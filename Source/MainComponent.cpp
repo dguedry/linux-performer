@@ -25,6 +25,11 @@ namespace
 
     String noteName (int n) { return MidiMessage::getMidiNoteName (n, true, true, 3); }
 
+    String araWarning (const String& name)
+    {
+        return name + " looks like an ARA-only plugin. ARA plugins need an ARA host (Reaper, Logic...); here the editor may be empty and can freeze Performer. Prefer the non-ARA version.";
+    }
+
     void styleHeader (Label& l)
     {
         l.setFont (FontOptions (14.0f, Font::bold));
@@ -396,7 +401,7 @@ private:
 
             auto& e = chain.engine;
             auto& o = chain.owner;
-            on.onClick        = [this, &e, &o] { e.setEffectBypassed (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, ! on.getToggleState()); };
+            on.onClick        = [this, &e, &o] { e.setEffectBypassed (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, ! on.getToggleState()); o.markDirty(); };
             guiBtn.onClick    = [this, &o]     { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
             upBtn.onClick     = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index - 1); };
             downBtn.onClick   = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index + 1); };
@@ -452,6 +457,8 @@ private:
             String error;
             if (! engine.addEffect (owner.getSelectedInput(), owner.getEditedProgram(), slot, types[idx], error))
                 owner.showStatus ("Could not load " + types[idx].name + ": " + error);
+            else if (MainComponent::looksLikeAraPlugin (types[idx]))
+                owner.showStatus (araWarning (types[idx].name));
             else
                 owner.showStatus ("Added effect " + types[idx].name);
         });
@@ -520,14 +527,14 @@ public:
 
             auto& e = panel.engine;
             auto& o = panel.owner;
-            enabled.onClick   = [this, &e, &o] { e.setSlotEnabled   (o.getSelectedInput(), o.getEditedProgram(), index, enabled.getToggleState()); };
-            gain.onValueChange      = [this, &e, &o] { e.setSlotGainDb    (o.getSelectedInput(), o.getEditedProgram(), index, (float) gain.getValue()); };
-            transpose.onValueChange = [this, &e, &o] { e.setSlotTranspose (o.getSelectedInput(), o.getEditedProgram(), index, (int) transpose.getValue()); };
+            enabled.onClick   = [this, &e, &o] { e.setSlotEnabled   (o.getSelectedInput(), o.getEditedProgram(), index, enabled.getToggleState()); o.markDirty(); };
+            gain.onValueChange      = [this, &e, &o] { e.setSlotGainDb    (o.getSelectedInput(), o.getEditedProgram(), index, (float) gain.getValue()); o.markDirty(); };
+            transpose.onValueChange = [this, &e, &o] { e.setSlotTranspose (o.getSelectedInput(), o.getEditedProgram(), index, (int) transpose.getValue()); o.markDirty(); };
             lowKey.onValueChange    = [this, &e, &o] { if (lowKey.getValue() > highKey.getValue()) highKey.setValue (lowKey.getValue(), dontSendNotification);
-                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); };
+                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); o.markDirty(); };
             highKey.onValueChange   = [this, &e, &o] { if (highKey.getValue() < lowKey.getValue()) lowKey.setValue (highKey.getValue(), dontSendNotification);
-                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); };
-            outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); };
+                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); o.markDirty(); };
+            outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             guiBtn.onClick    = [this, &o] { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
@@ -703,6 +710,8 @@ private:
             String error;
             if (! engine.addSlot (owner.getSelectedInput(), owner.getEditedProgram(), types[idx], error))
                 owner.showStatus ("Could not load " + types[idx].name + ": " + error);
+            else if (MainComponent::looksLikeAraPlugin (types[idx]))
+                owner.showStatus (araWarning (types[idx].name));
             else
                 owner.showStatus ("Added " + types[idx].name);
         });
@@ -1187,6 +1196,12 @@ private:
 //==============================================================================
 //  MainComponent
 //==============================================================================
+bool MainComponent::looksLikeAraPlugin (const PluginDescription& d)
+{
+    // JUCE doesn't expose the OnlyARA sub-category, so fall back to the name.
+    return d.name.containsWholeWordIgnoreCase ("ARA") || d.category.containsIgnoreCase ("ARA");
+}
+
 MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialSetup) : engine (e), settings (s)
 {
     inputsPanel   = std::make_unique<InputsPanel> (engine, *this);
@@ -1304,11 +1319,22 @@ void MainComponent::resized()
 
 void MainComponent::timerCallback()
 {
+    const auto now = Time::getMillisecondCounterHiRes();
     cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + String (engine.getSampleRate() / 1000.0, 1) + " kHz", dontSendNotification);
-    if (statusText.isNotEmpty() && Time::getMillisecondCounterHiRes() - statusTime > 8000.0)
+    if (statusText.isNotEmpty() && now - statusTime > 8000.0)
     {
         statusText.clear();
         statusLabel.setText ({}, dontSendNotification);
+    }
+
+    // Periodic autosave, so a crash or a frozen plugin doesn't cost the session.
+    if (dirty && now - lastAutosaveTime > autosaveIntervalMs)
+    {
+        lastAutosaveTime = now;
+        dirty = false;
+        if (engine.captureSetup().saveToFile (getAutosaveFile()).wasOk())
+            fileLabel.setText ((currentFile == File() ? String ("(unsaved setup)") : currentFile.getFullPathName())
+                                   + "   autosaved " + Time::getCurrentTime().toString (false, true, false), dontSendNotification);
     }
 }
 
@@ -1346,16 +1372,18 @@ void MainComponent::refreshProgramView()
 }
 
 // Engine::Listener ------------------------------------------------------------
-void MainComponent::setupChanged() { refreshAll(); }
+void MainComponent::setupChanged() { markDirty(); refreshAll(); }
 
 void MainComponent::programChanged (int inputIndex, int)
 {
+    markDirty();
     inputsPanel->repaint();
     if (inputIndex == selectedInput) refreshProgramView();
 }
 
 void MainComponent::programContentChanged (int inputIndex, int program)
 {
+    markDirty();
     if (inputIndex != selectedInput) return;
     programsPanel->repaint();
     if (program == getEditedProgram())
@@ -1387,6 +1415,9 @@ void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int
 
     for (auto& w : pluginWindows)
         if (&w->instance == inst) { w->toFront (true); return; }
+
+    if (looksLikeAraPlugin (inst->getPluginDescription()))
+        showStatus (araWarning (inst->getName()));
 
     const auto& inputs = engine.getSetup().inputs;
     String title = inst->getName();
@@ -1442,13 +1473,24 @@ void MainComponent::loadSetupFile (const File& f)
     pluginWindows.clear();
     engine.loadSetup (std::move (s));
     setCurrentFile (f == getAutosaveFile() ? File() : f);
-    showStatus ("Loaded " + f.getFileName());
+    dirty = false;
+    lastAutosaveTime = Time::getMillisecondCounterHiRes();
+
+    // Warn if an autosave is newer than the file we just opened (a previous session died).
+    if (f != getAutosaveFile() && getAutosaveFile().existsAsFile()
+        && getAutosaveFile().getLastModificationTime() > f.getLastModificationTime() + RelativeTime::seconds (5))
+        showStatus ("Loaded " + f.getFileName() + ".  Note: " + getAutosaveFile().getFullPathName() + " is newer (autosaved "
+                    + getAutosaveFile().getLastModificationTime().toString (true, true, false) + "); use Open... to recover it.");
+    else
+        showStatus ("Loaded " + f.getFileName());
 }
 
 bool MainComponent::writeSetupFile (const File& f)
 {
     auto r = engine.captureSetup().saveToFile (f);
     if (r.failed()) { showStatus ("Save failed: " + r.getErrorMessage()); return false; }
+    dirty = false;
+    lastAutosaveTime = Time::getMillisecondCounterHiRes();
     return true;
 }
 

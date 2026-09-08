@@ -32,6 +32,10 @@ public:
 
     void openPluginEditor (int inputIndex, int program, int slot, int effect = -1);
     void showStatus (const juce::String&);
+    /** Marks the setup as changed so the periodic autosave picks it up. */
+    void markDirty()                        { dirty = true; }
+    /** ARA-only plugins need an ARA host; they may show an empty editor and can hang. */
+    static bool looksLikeAraPlugin (const juce::PluginDescription&);
     void selectInput (int);
     void loadSetupFile (const juce::File&);
 
@@ -85,6 +89,9 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String statusText;
     double statusTime = 0;
+    bool dirty = false;
+    double lastAutosaveTime = 0;
+    static constexpr double autosaveIntervalMs = 60000.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

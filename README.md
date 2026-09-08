@@ -65,7 +65,14 @@ cmake --build build
    also autosaved on quit.
 
 Plugin state is captured into the setup file whenever a program is unloaded
-or the setup is saved, so tweaks made in the plugin GUI persist.
+or the setup is saved, so tweaks made in the plugin GUI persist. Changes are
+also autosaved about once a minute to `~/.config/Performer/autosave.performer.json`;
+if that file is newer than the setup you open, the status bar says so.
+
+**ARA-only plugins** (e.g. "ACE Bridge ARA") need an ARA host such as Reaper.
+Outside one their editor is empty, and bridged through yabridge the plugin can
+stop answering, which freezes the host when its window closes. Performer warns
+when such a plugin is added or opened; use the plugin's non-ARA version instead.
 
 ## Layout of the code
 
