@@ -1,9 +1,11 @@
 // Headless integration test: loads a real LV2 instrument, routes MIDI through the
 // engine and checks audio, program changes, mappings and learn.
 #include "Engine.h"
+#include "MappingSuggestions.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <cmath>
+#include <set>
 
 using namespace perf;
 using namespace juce;
@@ -377,6 +379,66 @@ int main()
             engine.injectMidi (0, MidiMessage::noteOff (1, 60));
             render (engine, 20);
         }
+    }
+
+    // --- mapping suggestions ------------------------------------------------------------------
+    {
+        engine.setPreloadAllPrograms (false);
+        engine.selectProgram (0, 30);
+        CHECK (engine.addSlot (0, 30, synth, err));
+        auto* mono = engine.getSlotInstance (0, 30, 0);
+        CHECK (mono != nullptr);
+        if (mono != nullptr)
+        {
+            auto byNames = suggestMappingsFromNames (*mono);
+            std::printf ("     %d name-based suggestions for %s:\n", (int) byNames.size(), synth.name.toRawUTF8());
+            for (auto& sg : byNames)
+                std::printf ("       %-12s -> %-28s (%s)\n", sg.mapping.sourceDescription().toRawUTF8(), sg.mapping.paramName.toRawUTF8(), sg.reason.toRawUTF8());
+
+            auto find = [&] (int cc) -> const MappingSuggestion* { for (auto& sg : byNames) if (sg.mapping.number == cc) return &sg; return nullptr; };
+            CHECK (find (74) != nullptr && find (74)->mapping.paramName.containsIgnoreCase ("cutoff"));
+            CHECK (find (71) != nullptr && find (71)->mapping.paramName.containsIgnoreCase ("reso"));
+            CHECK (find (73) != nullptr && find (73)->mapping.paramName.containsIgnoreCase ("attack"));
+            CHECK (find (72) != nullptr && find (72)->mapping.paramName.containsIgnoreCase ("release"));
+            CHECK (find (5)  != nullptr && find (5)->mapping.paramName.containsIgnoreCase ("portamento"));
+            CHECK (find (1) == nullptr);                          // mod wheel is left to the plugin
+
+            // No CC and no parameter is used twice.
+            std::set<int> ccs; std::set<String> ids;
+            for (auto& sg : byNames) { ccs.insert (sg.mapping.number); ids.insert (sg.mapping.paramId); }
+            CHECK (ccs.size() == byNames.size() && ids.size() == byNames.size());
+
+            // Full pipeline without a template: same set, targeted at slot 0, skipping existing ones.
+            auto& templates = host.getMappingTemplates();
+            CHECK (! templates.has (synth));
+            std::vector<MappingDef> existing;
+            existing.push_back (find (74)->mapping); existing.back().slot = 0; existing.back().effect = -1;
+            auto pipeline = suggestMappings (*mono, synth, templates, 0, -1, existing);
+            CHECK (pipeline.size() == byNames.size() - 1);
+            for (auto& sg : pipeline) { CHECK (sg.mapping.slot == 0 && sg.mapping.effect == -1); CHECK (sg.mapping.number != 74); }
+
+            // Template: save two mappings, one of them for a parameter that doesn't exist.
+            std::vector<MappingDef> tmpl;
+            MappingDef a; a.number = 20; a.paramId = find (74)->mapping.paramId; a.minValue = 0.1f; a.maxValue = 0.9f;
+            MappingDef b; b.number = 21; b.paramId = "sym:does_not_exist";
+            tmpl.push_back (a); tmpl.push_back (b);
+            templates.set (synth, tmpl);
+            CHECK (templates.has (synth));
+            auto fromTemplate = suggestMappings (*mono, synth, templates, 2, 1, {});
+            CHECK (fromTemplate.size() == 1);
+            if (fromTemplate.size() == 1)
+            {
+                CHECK (fromTemplate[0].mapping.number == 20 && fromTemplate[0].mapping.slot == 2 && fromTemplate[0].mapping.effect == 1);
+                CHECK (std::abs (fromTemplate[0].mapping.minValue - 0.1f) < 1e-6f);
+                CHECK (fromTemplate[0].mapping.paramName.containsIgnoreCase ("cutoff"));
+            }
+            // Persisted: a fresh instance reads the same file.
+            MappingTemplates reloaded (settings.getFile().getSiblingFile ("mapping-templates.json"));
+            CHECK (reloaded.has (synth) && reloaded.get (synth).size() == 2);
+            templates.remove (synth);
+            CHECK (! templates.has (synth));
+        }
+        engine.clearProgram (0, 30);
     }
 
     // --- optional: write a demo setup for eyeballing the UI ----------------------------------

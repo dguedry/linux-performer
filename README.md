@@ -54,6 +54,13 @@ cmake --build build
 5. To map a controller: open **MIDI mappings**, pick a target plugin and parameter
    (or move a knob in the plugin GUI and press **Use touched parameter**),
    press **Learn MIDI**, move the controller, then **Add**.
+   **Suggest...** proposes a whole set at once: from the plugin's saved template
+   if you made one with **Save template**, otherwise by matching parameter names
+   to the General MIDI Level 2 sound controllers (CC 74 cutoff, 71 resonance,
+   73/75/70/72 attack/decay/sustain/release, 76/77 LFO rate/depth, 7 volume,
+   10 pan, 91 reverb, 93 chorus, 94 detune, 5 portamento, 12 drive, 13 delay mix).
+   Untick what you don't want and press **Add selected**. Templates live in
+   `~/.config/Performer/mapping-templates.json`.
 6. **Save** the setup. It is reloaded automatically next start; the setup is
    also autosaved on quit.
 
@@ -63,7 +70,8 @@ or the setup is saved, so tweaks made in the plugin GUI persist.
 ## Layout of the code
 
 - `Source/Model.*` – the document (`Setup → InputDef → ProgramDef → SlotDef / MappingDef`) and JSON persistence.
-- `Source/PluginHost.*` – plugin formats, known-plugin list, instantiation.
+- `Source/PluginHost.*` – plugin formats, known-plugin list, instantiation, mapping templates.
+- `Source/MappingSuggestions.*` – per-plugin mapping templates and name-based CC suggestions.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
 - `Source/MainComponent.*` – the UI (inputs, programs, slots, mappings panels).
 - `Source/PluginWindow.h` – window hosting a plugin editor.

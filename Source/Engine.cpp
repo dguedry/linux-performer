@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "MappingSuggestions.h"
 
 using namespace juce;
 
@@ -852,28 +853,8 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 //==============================================================================
 // Mappings
 //==============================================================================
-String Engine::getParameterId (const AudioProcessorParameter& p)
-{
-    if (auto* hosted = dynamic_cast<const HostedAudioProcessorParameter*> (&p))
-        return hosted->getParameterID();
-    return String (p.getParameterIndex());
-}
-
-AudioProcessorParameter* Engine::findParameter (AudioPluginInstance& inst, const String& paramId)
-{
-    for (auto* p : inst.getParameters())
-        if (getParameterId (*p) == paramId)
-            return p;
-    // Fall back to a numeric index.
-    if (paramId.containsOnly ("0123456789"))
-    {
-        const int idx = paramId.getIntValue();
-        auto& params = inst.getParameters();
-        if (idx >= 0 && idx < params.size())
-            return params[idx];
-    }
-    return nullptr;
-}
+String Engine::getParameterId (const AudioProcessorParameter& p)                      { return parameterIdOf (p); }
+AudioProcessorParameter* Engine::findParameter (AudioPluginInstance& inst, const String& id) { return findParameterById (inst, id); }
 
 void Engine::resolveMappings (ProgramRuntime& rt, const ProgramDef& def)
 {

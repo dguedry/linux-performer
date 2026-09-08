@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_data_structures/juce_data_structures.h>
+#include "MappingSuggestions.h"
 
 namespace perf
 {
@@ -17,6 +18,7 @@ public:
     juce::KnownPluginList& getKnownPlugins()              { return knownPlugins; }
     juce::File getDeadMansPedalFile() const               { return deadMansPedal; }
     juce::PropertiesFile& getSettings()                   { return settings; }
+    MappingTemplates& getMappingTemplates()               { return *templates; }
 
     /** Creates a plugin instance. Must be called on the message thread. */
     std::unique_ptr<juce::AudioPluginInstance> createInstance (const juce::PluginDescription&,
@@ -33,6 +35,7 @@ private:
 
     struct ListListener;
     std::unique_ptr<ListListener> listListener;
+    std::unique_ptr<MappingTemplates> templates;
 };
 
 } // namespace perf

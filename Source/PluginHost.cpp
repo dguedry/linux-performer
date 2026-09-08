@@ -17,6 +17,7 @@ PluginHost::PluginHost (PropertiesFile& s) : settings (s)
     addDefaultFormatsToManager (formatManager);
 
     deadMansPedal = settings.getFile().getSiblingFile ("RecentlyCrashedPluginsList");
+    templates = std::make_unique<MappingTemplates> (settings.getFile().getSiblingFile ("mapping-templates.json"));
 
     if (auto xml = settings.getXmlValue ("pluginList"))
         knownPlugins.recreateFromXml (*xml);

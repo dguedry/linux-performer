@@ -1,5 +1,6 @@
 // Round-trip test for the Performer setup file format.
 #include "Model.h"
+#include "MappingSuggestions.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 
@@ -133,6 +134,34 @@ int main()
     Setup ignored;
     CHECK (Setup::loadFromFile (bad.getFile(), ignored).failed());
     CHECK (Setup::loadFromFile (juce::File ("/nonexistent/x.json"), ignored).failed());
+
+    // Mapping templates: store, reload, remove.
+    {
+        juce::TemporaryFile tf (".json");
+        MappingTemplates t (tf.getFile());
+        CHECK (t.size() == 0);
+        juce::PluginDescription d; d.name = "Synth"; d.pluginFormatName = "VST3"; d.fileOrIdentifier = "/x/Synth.vst3"; d.uniqueId = 42;
+        MappingDef m1; m1.number = 74; m1.paramId = "cut"; m1.slot = 3; m1.effect = 2; m1.minValue = 0.2f;
+        MappingDef m2; m2.source = MappingDef::Source::PitchBend; m2.paramId = "bend";
+        t.set (d, { m1, m2 });
+        CHECK (t.has (d) && t.size() == 1);
+        MappingTemplates t2 (tf.getFile());
+        CHECK (t2.has (d));
+        auto got = t2.get (d);
+        CHECK (got.size() == 2);
+        if (got.size() == 2)
+        {
+            CHECK (got[0].number == 74 && got[0].paramId == "cut" && std::abs (got[0].minValue - 0.2f) < 1e-6f);
+            CHECK (got[0].slot == 0 && got[0].effect == -1);      // targets are stripped
+            CHECK (got[1].source == MappingDef::Source::PitchBend && got[1].paramId == "bend");
+        }
+        juce::PluginDescription other = d; other.uniqueId = 43;
+        CHECK (! t2.has (other));
+        t2.remove (d);
+        CHECK (! t2.has (d));
+        MappingTemplates t3 (tf.getFile());
+        CHECK (! t3.has (d) && t3.size() == 0);
+    }
 
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

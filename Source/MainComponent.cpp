@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "MappingSuggestions.h"
 #include <optional>
 
 using namespace juce;
@@ -722,6 +723,97 @@ private:
 };
 
 //==============================================================================
+//  SuggestionsComponent -- confirm dialog for proposed mappings
+//==============================================================================
+class SuggestionsComponent : public Component,
+                             private ListBoxModel
+{
+public:
+    SuggestionsComponent (Engine& e, int input, int program, const String& targetName, std::vector<MappingSuggestion> s)
+        : engine (e), inputIndex (input), programIndex (program), suggestions (std::move (s))
+    {
+        selected.insertMultiple (0, true, (int) suggestions.size());
+
+        addAndMakeVisible (info);
+        info.setColour (Label::textColourId, textDim);
+        info.setText (suggestions.empty()
+                        ? "No suggestions for " + targetName + ". Its parameter names don't match any standard controller, and no template is saved. Use Learn MIDI, then Save template."
+                        : String ((int) suggestions.size()) + " proposed mappings for " + targetName + ". Untick any you don't want.",
+                      dontSendNotification);
+        info.setJustificationType (Justification::topLeft);
+
+        addAndMakeVisible (list);
+        list.setModel (this);
+        list.setRowHeight (24);
+        list.setColour (ListBox::backgroundColourId, bgPanel);
+        list.setClickingTogglesRowSelection (false);
+
+        addAndMakeVisible (addBtn);
+        addAndMakeVisible (cancelBtn);
+        addBtn.setEnabled (! suggestions.empty());
+        addBtn.onClick = [this]
+        {
+            int n = 0;
+            for (int i = 0; i < (int) suggestions.size(); ++i)
+                if (selected[i]) { engine.addMapping (inputIndex, programIndex, suggestions[(size_t) i].mapping); ++n; }
+            close();
+        };
+        cancelBtn.onClick = [this] { close(); };
+        setSize (620, jlimit (180, 520, 110 + 24 * (int) suggestions.size()));
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        info.setBounds (r.removeFromTop (40));
+        auto buttons = r.removeFromBottom (28);
+        cancelBtn.setBounds (buttons.removeFromRight (100));
+        buttons.removeFromRight (6);
+        addBtn.setBounds (buttons.removeFromRight (130));
+        r.removeFromBottom (8);
+        list.setBounds (r);
+    }
+
+    int getNumRows() override { return (int) suggestions.size(); }
+
+    void paintListBoxItem (int row, Graphics& g, int w, int h, bool) override
+    {
+        if (row < 0 || row >= (int) suggestions.size()) return;
+        const auto& s = suggestions[(size_t) row];
+        g.fillAll (row % 2 ? bgRow : bgPanel);
+        getLookAndFeel().drawTickBox (g, *this, 6.0f, 4.0f, 16.0f, 16.0f, selected[row], true, false, false);
+        g.setColour (Colours::white);
+        g.setFont (FontOptions (13.0f, Font::bold));
+        g.drawText (s.mapping.sourceDescription(), 30, 0, 90, h, Justification::centredLeft, true);
+        g.setFont (FontOptions (13.0f));
+        g.drawText (s.mapping.paramName, 125, 0, w * 45 / 100, h, Justification::centredLeft, true);
+        g.setColour (textDim);
+        g.setFont (FontOptions (12.0f));
+        g.drawText (s.reason, 125 + w * 45 / 100, 0, w - (125 + w * 45 / 100) - 6, h, Justification::centredLeft, true);
+    }
+
+    void listBoxItemClicked (int row, const MouseEvent&) override
+    {
+        if (row >= 0 && row < selected.size()) { selected.set (row, ! selected[row]); list.repaintRow (row); }
+    }
+
+private:
+    void close()
+    {
+        if (auto* dw = findParentComponentOfClass<DialogWindow>())
+            dw->exitModalState (0);
+    }
+
+    Engine& engine;
+    int inputIndex, programIndex;
+    std::vector<MappingSuggestion> suggestions;
+    Array<bool> selected;
+    Label info;
+    ListBox list;
+    TextButton addBtn { "Add selected" }, cancelBtn { "Cancel" };
+};
+
+//==============================================================================
 //  MappingsPanel
 //==============================================================================
 class MappingsPanel : public Component,
@@ -784,6 +876,12 @@ public:
         addAndMakeVisible (addBtn);
         addAndMakeVisible (updateBtn);
         addAndMakeVisible (removeBtn);
+        addAndMakeVisible (suggestBtn);
+        addAndMakeVisible (templateBtn);
+        suggestBtn.setTooltip ("Propose mappings for the selected target: from its saved template, or from parameter names matched to standard MIDI controller numbers");
+        templateBtn.setTooltip ("Save the selected target's current mappings as the default template for this plugin");
+        suggestBtn.onClick  = [this] { showSuggestions(); };
+        templateBtn.onClick = [this] { saveTemplate(); };
         addBtn.onClick    = [this] { if (auto m = makeMapping()) engine.addMapping (owner.getSelectedInput(), owner.getEditedProgram(), *m); };
         updateBtn.onClick = [this] { int r = table.getSelectedRow(); if (r >= 0) if (auto m = makeMapping()) engine.updateMapping (owner.getSelectedInput(), owner.getEditedProgram(), r, *m); };
         removeBtn.onClick = [this] { int r = table.getSelectedRow(); if (r >= 0) engine.removeMapping (owner.getSelectedInput(), owner.getEditedProgram(), r); };
@@ -874,6 +972,8 @@ public:
         addBtn.setBounds (row3.removeFromLeft (100)); row3.removeFromLeft (4);
         updateBtn.setBounds (row3.removeFromLeft (100)); row3.removeFromLeft (4);
         removeBtn.setBounds (row3.removeFromLeft (100));
+        templateBtn.setBounds (row3.removeFromRight (120)); row3.removeFromRight (4);
+        suggestBtn.setBounds (row3.removeFromRight (110));
     }
 
     // TableListBoxModel
@@ -1011,6 +1111,59 @@ private:
         updateBtn.setEnabled (canMake && table.getSelectedRow() >= 0);
         removeBtn.setEnabled (table.getSelectedRow() >= 0);
         touchedBtn.setEnabled (touchedParam >= 0);
+
+        auto* t = selectedTarget();
+        const bool loaded = t != nullptr && engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) != nullptr;
+        suggestBtn.setEnabled (loaded);
+        int mappedHere = 0;
+        if (auto* def = currentProgram(); def != nullptr && t != nullptr)
+            for (auto& m : def->mappings) if (m.slot == t->slot && m.effect == t->effect) ++mappedHere;
+        templateBtn.setEnabled (loaded && mappedHere > 0);
+    }
+
+    const PluginDescription* targetDescription (const Target& t) const
+    {
+        auto* def = currentProgram();
+        if (def == nullptr) return nullptr;
+        if (t.effect < 0) return (t.slot >= 0 && t.slot < (int) def->slots.size()) ? &def->slots[(size_t) t.slot].plugin : nullptr;
+        auto* chain = def->chainFor (t.slot);
+        return (chain != nullptr && t.effect < (int) chain->size()) ? &(*chain)[(size_t) t.effect].plugin : nullptr;
+    }
+
+    void showSuggestions()
+    {
+        auto* t = selectedTarget();
+        auto* def = currentProgram();
+        if (t == nullptr || def == nullptr) return;
+        auto* inst = engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect);
+        auto* desc = targetDescription (*t);
+        if (inst == nullptr || desc == nullptr) { owner.showStatus ("Plugin is not loaded"); return; }
+
+        auto suggestions = suggestMappings (*inst, *desc, engine.getPluginHost().getMappingTemplates(), t->slot, t->effect, def->mappings);
+        auto* content = new SuggestionsComponent (engine, owner.getSelectedInput(), owner.getEditedProgram(), t->label, std::move (suggestions));
+        DialogWindow::LaunchOptions o;
+        o.content.setOwned (content);
+        o.dialogTitle = "Suggested mappings";
+        o.dialogBackgroundColour = bgPanel;
+        o.escapeKeyTriggersCloseButton = true;
+        o.useNativeTitleBar = true;
+        o.resizable = false;
+        o.launchAsync();
+    }
+
+    void saveTemplate()
+    {
+        auto* t = selectedTarget();
+        auto* def = currentProgram();
+        if (t == nullptr || def == nullptr) return;
+        auto* desc = targetDescription (*t);
+        if (desc == nullptr) return;
+        std::vector<MappingDef> mine;
+        for (auto& m : def->mappings)
+            if (m.slot == t->slot && m.effect == t->effect) mine.push_back (m);
+        if (mine.empty()) { owner.showStatus ("No mappings on this target to save"); return; }
+        engine.getPluginHost().getMappingTemplates().set (*desc, mine);
+        owner.showStatus ("Saved " + String ((int) mine.size()) + " mappings as the template for " + desc->name + ". Suggest... will offer them for any " + desc->name + ".");
     }
 
     Engine& engine;
@@ -1020,7 +1173,8 @@ private:
     ComboBox targetBox, paramBox;
     std::vector<Target> targets;
     StringArray paramIds;
-    TextButton touchedBtn { "Use touched parameter" }, learnBtn { "Learn MIDI" }, addBtn { "Add" }, updateBtn { "Update" }, removeBtn { "Remove" };
+    TextButton touchedBtn { "Use touched parameter" }, learnBtn { "Learn MIDI" }, addBtn { "Add" }, updateBtn { "Update" }, removeBtn { "Remove" },
+               suggestBtn { "Suggest..." }, templateBtn { "Save template" };
     Label sourceLabel { {}, "-" };
     Slider minSlider, maxSlider;
     ToggleButton passToggle { "Pass through" };
