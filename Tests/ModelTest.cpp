@@ -1,0 +1,113 @@
+// Round-trip test for the Performer setup file format.
+#include "Model.h"
+#include <juce_events/juce_events.h>
+#include <cstdio>
+
+using namespace perf;
+
+static int failures = 0;
+#define CHECK(cond) do { if (! (cond)) { std::printf ("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); ++failures; } } while (0)
+
+int main()
+{
+    juce::ScopedJuceInitialiser_GUI init;
+
+    Setup s = Setup::makeDefault();
+    s.preloadAllPrograms = true;
+    s.releaseTailSeconds = 2.5;
+
+    auto& upper = s.inputs[0];
+    upper.midiDeviceIdentifier = "alsa:24:0";
+    upper.midiDeviceName = "Nord Stage";
+    upper.channel = 1;
+    upper.currentProgram = 5;
+
+    auto& prog = upper.programs[5];
+    prog.name = "Rhodes + Pad";
+
+    SlotDef slot;
+    slot.plugin.name = "Test Synth";
+    slot.plugin.pluginFormatName = "VST3";
+    slot.plugin.fileOrIdentifier = "/usr/lib/vst3/Test.vst3";
+    slot.plugin.uniqueId = 0x1234;
+    slot.state.append ("\x00\x01\x02\xff state", 9);
+    slot.gainDb = -6.5f;
+    slot.transpose = -12;
+    slot.lowKey = 36; slot.highKey = 72;
+    slot.outChannel = 3;
+    slot.enabled = false;
+    prog.slots.push_back (slot);
+
+    MappingDef m;
+    m.source = MappingDef::Source::CC; m.number = 74;
+    m.slot = 0; m.paramId = "cutoff"; m.paramName = "Cutoff";
+    m.minValue = 0.2f; m.maxValue = 0.9f; m.passThrough = true;
+    prog.mappings.push_back (m);
+    MappingDef pb; pb.source = MappingDef::Source::PitchBend; pb.paramId = "7";
+    prog.mappings.push_back (pb);
+
+    // Name-only program (no slots) must survive too.
+    upper.programs[9].name = "Empty but named";
+
+    juce::TemporaryFile tmp (".performer.json");
+    CHECK (s.saveToFile (tmp.getFile()).wasOk());
+
+    Setup loaded;
+    auto r = Setup::loadFromFile (tmp.getFile(), loaded);
+    CHECK (r.wasOk());
+    if (r.failed()) std::printf ("  %s\n", r.getErrorMessage().toRawUTF8());
+
+    CHECK (loaded.preloadAllPrograms == true);
+    CHECK (std::abs (loaded.releaseTailSeconds - 2.5) < 1e-9);
+    CHECK (loaded.inputs.size() == 2);
+    CHECK (loaded.inputs[1].name == "Lower");
+    CHECK (loaded.inputs[1].channel == 2);
+
+    auto& u = loaded.inputs[0];
+    CHECK (u.name == "Upper");
+    CHECK (u.midiDeviceIdentifier == "alsa:24:0");
+    CHECK (u.midiDeviceName == "Nord Stage");
+    CHECK (u.currentProgram == 5);
+    CHECK (u.programs.size() == 128);
+    CHECK (u.programs[9].name == "Empty but named");
+    CHECK (u.programs[4].isEmpty() && u.programs[4].name.isEmpty());
+
+    auto& p = u.programs[5];
+    CHECK (p.name == "Rhodes + Pad");
+    CHECK (p.slots.size() == 1);
+    if (p.slots.size() == 1)
+    {
+        auto& ls = p.slots[0];
+        CHECK (ls.plugin.name == "Test Synth");
+        CHECK (ls.plugin.pluginFormatName == "VST3");
+        CHECK (ls.plugin.fileOrIdentifier == "/usr/lib/vst3/Test.vst3");
+        CHECK (ls.plugin.uniqueId == 0x1234);
+        CHECK (ls.state == slot.state);
+        CHECK (std::abs (ls.gainDb - (-6.5f)) < 1e-6f);
+        CHECK (ls.transpose == -12);
+        CHECK (ls.lowKey == 36 && ls.highKey == 72);
+        CHECK (ls.outChannel == 3);
+        CHECK (ls.enabled == false);
+    }
+    CHECK (p.mappings.size() == 2);
+    if (p.mappings.size() == 2)
+    {
+        auto& lm = p.mappings[0];
+        CHECK (lm.source == MappingDef::Source::CC && lm.number == 74);
+        CHECK (lm.slot == 0 && lm.paramId == "cutoff" && lm.paramName == "Cutoff");
+        CHECK (std::abs (lm.minValue - 0.2f) < 1e-6f && std::abs (lm.maxValue - 0.9f) < 1e-6f);
+        CHECK (lm.passThrough == true);
+        CHECK (p.mappings[1].source == MappingDef::Source::PitchBend);
+        CHECK (p.mappings[1].sourceDescription() == "Pitch Bend");
+    }
+
+    // Garbage file is rejected cleanly.
+    juce::TemporaryFile bad (".json");
+    bad.getFile().replaceWithText ("{ \"format\": \"something-else\" }");
+    Setup ignored;
+    CHECK (Setup::loadFromFile (bad.getFile(), ignored).failed());
+    CHECK (Setup::loadFromFile (juce::File ("/nonexistent/x.json"), ignored).failed());
+
+    std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
+    return failures == 0 ? 0 : 1;
+}
