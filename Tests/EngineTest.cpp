@@ -239,6 +239,47 @@ int main()
     CHECK (reloaded.inputs[0].programs[7].slots.size() == 1 && reloaded.inputs[0].programs[7].slots[0].plugin.name == synth.name);
     CHECK (reloaded.preloadAllPrograms);
 
+    // --- optional: an arbitrary VST3 (e.g. a yabridge-bridged plugin) --------------------
+    // PERFORMER_TEST_VST3=/path/to/Plugin.vst3 loads it, plays a note and renders blocks;
+    // this reproduces the multi-out / inactive-bus crash seen with Kontakt via yabridge.
+    if (auto vst3Path = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_VST3", {}); vst3Path.isNotEmpty())
+    {
+        AudioPluginFormat* vst3 = nullptr;
+        for (auto* f : host.getFormatManager().getFormats())
+            if (f->getName() == "VST3") vst3 = f;
+        CHECK (vst3 != nullptr);
+        if (vst3 != nullptr)
+        {
+            OwnedArray<PluginDescription> found;
+            host.getKnownPlugins().scanAndAddFile (vst3Path, true, found, *vst3);
+            CHECK (found.size() > 0);
+            if (found.size() > 0)
+            {
+                const PluginDescription desc (*found[0]);
+                std::printf ("     extra VST3: %s (%s)\n", desc.name.toRawUTF8(), desc.manufacturerName.toRawUTF8());
+                engine.setPreloadAllPrograms (false);
+                engine.selectProgram (0, 20);
+                CHECK (engine.addSlot (0, 20, desc, err));
+                if (err.isNotEmpty()) std::printf ("     addSlot error: %s\n", err.toRawUTF8());
+                if (auto* x = engine.getSlotInstance (0, 20, 0))
+                {
+                    int busChannels = 0;
+                    for (int b = 0; b < x->getBusCount (false); ++b)
+                        busChannels += x->getBus (false, b)->getNumberOfChannels();
+                    std::printf ("     output buses=%d  total out channels=%d (enabled %d)  main=%d\n",
+                                 x->getBusCount (false), busChannels, x->getTotalNumOutputChannels(), x->getMainBusNumOutputChannels());
+                    CHECK (x->getTotalNumOutputChannels() == busChannels);   // every bus active
+                    engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+                    const float r = render (engine, 100);                      // ~1.2 s; would segfault before the fix
+                    std::printf ("     rms with extra VST3 (may be 0 if no preset loaded): %f\n", r);
+                    engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+                    render (engine, 20);
+                    CHECK (true);   // survived processing
+                }
+            }
+        }
+    }
+
     engine.removeListener (&listener);
     std::printf (failures == 0 ? "EngineTest: all checks passed\n" : "EngineTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;

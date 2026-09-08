@@ -444,11 +444,10 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
         return slot;
     }
 
-    // Keep only the main output bus active; multi-out instruments would otherwise
-    // burn CPU rendering outputs nobody hears.
-    for (int b = 1; b < instance->getBusCount (false); ++b)
-        if (auto* bus = instance->getBus (false, b))
-            bus->enable (false);
+    // Activate every bus and give the plugin real buffers for all of them. JUCE hands
+    // inactive buses null channel pointers, and some plugins (Kontakt via yabridge, for
+    // one) write into those anyway and crash the host. Only the main bus gets mixed.
+    instance->enableAllBuses();
 
     if (def.state.getSize() > 0)
     {

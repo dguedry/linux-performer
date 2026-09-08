@@ -64,4 +64,16 @@ or the setup is saved, so tweaks made in the plugin GUI persist.
 - `Source/PluginWindow.h` – window hosting a plugin editor.
 - `Source/Main.cpp` – application entry.
 
+## Tests
+
+```sh
+ctest --test-dir build
+# Optionally exercise a specific VST3 (e.g. a yabridge-bridged plugin) through the engine:
+PERFORMER_TEST_VST3="$HOME/.vst3/yabridge/Kontakt 8.vst3" ./build/EngineTest_artefacts/Release/EngineTest
+```
+
+All plugin buses are kept active and rendered into a full-size buffer; only the
+main bus is mixed. Disabling aux buses makes JUCE pass null channel pointers,
+which crashes plugins that write to them regardless (Kontakt via yabridge).
+
 Settings live in `~/.config/Performer/`.
