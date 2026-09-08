@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Model.h"
+#include "ParamInfo.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <vector>
 
@@ -42,25 +43,23 @@ private:
 };
 
 //==============================================================================
-/** Stable identifier for a hosted parameter: the plugin's own ID where available,
-    else the index as a string. */
-juce::String parameterIdOf (const juce::AudioProcessorParameter&);
-juce::AudioProcessorParameter* findParameterById (juce::AudioPluginInstance&, const juce::String& paramId);
+/** Index of the parameter with this ID (or numeric index as text), or -1. */
+int findParamIndex (const ParamInfoList&, const juce::String& paramId);
 
 //==============================================================================
 /** Proposes CC mappings for a plugin from its parameter names, using the
     General MIDI Level 2 sound-controller numbers (CC 74 cutoff, 71 resonance,
     73 attack, 72 release, ...). Each CC and each parameter is used at most once. */
-std::vector<MappingSuggestion> suggestMappingsFromNames (juce::AudioPluginInstance&);
+std::vector<MappingSuggestion> suggestMappingsFromNames (const ParamInfoList&);
 
 /** Turns a template into suggestions, dropping entries whose parameter the
     plugin no longer has. */
-std::vector<MappingSuggestion> suggestMappingsFromTemplate (juce::AudioPluginInstance&, const std::vector<MappingDef>& tmpl);
+std::vector<MappingSuggestion> suggestMappingsFromTemplate (const ParamInfoList&, const std::vector<MappingDef>& tmpl);
 
 /** Full pipeline: template if one exists, otherwise name heuristics. Sets
     slot/effect on every suggestion and drops anything that duplicates a CC or
     parameter already mapped to the same target in `existing`. */
-std::vector<MappingSuggestion> suggestMappings (juce::AudioPluginInstance&, const juce::PluginDescription&,
+std::vector<MappingSuggestion> suggestMappings (const ParamInfoList&, const juce::PluginDescription&,
                                                 const MappingTemplates&, int slot, int effect,
                                                 const std::vector<MappingDef>& existing);
 

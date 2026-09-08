@@ -27,6 +27,14 @@ public:
 
     void saveKnownPlugins();
 
+    /** Scans a plugin file in a performer-plugin-host process so a crashing plugin
+        can't take Performer down. Falls back to in-process if the helper is missing. */
+    struct OutOfProcessScanner : public juce::KnownPluginList::CustomScanner
+    {
+        bool findPluginTypesFor (juce::AudioPluginFormat&, juce::OwnedArray<juce::PluginDescription>&, const juce::String& fileOrIdentifier) override;
+        void scanFinished() override {}
+    };
+
 private:
     juce::PropertiesFile& settings;
     juce::AudioPluginFormatManager formatManager;

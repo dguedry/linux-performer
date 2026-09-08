@@ -356,7 +356,7 @@ public:
         {
             auto row = std::make_unique<Row> (*this, i);
             row->update (effects[(size_t) i],
-                         engine.getPluginInstance (inputIndex, program, slot, i) != nullptr,
+                         engine.isPluginAlive (inputIndex, program, slot, i),
                          engine.getPluginLoadError (inputIndex, program, slot, i),
                          i > 0, i + 1 < (int) effects.size());
             addAndMakeVisible (row.get());
@@ -402,7 +402,8 @@ private:
             auto& e = chain.engine;
             auto& o = chain.owner;
             on.onClick        = [this, &e, &o] { e.setEffectBypassed (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, ! on.getToggleState()); o.markDirty(); };
-            guiBtn.onClick    = [this, &o]     { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
+            guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index);
+                                                 else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
             upBtn.onClick     = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index - 1); };
             downBtn.onClick   = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index + 1); };
             removeBtn.onClick = [this, &e, &o] { e.removeEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
@@ -410,11 +411,13 @@ private:
 
         void update (const EffectDef& def, bool loaded, const String& error, bool canUp, bool canDown)
         {
+            alive = loaded;
             on.setToggleState (! def.bypassed, dontSendNotification);
             name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
             name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (def.bypassed ? textDim : Colours::white));
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
-            guiBtn.setEnabled (loaded);
+            guiBtn.setButtonText (loaded ? "Edit GUI" : "Reload");
+            guiBtn.setColour (TextButton::buttonColourId, loaded ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             upBtn.setEnabled (canUp);
             downBtn.setEnabled (canDown);
         }
@@ -433,6 +436,7 @@ private:
 
         EffectChainComponent& chain;
         int index;
+        bool alive = false;
         ToggleButton on;
         Label name;
         TextButton guiBtn { "Edit GUI" }, upBtn { "^" }, downBtn { "v" }, removeBtn { "X" };
@@ -535,12 +539,14 @@ public:
             highKey.onValueChange   = [this, &e, &o] { if (highKey.getValue() < lowKey.getValue()) lowKey.setValue (highKey.getValue(), dontSendNotification);
                                                        e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); o.markDirty(); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
-            guiBtn.onClick    = [this, &o] { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
+            guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
+                                                 else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
 
         void update (const SlotDef& def, bool loaded, const String& error, int inputIndex, int program)
         {
+            alive = loaded;
             enabled.setToggleState (def.enabled, dontSendNotification);
             name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
             name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : Colours::white);
@@ -550,7 +556,8 @@ public:
             lowKey.setValue (def.lowKey, dontSendNotification);
             highKey.setValue (def.highKey, dontSendNotification);
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
-            guiBtn.setEnabled (loaded);
+            guiBtn.setButtonText (loaded ? "Edit GUI" : "Reload");
+            guiBtn.setColour (TextButton::buttonColourId, loaded ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             chain.rebuild (def.effects, inputIndex, program);
         }
 
@@ -587,6 +594,7 @@ public:
 
         SlotsPanel& panel;
         int index;
+        bool alive = false;
         ToggleButton enabled;
         Label name;
         Slider gain, transpose, lowKey, highKey;
@@ -648,7 +656,7 @@ public:
             for (int s = 0; s < (int) def.slots.size(); ++s)
             {
                 auto row = std::make_unique<SlotRow> (*this, s);
-                row->update (def.slots[(size_t) s], engine.getSlotInstance (in, prog, s) != nullptr, engine.getSlotLoadError (in, prog, s), in, prog);
+                row->update (def.slots[(size_t) s], engine.isPluginAlive (in, prog, s), engine.getPluginLoadError (in, prog, s), in, prog);
                 container.addAndMakeVisible (row.get());
                 rows.push_back (std::move (row));
             }
@@ -946,12 +954,10 @@ public:
     {
         touchedSlot = slot; touchedEffect = effect; touchedParam = paramIndex;
         touchedBtn.setEnabled (true);
-        if (auto* inst = engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), slot, effect))
-        {
-            auto& params = inst->getParameters();
-            if (paramIndex >= 0 && paramIndex < params.size())
-                touchedBtn.setButtonText ("Use touched: " + params[paramIndex]->getName (24));
-        }
+        if (auto* plugin = engine.getPlugin (owner.getSelectedInput(), owner.getEditedProgram(), slot, effect))
+            for (auto& p : plugin->getParameters())
+                if (p.index == paramIndex)
+                    touchedBtn.setButtonText ("Use touched: " + p.name.substring (0, 24));
     }
 
     void resized() override
@@ -1063,8 +1069,8 @@ private:
         paramBox.clear (dontSendNotification);
         paramIds.clear();
         auto* t = selectedTarget();
-        auto* inst = t != nullptr ? engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) : nullptr;
-        if (inst == nullptr)
+        auto* plugin = t != nullptr ? engine.getPlugin (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) : nullptr;
+        if (plugin == nullptr)
         {
             paramBox.setTextWhenNothingSelected (t != nullptr ? "(plugin not loaded)" : "(no plugin)");
             updateButtons();
@@ -1072,12 +1078,14 @@ private:
         }
         paramBox.setTextWhenNothingSelected ("Choose parameter...");
         int id = 1, reselect = 0;
-        for (auto* p : inst->getParameters())
+        paramIndices.clear();
+        for (auto& p : plugin->getParameters())
         {
-            String name = p->getName (64);
-            if (name.isEmpty()) name = "Param " + String (p->getParameterIndex());
+            String name = p.name;
+            if (name.isEmpty()) name = "Param " + String (p.index);
             paramBox.addItem (name, id);
-            paramIds.add (Engine::getParameterId (*p));
+            paramIds.add (p.id);
+            paramIndices.add (p.index);
             if (paramIds[paramIds.size() - 1] == prev) reselect = id;
             ++id;
         }
@@ -1092,8 +1100,9 @@ private:
             if (targets[(size_t) i].slot == touchedSlot && targets[(size_t) i].effect == touchedEffect)
                 targetBox.setSelectedId (i + 1, dontSendNotification);
         fillParams();
-        if (touchedParam < paramIds.size())
-            paramBox.setSelectedId (touchedParam + 1, dontSendNotification);
+        const int pos = paramIndices.indexOf (touchedParam);
+        if (pos >= 0)
+            paramBox.setSelectedId (pos + 1, dontSendNotification);
         updateButtons();
     }
 
@@ -1122,7 +1131,7 @@ private:
         touchedBtn.setEnabled (touchedParam >= 0);
 
         auto* t = selectedTarget();
-        const bool loaded = t != nullptr && engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) != nullptr;
+        const bool loaded = t != nullptr && engine.getPlugin (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) != nullptr;
         suggestBtn.setEnabled (loaded);
         int mappedHere = 0;
         if (auto* def = currentProgram(); def != nullptr && t != nullptr)
@@ -1144,11 +1153,11 @@ private:
         auto* t = selectedTarget();
         auto* def = currentProgram();
         if (t == nullptr || def == nullptr) return;
-        auto* inst = engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect);
+        auto* plugin = engine.getPlugin (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect);
         auto* desc = targetDescription (*t);
-        if (inst == nullptr || desc == nullptr) { owner.showStatus ("Plugin is not loaded"); return; }
+        if (plugin == nullptr || desc == nullptr) { owner.showStatus ("Plugin is not loaded"); return; }
 
-        auto suggestions = suggestMappings (*inst, *desc, engine.getPluginHost().getMappingTemplates(), t->slot, t->effect, def->mappings);
+        auto suggestions = suggestMappings (plugin->getParameters(), *desc, engine.getPluginHost().getMappingTemplates(), t->slot, t->effect, def->mappings);
         auto* content = new SuggestionsComponent (engine, owner.getSelectedInput(), owner.getEditedProgram(), t->label, std::move (suggestions));
         DialogWindow::LaunchOptions o;
         o.content.setOwned (content);
@@ -1182,6 +1191,7 @@ private:
     ComboBox targetBox, paramBox;
     std::vector<Target> targets;
     StringArray paramIds;
+    Array<int> paramIndices;
     TextButton touchedBtn { "Use touched parameter" }, learnBtn { "Learn MIDI" }, addBtn { "Add" }, updateBtn { "Update" }, removeBtn { "Remove" },
                suggestBtn { "Suggest..." }, templateBtn { "Save template" };
     Label sourceLabel { {}, "-" };
@@ -1261,7 +1271,6 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
 MainComponent::~MainComponent()
 {
     engine.removeListener (this);
-    pluginWindows.clear();
 }
 
 int MainComponent::getEditedProgram() const
@@ -1320,7 +1329,8 @@ void MainComponent::resized()
 void MainComponent::timerCallback()
 {
     const auto now = Time::getMillisecondCounterHiRes();
-    cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + String (engine.getSampleRate() / 1000.0, 1) + " kHz", dontSendNotification);
+    cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + String (engine.getSampleRate() / 1000.0, 1) + " kHz"
+                      + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
     {
         statusText.clear();
@@ -1404,38 +1414,24 @@ void MainComponent::parameterTouched (int inputIndex, int program, int slot, int
         mappingsPanel->onTouched (slot, effect, paramIndex);
 }
 
-void MainComponent::instanceAboutToBeDeleted (AudioPluginInstance* inst) { closePluginWindowsFor (inst); }
 void MainComponent::statusMessage (const String& s) { showStatus (s); }
 
 //==============================================================================
 void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int effect)
 {
-    auto* inst = engine.getPluginInstance (inputIndex, program, slot, effect);
-    if (inst == nullptr) { showStatus ("Plugin is not loaded"); return; }
+    auto* plugin = engine.getPlugin (inputIndex, program, slot, effect);
+    if (plugin == nullptr || ! plugin->isAlive()) { showStatus ("Plugin is not running. Use Reload to restart it."); return; }
 
-    for (auto& w : pluginWindows)
-        if (&w->instance == inst) { w->toFront (true); return; }
-
-    if (looksLikeAraPlugin (inst->getPluginDescription()))
-        showStatus (araWarning (inst->getName()));
+    if (looksLikeAraPlugin (plugin->getDescription()))
+        showStatus (araWarning (plugin->getName()));
 
     const auto& inputs = engine.getSetup().inputs;
-    String title = inst->getName();
+    String title = plugin->getName();
     if (inputIndex < (int) inputs.size())
-        title = inputs[(size_t) inputIndex].name + " / " + programTitle (program, inputs[(size_t) inputIndex].programs[(size_t) program]) + " / " + inst->getName();
+        title = inputs[(size_t) inputIndex].name + " / " + programTitle (program, inputs[(size_t) inputIndex].programs[(size_t) program]) + " / " + plugin->getName();
 
-    pluginWindows.push_back (std::make_unique<PluginWindow> (*inst, title, [this, inst]
-    {
-        // Defer: we're inside the window's own callback.
-        MessageManager::callAsync ([this, inst] { closePluginWindowsFor (inst); });
-    }));
-}
-
-void MainComponent::closePluginWindowsFor (AudioPluginInstance* inst)
-{
-    pluginWindows.erase (std::remove_if (pluginWindows.begin(), pluginWindows.end(),
-                                         [inst] (auto& w) { return &w->instance == inst; }),
-                         pluginWindows.end());
+    if (! plugin->showEditor (title))
+        showStatus (plugin->getName() + ": could not open its editor (" + plugin->getLastError() + ")");
 }
 
 //==============================================================================
@@ -1454,7 +1450,6 @@ void MainComponent::setCurrentFile (const File& f)
 
 void MainComponent::newSetup()
 {
-    pluginWindows.clear();
     engine.loadSetup (Setup::makeDefault());
     setCurrentFile ({});
     showStatus ("New setup");
@@ -1470,7 +1465,6 @@ void MainComponent::loadSetupFile (const File& f)
         refreshAll();
         return;
     }
-    pluginWindows.clear();
     engine.loadSetup (std::move (s));
     setCurrentFile (f == getAutosaveFile() ? File() : f);
     dirty = false;

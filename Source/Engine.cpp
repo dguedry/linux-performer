@@ -1,5 +1,4 @@
 #include "Engine.h"
-#include "MappingSuggestions.h"
 
 using namespace juce;
 
@@ -10,41 +9,36 @@ namespace perf
 // Runtime structures
 //==============================================================================
 
-/** A hosted plugin instance: an instrument or an effect. */
-struct Engine::PluginNode : public AudioProcessorListener
+/** A hosted plugin: an instrument or an effect, living in its own process. */
+struct Engine::PluginNode : public RemotePlugin::Listener
 {
     PluginNode (Engine& e, int in, int prog, int slot, int effect)
         : engine (e), inputIndex (in), program (prog), slotIndex (slot), effectIndex (effect) {}
 
-    ~PluginNode() override { if (instance != nullptr) instance->removeListener (this); }
+    ~PluginNode() override { if (plugin != nullptr) plugin->setListener (nullptr); }
 
-    void ensureScratch (int numSamples)
-    {
-        if (instance == nullptr) return;
-        const int ch = jmax (2, instance->getTotalNumInputChannels(), instance->getTotalNumOutputChannels());
-        if (scratch.getNumChannels() != ch || scratch.getNumSamples() < numSamples)
-            scratch.setSize (ch, numSamples, false, false, true);
-        midi.ensureSize (2048);
-    }
+    bool alive() const { return plugin != nullptr && plugin->isAlive(); }
 
-    // AudioProcessorListener -- used for "last touched parameter"
-    void audioProcessorParameterChanged (AudioProcessor*, int paramIndex, float) override
+    // RemotePlugin::Listener (reader thread)
+    void remoteParameterTouched (RemotePlugin&, int index, float) override
     {
-        if (! engine.suppressTouch.load())
-            engine.noteParameterTouched (inputIndex, program, slotIndex.load(), effectIndex.load(), paramIndex);
+        engine.noteParameterTouched (inputIndex.load(), program, slotIndex.load(), effectIndex.load(), index);
     }
-    void audioProcessorChanged (AudioProcessor*, const ChangeDetails&) override {}
-    void audioProcessorParameterChangeGestureBegin (AudioProcessor*, int paramIndex) override
+    void remoteParameterChanged (RemotePlugin&, int index, float) override
     {
-        engine.noteParameterTouched (inputIndex, program, slotIndex.load(), effectIndex.load(), paramIndex);
+        engine.noteParameterTouched (inputIndex.load(), program, slotIndex.load(), effectIndex.load(), index);
+    }
+    void remoteDied (RemotePlugin&) override
+    {
+        engine.notePluginDied (inputIndex.load(), program, slotIndex.load(), effectIndex.load());
     }
 
     Engine& engine;
-    int inputIndex, program;
+    std::atomic<int> inputIndex;
+    int program;
     std::atomic<int> slotIndex, effectIndex;
-    std::unique_ptr<AudioPluginInstance> instance;
+    std::unique_ptr<RemotePlugin> plugin;
     String loadError;
-    AudioBuffer<float> scratch;    // full plugin channel count
     MidiBuffer midi;
 };
 
@@ -78,7 +72,8 @@ struct Engine::SlotRuntime : public PluginNode
 struct Engine::MappingRuntime
 {
     MappingDef def;
-    AudioProcessorParameter* param = nullptr;
+    RemotePlugin* plugin = nullptr;
+    int paramIndex = -1;
 };
 
 struct Engine::ProgramRuntime
@@ -261,10 +256,10 @@ void Engine::removeInput (int inputIndex)
             {
                 for (auto& s : rt->slots)
                 {
-                    s->inputIndex = i;
-                    for (auto& e : s->effects) e->inputIndex = i;
+                    s->inputIndex.store (i);
+                    for (auto& e : s->effects) e->inputIndex.store (i);
                 }
-                for (auto& e : rt->effects) e->inputIndex = i;
+                for (auto& e : rt->effects) e->inputIndex.store (i);
             }
     }
 
@@ -485,40 +480,21 @@ std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int 
 
 void Engine::loadPluginInto (PluginNode& node, const PluginDescription& desc, const MemoryBlock& state)
 {
+    auto plugin = std::make_unique<RemotePlugin>();
     String error;
-    auto instance = host.createInstance (desc, sampleRate, blockSize, error);
-
-    if (instance == nullptr)
+    if (! plugin->load (desc, sampleRate, blockSize, error))
     {
         node.loadError = error;
         listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load " + desc.name + ": " + error); });
         return;
     }
 
-    // Activate every bus and give the plugin real buffers for all of them. JUCE hands
-    // inactive buses null channel pointers, and some plugins (Kontakt via yabridge, for
-    // one) write into those anyway and crash the host. Only the main bus is used.
-    instance->enableAllBuses();
+    if (state.getSize() > 0 && ! plugin->setState (state))
+        listeners.call ([&] (Listener& l) { l.statusMessage (desc.name + ": could not restore its saved state (" + plugin->getLastError() + ")"); });
 
-    if (state.getSize() > 0)
-    {
-        // Restoring state fires parameter callbacks; don't let them count as "touched".
-        suppressTouch.store (true);
-        instance->setStateInformation (state.getData(), (int) state.getSize());
-        suppressTouch.store (false);
-    }
-
-    prepareInstance (*instance);
-    instance->addListener (&node);
-    node.instance = std::move (instance);
-    node.ensureScratch (blockSize);
-}
-
-void Engine::prepareInstance (AudioPluginInstance& inst)
-{
-    inst.setNonRealtime (false);
-    inst.setPlayHead (nullptr);
-    inst.prepareToPlay (sampleRate, blockSize);
+    node.midi.ensureSize (2048);
+    plugin->setListener (&node);
+    node.plugin = std::move (plugin);
 }
 
 void Engine::unloadProgram (InputRuntime& in, int program)
@@ -556,12 +532,10 @@ void Engine::destroyProgramPlugins (ProgramRuntime& rt)
 
 void Engine::destroyNode (PluginNode* node)
 {
-    if (node == nullptr || node->instance == nullptr) return;
-    auto* inst = node->instance.get();
-    listeners.call ([inst] (Listener& l) { l.instanceAboutToBeDeleted (inst); });
-    inst->removeListener (node);
-    inst->releaseResources();
-    node->instance.reset();
+    if (node == nullptr || node->plugin == nullptr) return;
+    node->plugin->setListener (nullptr);
+    node->plugin->shutdown();
+    node->plugin.reset();
 }
 
 void Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
@@ -571,11 +545,11 @@ void Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
 
     auto capture = [] (PluginNode& node, MemoryBlock& dest)
     {
-        if (auto* inst = node.instance.get())
+        if (node.alive())
         {
             MemoryBlock mb;
-            inst->getStateInformation (mb);
-            if (mb.getSize() > 0) dest = std::move (mb);
+            if (node.plugin->getState (mb) && mb.getSize() > 0)
+                dest = std::move (mb);
         }
     };
 
@@ -608,7 +582,7 @@ bool Engine::addSlot (int inputIndex, int program, const PluginDescription& desc
     if (auto* rt = getLoaded (inputIndex, program))
     {
         auto slot = buildSlot (inputIndex, program, slotIndex, sd);
-        ok = slot->instance != nullptr;
+        ok = slot->plugin != nullptr;
         error = slot->loadError;
         const ScopedLock sl (lock);
         rt->slots.push_back (std::move (slot));
@@ -729,7 +703,7 @@ bool Engine::addEffect (int inputIndex, int program, int slot, const PluginDescr
         if (auto* chain = runtimeChainFor (*rt, slot))
         {
             auto fx = buildEffect (inputIndex, program, slot, effectIndex, ed);
-            ok = fx->instance != nullptr;
+            ok = fx->plugin != nullptr;
             error = fx->loadError;
             const ScopedLock sl (lock);
             chain->push_back (std::move (fx));
@@ -838,24 +812,71 @@ Engine::PluginNode* Engine::getNode (int inputIndex, int program, int slot, int 
     return (*chain)[(size_t) effect].get();
 }
 
-AudioPluginInstance* Engine::getPluginInstance (int inputIndex, int program, int slot, int effect) const
+RemotePlugin* Engine::getPlugin (int inputIndex, int program, int slot, int effect) const
 {
     auto* node = getNode (inputIndex, program, slot, effect);
-    return node != nullptr ? node->instance.get() : nullptr;
+    return node != nullptr ? node->plugin.get() : nullptr;
+}
+
+bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) const
+{
+    auto* node = getNode (inputIndex, program, slot, effect);
+    return node != nullptr && node->alive();
 }
 
 String Engine::getPluginLoadError (int inputIndex, int program, int slot, int effect) const
 {
     auto* node = getNode (inputIndex, program, slot, effect);
-    return node != nullptr ? node->loadError : String();
+    if (node == nullptr) return {};
+    if (node->plugin != nullptr && ! node->plugin->isAlive())
+        return "Plugin process stopped: " + node->plugin->getLastError();
+    return node->loadError;
+}
+
+void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto* node = getNode (inputIndex, program, slot, effect);
+    if (node == nullptr) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+
+    const PluginDescription* desc = nullptr;
+    const MemoryBlock* state = nullptr;
+    if (effect < 0)
+    {
+        if (slot < 0 || slot >= (int) def.slots.size()) return;
+        desc = &def.slots[(size_t) slot].plugin;
+        state = &def.slots[(size_t) slot].state;
+    }
+    else if (auto* chain = defChainFor (def, slot))
+    {
+        if (effect >= (int) chain->size()) return;
+        desc = &(*chain)[(size_t) effect].plugin;
+        state = &(*chain)[(size_t) effect].state;
+    }
+    if (desc == nullptr) return;
+
+    // Detach the old process from the audio thread, then start a fresh one.
+    std::unique_ptr<RemotePlugin> old;
+    {
+        const ScopedLock sl (lock);
+        old = std::move (node->plugin);
+    }
+    if (old != nullptr) { old->setListener (nullptr); old->shutdown(); }
+
+    node->loadError.clear();
+    loadPluginInto (*node, *desc, *state);
+    {
+        const ScopedLock sl (lock);
+        if (auto* rt = getLoaded (inputIndex, program))
+            resolveMappings (*rt, def);
+    }
+    notifyContent (inputIndex, program);
 }
 
 //==============================================================================
 // Mappings
 //==============================================================================
-String Engine::getParameterId (const AudioProcessorParameter& p)                      { return parameterIdOf (p); }
-AudioProcessorParameter* Engine::findParameter (AudioPluginInstance& inst, const String& id) { return findParameterById (inst, id); }
-
 void Engine::resolveMappings (ProgramRuntime& rt, const ProgramDef& def)
 {
     std::vector<MappingRuntime> resolved;
@@ -876,8 +897,11 @@ void Engine::resolveMappings (ProgramRuntime& rt, const ProgramDef& def)
                 node = (*chain)[(size_t) m.effect].get();
         }
 
-        if (node != nullptr && node->instance != nullptr)
-            mr.param = findParameter (*node->instance, m.paramId);
+        if (node != nullptr && node->plugin != nullptr)
+        {
+            mr.plugin = node->plugin.get();
+            mr.paramIndex = node->plugin->findParameterIndex (m.paramId);
+        }
         resolved.push_back (mr);
     }
     rt.mappings = std::move (resolved);
@@ -918,6 +942,11 @@ void Engine::noteParameterTouched (int inputIndex, int program, int slot, int ef
 {
     // Can arrive on any thread; dedupe and hand off to the message thread.
     postEvent ({ Event::touched, inputIndex, program, slot, effect, paramIndex });
+}
+
+void Engine::notePluginDied (int inputIndex, int program, int slot, int effect)
+{
+    postEvent ({ Event::pluginDied, inputIndex, program, slot, effect, 0 });
 }
 
 void Engine::panic() { panicRequested.store (true); }
@@ -964,6 +993,16 @@ void Engine::handleAsyncUpdate()
             case Event::touched:
                 lastTouched = { e.input, e.a, e.b, e.c, e.d };
                 listeners.call ([&] (Listener& l) { l.parameterTouched (e.input, e.a, e.b, e.c, e.d); });
+                break;
+
+            case Event::pluginDied:
+                if (auto* node = getNode (e.input, e.a, e.b, e.c))
+                    if (node->plugin != nullptr && ! node->plugin->isAlive())
+                    {
+                        const auto name = node->plugin->getName();
+                        listeners.call ([&] (Listener& l) { l.statusMessage (name + " stopped (" + node->plugin->getLastError() + "). Use Reload on that plugin to restart it."); });
+                        notifyContent (e.input, e.a);
+                    }
                 break;
         }
     }
@@ -1078,13 +1117,7 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
         for (auto& [p, rt] : in->loaded)
         {
             rt->mix.setSize (2, blockSize, false, false, true);
-            auto prep = [this] (PluginNode& node)
-            {
-                if (node.instance == nullptr) return;
-                node.instance->releaseResources();
-                prepareInstance (*node.instance);
-                node.ensureScratch (blockSize);
-            };
+            auto prep = [this] (PluginNode& node) { if (node.alive()) node.plugin->prepare (sampleRate, blockSize); };
             for (auto& s : rt->slots)
             {
                 s->stereo.setSize (2, blockSize, false, false, true);
@@ -1105,6 +1138,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const*, int,
     for (int c = 0; c < numOut; ++c)
         if (out[c] != nullptr)
             FloatVectorOperations::clear (out[c], numSamples);
+
+    // Every plugin process must answer within this block; late ones are silenced for it.
+    blockDeadline = ipc::monotonicDeadline (jmax (0.001, 0.85 * numSamples / sampleRate));
 
     const ScopedLock sl (lock);
     const bool panicNow = panicRequested.exchange (false);
@@ -1167,44 +1203,17 @@ static void addNotesOff (MidiBuffer& midi, bool allSoundOff)
     }
 }
 
-/** Runs a plugin on the working stereo signal. Instruments (feedStereoIn == false) render
-    from silence; effects receive the stereo signal on their first two inputs. The main
-    output bus (mono duplicated) becomes the new stereo signal. */
-void Engine::renderNode (PluginNode& node, AudioBuffer<float>& stereo, int numSamples, bool feedStereoIn)
-{
-    auto* inst = node.instance.get();
-    node.ensureScratch (numSamples);
-    AudioBuffer<float> view (node.scratch.getArrayOfWritePointers(), node.scratch.getNumChannels(), numSamples);
-    view.clear();
-
-    if (feedStereoIn)
-    {
-        const int nIn = inst->getMainBusNumInputChannels();
-        for (int c = 0; c < jmin (nIn, 2); ++c)
-            view.copyFrom (c, 0, stereo, c, 0, numSamples);
-        if (nIn == 1)   // mono-in effect: feed the average of both sides
-        {
-            view.addFrom (0, 0, stereo, 1, 0, numSamples);
-            view.applyGain (0, 0, numSamples, 0.5f);
-        }
-    }
-
-    inst->processBlock (view, node.midi);
-
-    const int nOut = inst->getMainBusNumOutputChannels();
-    if (nOut <= 0) { stereo.clear(); return; }
-    for (int c = 0; c < 2; ++c)
-        stereo.copyFrom (c, 0, view, (nOut == 1) ? 0 : jmin (c, nOut - 1), 0, numSamples);
-}
-
 void Engine::runChain (std::vector<std::unique_ptr<EffectRuntime>>& chain, const MidiBuffer& midi, AudioBuffer<float>& stereo, int numSamples)
 {
     for (auto& fx : chain)
     {
-        if (fx->instance == nullptr || fx->instance->isSuspended() || fx->bypassed.load()) continue;
-        fx->midi.clear();
-        fx->midi.addEvents (midi, 0, numSamples, 0);
-        renderNode (*fx, stereo, numSamples, true);
+        if (! fx->alive() || fx->bypassed.load()) continue;
+        fx->plugin->beginProcess (stereo.getReadPointer (0), stereo.getReadPointer (1), midi, numSamples);
+        if (! fx->plugin->finishProcess (stereo.getWritePointer (0), stereo.getWritePointer (1), blockDeadline))
+        {
+            stereo.clear();
+            lateBlocks.fetch_add (1);
+        }
     }
 }
 
@@ -1231,12 +1240,10 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
         bool consumed = false;
         for (auto& map : prog.mappings)
         {
-            if (map.param == nullptr || ! mappingMatches (map.def, m)) continue;
+            if (map.plugin == nullptr || map.paramIndex < 0 || ! map.plugin->isAlive() || ! mappingMatches (map.def, m)) continue;
             const float norm = normalisedValueOf (m, map.def.source);
             const float value = map.def.minValue + (map.def.maxValue - map.def.minValue) * norm;
-            suppressTouch.store (true);
-            map.param->setValueNotifyingHost (jlimit (0.0f, 1.0f, value));
-            suppressTouch.store (false);
+            map.plugin->queueParameterChange (map.paramIndex, jlimit (0.0f, 1.0f, value));
             if (! map.def.passThrough) consumed = true;
         }
         if (consumed) continue;
@@ -1245,7 +1252,7 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
 
         for (auto& slot : prog.slots)
         {
-            if (slot->instance == nullptr || ! slot->enabled.load()) continue;
+            if (! slot->alive() || ! slot->enabled.load()) continue;
 
             MidiMessage mm (m);
             if (mm.isNoteOnOrOff())
@@ -1262,20 +1269,30 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
         }
     }
 
-    // Render each slot through its chain and sum into the program mix.
+    // Render each slot through its chain and sum into the program mix. Instruments run
+    // in parallel (one process each); each slot's effect chain then runs in order.
     if (prog.mix.getNumSamples() < numSamples) prog.mix.setSize (2, numSamples, false, false, true);
     AudioBuffer<float> mix (prog.mix.getArrayOfWritePointers(), 2, numSamples);
     mix.clear();
 
     for (auto& slot : prog.slots)
     {
-        auto* inst = slot->instance.get();
-        if (inst == nullptr || inst->isSuspended()) continue;
-
         if (slot->stereo.getNumSamples() < numSamples) slot->stereo.setSize (2, numSamples, false, false, true);
+        if (slot->alive())
+            slot->plugin->beginProcess (nullptr, nullptr, slot->midi, numSamples);
+    }
+
+    for (auto& slot : prog.slots)
+    {
+        if (! slot->alive()) continue;
         AudioBuffer<float> stereo (slot->stereo.getArrayOfWritePointers(), 2, numSamples);
 
-        renderNode (*slot, stereo, numSamples, false);
+        if (! slot->plugin->finishProcess (stereo.getWritePointer (0), stereo.getWritePointer (1), blockDeadline))
+        {
+            stereo.clear();
+            lateBlocks.fetch_add (1);
+            continue;
+        }
         runChain (slot->effects, slot->midi, stereo, numSamples);
 
         const float g = slot->enabled.load() ? slot->gain.load() : 0.0f;

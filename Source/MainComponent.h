@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Engine.h"
-#include "PluginWindow.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -46,7 +45,6 @@ private:
     void programContentChanged (int inputIndex, int program) override;
     void learnReceived (int inputIndex, MappingDef::Source, int number) override;
     void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) override;
-    void instanceAboutToBeDeleted (juce::AudioPluginInstance*) override;
     void statusMessage (const juce::String&) override;
 
     void timerCallback() override;
@@ -64,7 +62,6 @@ private:
 
     void showAudioSettings();
     void showPluginManager();
-    void closePluginWindowsFor (juce::AudioPluginInstance*);
 
     Engine& engine;
     juce::PropertiesFile& settings;
@@ -85,7 +82,6 @@ private:
     std::unique_ptr<SlotsPanel> slotsPanel;
     std::unique_ptr<MappingsPanel> mappingsPanel;
 
-    std::vector<std::unique_ptr<PluginWindow>> pluginWindows;
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String statusText;
     double statusTime = 0;

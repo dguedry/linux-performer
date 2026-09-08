@@ -100,28 +100,17 @@ Result MappingTemplates::load()
 }
 
 //==============================================================================
-// Parameter identity
-//==============================================================================
-String parameterIdOf (const AudioProcessorParameter& p)
+int findParamIndex (const ParamInfoList& params, const String& paramId)
 {
-    if (auto* hosted = dynamic_cast<const HostedAudioProcessorParameter*> (&p))
-        return hosted->getParameterID();
-    return String (p.getParameterIndex());
-}
-
-AudioProcessorParameter* findParameterById (AudioPluginInstance& inst, const String& paramId)
-{
-    for (auto* p : inst.getParameters())
-        if (parameterIdOf (*p) == paramId)
-            return p;
+    for (auto& p : params)
+        if (p.id == paramId) return p.index;
     if (paramId.containsOnly ("0123456789"))
     {
         const int idx = paramId.getIntValue();
-        auto& params = inst.getParameters();
-        if (idx >= 0 && idx < params.size())
-            return params[idx];
+        for (auto& p : params)
+            if (p.index == idx) return idx;
     }
-    return nullptr;
+    return -1;
 }
 
 //==============================================================================
@@ -160,26 +149,26 @@ namespace
         return r;
     }
 
-    bool isMappable (const AudioProcessorParameter& p)
+    bool isMappable (const ParamInfo& p)
     {
-        return p.isAutomatable() && ! p.isDiscrete() && ! p.isBoolean();
+        return p.automatable && ! p.discrete && ! p.boolean;
     }
 }
 
-std::vector<MappingSuggestion> suggestMappingsFromNames (AudioPluginInstance& inst)
+std::vector<MappingSuggestion> suggestMappingsFromNames (const ParamInfoList& plugin)
 {
-    struct Candidate { AudioProcessorParameter* param; String name, lower; };
+    struct Candidate { const ParamInfo* param; String name, lower; };
     std::vector<Candidate> params;
-    for (auto* p : inst.getParameters())
-        if (isMappable (*p))
+    for (auto& p : plugin)
+        if (isMappable (p))
         {
-            auto name = p->getName (128).trim();
+            auto name = p.name.trim();
             if (name.isEmpty()) continue;
-            params.push_back ({ p, name, name.toLowerCase() });
+            params.push_back ({ &p, name, name.toLowerCase() });
         }
 
     std::vector<MappingSuggestion> out;
-    std::set<AudioProcessorParameter*> used;
+    std::set<const ParamInfo*> used;
 
     for (auto& rule : rules())
     {
@@ -204,7 +193,7 @@ std::vector<MappingSuggestion> suggestMappingsFromNames (AudioPluginInstance& in
         MappingSuggestion s;
         s.mapping.source = MappingDef::Source::CC;
         s.mapping.number = rule.cc;
-        s.mapping.paramId = parameterIdOf (*best->param);
+        s.mapping.paramId = best->param->id;
         s.mapping.paramName = best->name;
         s.reason = String ("GM2 ") + rule.label + ": name matches";
         out.push_back (std::move (s));
@@ -213,28 +202,31 @@ std::vector<MappingSuggestion> suggestMappingsFromNames (AudioPluginInstance& in
 }
 
 //==============================================================================
-std::vector<MappingSuggestion> suggestMappingsFromTemplate (AudioPluginInstance& inst, const std::vector<MappingDef>& tmpl)
+std::vector<MappingSuggestion> suggestMappingsFromTemplate (const ParamInfoList& params, const std::vector<MappingDef>& tmpl)
 {
     std::vector<MappingSuggestion> out;
     for (auto& m : tmpl)
     {
-        auto* p = findParameterById (inst, m.paramId);
+        const int idx = findParamIndex (params, m.paramId);
+        if (idx < 0) continue;
+        const ParamInfo* p = nullptr;
+        for (auto& c : params) if (c.index == idx) p = &c;
         if (p == nullptr) continue;
         MappingSuggestion s;
         s.mapping = m;
-        s.mapping.paramName = p->getName (64);
+        s.mapping.paramName = p->name;
         s.reason = "from saved template";
         out.push_back (std::move (s));
     }
     return out;
 }
 
-std::vector<MappingSuggestion> suggestMappings (AudioPluginInstance& inst, const PluginDescription& desc,
+std::vector<MappingSuggestion> suggestMappings (const ParamInfoList& params, const PluginDescription& desc,
                                                 const MappingTemplates& templates, int slot, int effect,
                                                 const std::vector<MappingDef>& existing)
 {
-    auto suggestions = templates.has (desc) ? suggestMappingsFromTemplate (inst, templates.get (desc))
-                                            : suggestMappingsFromNames (inst);
+    auto suggestions = templates.has (desc) ? suggestMappingsFromTemplate (params, templates.get (desc))
+                                            : suggestMappingsFromNames (params);
 
     std::vector<MappingSuggestion> out;
     for (auto& s : suggestions)

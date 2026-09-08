@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cmath>
 #include <set>
+#include <signal.h>
+#include <unistd.h>
 
 using namespace perf;
 using namespace juce;
@@ -97,13 +99,16 @@ int main()
     CHECK (engine.getSetup().inputs.size() == 2);         // Upper (ch1), Lower (ch2)
     CHECK (engine.isProgramLoaded (0, 0));
 
+    CHECK (RemotePlugin::findHostExecutable().existsAsFile());
+    std::printf ("     plugin host: %s\n", RemotePlugin::findHostExecutable().getFullPathName().toRawUTF8());
+
     String err;
     CHECK (engine.addSlot (0, 0, synth, err));
     if (err.isNotEmpty()) std::printf ("     addSlot error: %s\n", err.toRawUTF8());
-    auto* inst = engine.getSlotInstance (0, 0, 0);
-    CHECK (inst != nullptr);
+    auto* inst = engine.getPlugin (0, 0, 0);
+    CHECK (inst != nullptr && inst->isAlive());
     if (inst == nullptr) return 1;
-    std::printf ("     instance outs=%d params=%d\n", inst->getMainBusNumOutputChannels(), inst->getParameters().size());
+    std::printf ("     plugin '%s' pid-hosted, params=%d\n", inst->getName().toRawUTF8(), (int) inst->getParameters().size());
 
     // Silence before any note.
     const float silence = render (engine, 4);
@@ -142,37 +147,42 @@ int main()
     render (engine, 100);
 
     // --- CC mapping -----------------------------------------------------------------
-    AudioProcessorParameter* target = nullptr;
-    for (auto* p : inst->getParameters())
-        if (p->isAutomatable() && ! p->isDiscrete() && p->getName (64).containsIgnoreCase ("cutoff")) { target = p; break; }
+    const ParamInfo* target = nullptr;
+    for (auto& p : inst->getParameters())
+        if (p.automatable && ! p.discrete && p.name.containsIgnoreCase ("cutoff")) { target = &p; break; }
     if (target == nullptr)
-        for (auto* p : inst->getParameters())
-            if (p->isAutomatable() && ! p->isDiscrete()) { target = p; break; }
+        for (auto& p : inst->getParameters())
+            if (p.automatable && ! p.discrete) { target = &p; break; }
     CHECK (target != nullptr);
     if (target != nullptr)
     {
-        std::printf ("     mapping CC 74 -> '%s' (id %s)\n", target->getName (64).toRawUTF8(), Engine::getParameterId (*target).toRawUTF8());
+        std::printf ("     mapping CC 74 -> '%s' (id %s)\n", target->name.toRawUTF8(), target->id.toRawUTF8());
         MappingDef m;
         m.source = MappingDef::Source::CC; m.number = 74; m.slot = 0;
-        m.paramId = Engine::getParameterId (*target);
+        m.paramId = target->id;
         m.minValue = 0.25f; m.maxValue = 0.75f;
         engine.addMapping (0, 0, m);
         CHECK (engine.getSetup().inputs[0].programs[0].mappings.size() == 1);
 
+        // Values are read back from the plugin process, not from the host's cache.
+        float v = -1.0f;
         engine.injectMidi (0, MidiMessage::controllerEvent (1, 74, 127));
         render (engine, 2);
-        std::printf ("     param after CC=127: %f\n", target->getValue());
-        CHECK (std::abs (target->getValue() - 0.75f) < 0.02f);
+        CHECK (inst->fetchParameterValue (target->index, v));
+        std::printf ("     param after CC=127: %f\n", v);
+        CHECK (std::abs (v - 0.75f) < 0.02f);
 
         engine.injectMidi (0, MidiMessage::controllerEvent (1, 74, 0));
         render (engine, 2);
-        std::printf ("     param after CC=0: %f\n", target->getValue());
-        CHECK (std::abs (target->getValue() - 0.25f) < 0.02f);
+        CHECK (inst->fetchParameterValue (target->index, v));
+        std::printf ("     param after CC=0: %f\n", v);
+        CHECK (std::abs (v - 0.25f) < 0.02f);
 
         // A different CC is not affected by the mapping.
         engine.injectMidi (0, MidiMessage::controllerEvent (1, 75, 127));
         render (engine, 2);
-        CHECK (std::abs (target->getValue() - 0.25f) < 0.02f);
+        CHECK (inst->fetchParameterValue (target->index, v));
+        CHECK (std::abs (v - 0.25f) < 0.02f);
     }
 
     // --- learn ------------------------------------------------------------------------
@@ -204,7 +214,7 @@ int main()
     // Switching back reloads program 0 from its definition and it plays again.
     engine.selectProgram (0, 0);
     CHECK (engine.isProgramLoaded (0, 0));
-    CHECK (engine.getSlotInstance (0, 0, 0) != nullptr);
+    CHECK (engine.isPluginAlive (0, 0, 0));
     CHECK (engine.getSetup().inputs[0].programs[0].mappings.size() == 1);
     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
     const float again = render (engine, 20);
@@ -218,7 +228,7 @@ int main()
     engine.setPreloadAllPrograms (true);
     pump (1600);
     CHECK (engine.isProgramLoaded (0, 7));
-    CHECK (engine.getSlotInstance (0, 7, 0) != nullptr);
+    CHECK (engine.isPluginAlive (0, 7, 0));
 
     // --- copy / clear / removeSlot ------------------------------------------------------
     engine.copyProgram (0, 0, 9);
@@ -257,8 +267,7 @@ int main()
             engine.setPreloadAllPrograms (false);
             engine.selectProgram (0, 0);
             CHECK (engine.addSlot (0, 0, synth, err));
-            auto* synthInst = engine.getSlotInstance (0, 0, 0);
-            CHECK (synthInst != nullptr);
+            CHECK (engine.isPluginAlive (0, 0, 0));
 
             // Baseline level, instrument only.
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
@@ -271,29 +280,29 @@ int main()
             CHECK (engine.addEffect (0, 0, 0, fx, err));
             if (err.isNotEmpty()) std::printf ("     addEffect error: %s\n", err.toRawUTF8());
             CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects.size() == 1);
-            auto* fxInst = engine.getPluginInstance (0, 0, 0, 0);
-            CHECK (fxInst != nullptr);
+            auto* fxInst = engine.getPlugin (0, 0, 0, 0);
+            CHECK (fxInst != nullptr && fxInst->isAlive());
             render (engine, 5);
             const float wet = render (engine, 10);
             std::printf ("     rms through slot effect: %f\n", wet);
             CHECK (wet > 0.01f);
 
             // Find a level/gain parameter and turn it down: output must drop.
-            AudioProcessorParameter* level = nullptr;
+            const ParamInfo* level = nullptr;
             if (fxInst != nullptr)
-                for (auto* p : fxInst->getParameters())
+                for (auto& p : fxInst->getParameters())
                 {
-                    const auto n = p->getName (64);
-                    if (n.containsIgnoreCase ("Level In") || n.containsIgnoreCase ("Input Gain") || n.containsIgnoreCase ("Input Level")) { level = p; break; }
+                    const auto n = p.name;
+                    if (n.containsIgnoreCase ("Level In") || n.containsIgnoreCase ("Input Gain") || n.containsIgnoreCase ("Input Level")) { level = &p; break; }
                 }
             if (level == nullptr && fxInst != nullptr)
-                for (auto* p : fxInst->getParameters())
-                    if (p->getName (64).containsIgnoreCase ("Level Out") || p->getName (64).containsIgnoreCase ("Output")) { level = p; break; }
+                for (auto& p : fxInst->getParameters())
+                    if (p.name.containsIgnoreCase ("Level Out") || p.name.containsIgnoreCase ("Output")) { level = &p; break; }
             CHECK (level != nullptr);
             if (level != nullptr)
             {
-                std::printf ("     effect level parameter: '%s'\n", level->getName (64).toRawUTF8());
-                const String levelId = Engine::getParameterId (*level);
+                std::printf ("     effect level parameter: '%s'\n", level->name.toRawUTF8());
+                const String levelId = level->id;
 
                 // Via a mapping to the effect (slot 0, effect 0): CC 7 -> level, min 0.
                 MappingDef m;
@@ -317,7 +326,7 @@ int main()
 
                 // Removing the effect drops its mapping and leaves the instrument alone.
                 engine.removeEffect (0, 0, 0, 0);
-                level = nullptr;   // instance destroyed with the effect
+                level = nullptr;   // its process is gone with the effect
                 CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects.empty());
                 CHECK (engine.getSetup().inputs[0].programs[0].mappings.empty());
                 render (engine, 5);
@@ -326,13 +335,14 @@ int main()
                 // Program-level chain: same effect after the mix, mapped via slot == -1.
                 CHECK (engine.addEffect (0, 0, -1, fx, err));
                 CHECK (engine.getSetup().inputs[0].programs[0].effects.size() == 1);
-                auto* progFx = engine.getPluginInstance (0, 0, -1, 0);
-                CHECK (progFx != nullptr);
+                auto* progFx = engine.getPlugin (0, 0, -1, 0);
+                CHECK (progFx != nullptr && progFx->isAlive());
                 if (progFx != nullptr)
                 {
-                    auto* pLevel = Engine::findParameter (*progFx, levelId);
-                    CHECK (pLevel != nullptr);
-                    const float unity = pLevel != nullptr ? pLevel->getValue() : 0.0f;
+                    const int pLevel = progFx->findParameterIndex (levelId);
+                    CHECK (pLevel >= 0);
+                    float unity = 0.0f;
+                    if (pLevel >= 0) progFx->fetchParameterValue (pLevel, unity);
                     MappingDef pm = m; pm.slot = -1; pm.effect = 0; pm.number = 8;
                     engine.addMapping (0, 0, pm);
                     render (engine, 5);
@@ -342,7 +352,7 @@ int main()
                     const float progMuted = render (engine, 10);
                     std::printf ("     rms with program effect level at min: %f\n", progMuted);
                     CHECK (progMuted < wet * 0.2f);
-                    if (pLevel != nullptr) pLevel->setValueNotifyingHost (unity);   // back to unity gain
+                    if (pLevel >= 0) progFx->setParameterValue (pLevel, unity);   // back to unity gain
                     render (engine, 2);
                 }
 
@@ -369,7 +379,7 @@ int main()
 
             // Loading that setup rebuilds the chain live.
             engine.loadSetup (rl);
-            CHECK (engine.getPluginInstance (0, 0, -1, 0) != nullptr);
+            CHECK (engine.isPluginAlive (0, 0, -1, 0));
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
             render (engine, 10);
             const float afterLoad = render (engine, 10);
@@ -386,11 +396,11 @@ int main()
         engine.setPreloadAllPrograms (false);
         engine.selectProgram (0, 30);
         CHECK (engine.addSlot (0, 30, synth, err));
-        auto* mono = engine.getSlotInstance (0, 30, 0);
-        CHECK (mono != nullptr);
+        auto* mono = engine.getPlugin (0, 30, 0);
+        CHECK (mono != nullptr && mono->isAlive());
         if (mono != nullptr)
         {
-            auto byNames = suggestMappingsFromNames (*mono);
+            auto byNames = suggestMappingsFromNames (mono->getParameters());
             std::printf ("     %d name-based suggestions for %s:\n", (int) byNames.size(), synth.name.toRawUTF8());
             for (auto& sg : byNames)
                 std::printf ("       %-12s -> %-28s (%s)\n", sg.mapping.sourceDescription().toRawUTF8(), sg.mapping.paramName.toRawUTF8(), sg.reason.toRawUTF8());
@@ -413,7 +423,7 @@ int main()
             CHECK (! templates.has (synth));
             std::vector<MappingDef> existing;
             existing.push_back (find (74)->mapping); existing.back().slot = 0; existing.back().effect = -1;
-            auto pipeline = suggestMappings (*mono, synth, templates, 0, -1, existing);
+            auto pipeline = suggestMappings (mono->getParameters(), synth, templates, 0, -1, existing);
             CHECK (pipeline.size() == byNames.size() - 1);
             for (auto& sg : pipeline) { CHECK (sg.mapping.slot == 0 && sg.mapping.effect == -1); CHECK (sg.mapping.number != 74); }
 
@@ -424,7 +434,7 @@ int main()
             tmpl.push_back (a); tmpl.push_back (b);
             templates.set (synth, tmpl);
             CHECK (templates.has (synth));
-            auto fromTemplate = suggestMappings (*mono, synth, templates, 2, 1, {});
+            auto fromTemplate = suggestMappings (mono->getParameters(), synth, templates, 2, 1, {});
             CHECK (fromTemplate.size() == 1);
             if (fromTemplate.size() == 1)
             {
@@ -439,6 +449,49 @@ int main()
             CHECK (! templates.has (synth));
         }
         engine.clearProgram (0, 30);
+    }
+
+    // --- crash isolation --------------------------------------------------------------------
+    {
+        engine.setPreloadAllPrograms (false);
+        engine.selectProgram (0, 40);
+        CHECK (engine.addSlot (0, 40, synth, err));
+        auto* victim = engine.getPlugin (0, 40, 0);
+        CHECK (victim != nullptr && victim->isAlive());
+        if (victim != nullptr && victim->isAlive())
+        {
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+            CHECK (render (engine, 10) > 0.01f);
+
+            // Find and kill our plugin host children the hard way, like a plugin crash would.
+            ChildProcess pgrep;
+            pgrep.start (StringArray { "pgrep", "-P", String ((int) ::getpid()), "-f", "plugin-host" });
+            auto pids = StringArray::fromLines (pgrep.readAllProcessOutput().trim());
+            std::printf ("     %d plugin host processes running; killing them all\n", pids.size());
+            CHECK (pids.size() >= 1);
+            for (auto& pidText : pids)
+                if (pidText.trim().isNotEmpty()) ::kill ((pid_t) pidText.getIntValue(), SIGKILL);
+
+            pump (300);
+            CHECK (! victim->isAlive());
+            CHECK (! engine.isPluginAlive (0, 40, 0));
+            CHECK (engine.getPluginLoadError (0, 40, 0).isNotEmpty());
+            std::printf ("     after crash: %s\n", engine.getPluginLoadError (0, 40, 0).toRawUTF8());
+
+            // The engine keeps rendering (silence from the dead slot) instead of hanging.
+            CHECK (render (engine, 5) < 1e-4f);
+
+            // Reload brings a fresh process and sound comes back.
+            engine.reloadPlugin (0, 40, 0);
+            CHECK (engine.isPluginAlive (0, 40, 0));
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+            const float back = render (engine, 20);
+            std::printf ("     rms after reload of crashed plugin: %f\n", back);
+            CHECK (back > 0.01f);
+            engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+            render (engine, 10);
+        }
+        engine.clearProgram (0, 40);
     }
 
     // --- optional: write a demo setup for eyeballing the UI ----------------------------------
@@ -486,14 +539,9 @@ int main()
                 engine.selectProgram (0, 20);
                 CHECK (engine.addSlot (0, 20, desc, err));
                 if (err.isNotEmpty()) std::printf ("     addSlot error: %s\n", err.toRawUTF8());
-                if (auto* x = engine.getSlotInstance (0, 20, 0))
+                if (auto* x = engine.getPlugin (0, 20, 0); x != nullptr && x->isAlive())
                 {
-                    int busChannels = 0;
-                    for (int b = 0; b < x->getBusCount (false); ++b)
-                        busChannels += x->getBus (false, b)->getNumberOfChannels();
-                    std::printf ("     output buses=%d  total out channels=%d (enabled %d)  main=%d\n",
-                                 x->getBusCount (false), busChannels, x->getTotalNumOutputChannels(), x->getMainBusNumOutputChannels());
-                    CHECK (x->getTotalNumOutputChannels() == busChannels);   // every bus active
+                    std::printf ("     loaded in its own process: %s, %d parameters\n", x->getName().toRawUTF8(), (int) x->getParameters().size());
                     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
                     const float r = render (engine, 100);                      // ~1.2 s; would segfault before the fix
                     std::printf ("     rms with extra VST3 (may be 0 if no preset loaded): %f\n", r);

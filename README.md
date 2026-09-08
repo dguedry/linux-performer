@@ -71,8 +71,32 @@ if that file is newer than the setup you open, the status bar says so.
 
 **ARA-only plugins** (e.g. "ACE Bridge ARA") need an ARA host such as Reaper.
 Outside one their editor is empty, and bridged through yabridge the plugin can
-stop answering, which freezes the host when its window closes. Performer warns
-when such a plugin is added or opened; use the plugin's non-ARA version instead.
+stop answering. Since each plugin has its own process this only stalls that
+plugin; Performer warns when such a plugin is added or opened anyway. Use the
+plugin's non-ARA version instead.
+
+## Process model
+
+Every plugin runs in its own `performer-plugin-host` process. Performer talks to
+each one over a shared-memory block (audio, MIDI and parameter changes, one
+block at a time, with two semaphores) plus a socket for everything that is not
+real-time: loading, state, parameter lists, editor windows and notifications.
+
+- A plugin that crashes takes only its own process down. The slot goes silent,
+  the UI marks it red, and its **Reload** button starts a fresh process with
+  the saved state.
+- A plugin that hangs (a stuck editor, a bridge waiting on Wine) can't freeze
+  Performer: requests to it time out, and the audio thread waits for each
+  process only until 85 % of the block period has passed. Late blocks are
+  counted in the status bar as "late N".
+- Plugin editors are windows of the host process, so they survive independently
+  of Performer's UI. Instruments of one program render in parallel, one process
+  per core; effect chains run in order.
+- Plugin scanning also happens in helper processes (`performer-plugin-host --scan`),
+  so a crashing plugin can't kill the scan.
+
+The helper is looked for next to the `Performer` executable, then in the build
+tree, then via `$PERFORMER_PLUGIN_HOST`.
 
 ## Layout of the code
 
@@ -80,8 +104,10 @@ when such a plugin is added or opened; use the plugin's non-ARA version instead.
 - `Source/PluginHost.*` – plugin formats, known-plugin list, instantiation, mapping templates.
 - `Source/MappingSuggestions.*` – per-plugin mapping templates and name-based CC suggestions.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
+- `Source/RemotePlugin.*` – host-side proxy for one plugin process (spawn, control channel, real-time block exchange).
+- `Source/Ipc/Protocol.*` – shared-memory layout and framing shared by both executables.
+- `Source/PluginHostProcess/PluginHostMain.cpp` – the `performer-plugin-host` executable.
 - `Source/MainComponent.*` – the UI (inputs, programs, slots, mappings panels).
-- `Source/PluginWindow.h` – window hosting a plugin editor.
 - `Source/Main.cpp` – application entry.
 
 ## Tests
