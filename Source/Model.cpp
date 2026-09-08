@@ -28,6 +28,42 @@ namespace
 }
 
 //==============================================================================
+static var effectsToVar (const std::vector<EffectDef>& effects)
+{
+    Array<var> arr;
+    for (auto& e : effects) arr.add (e.toVar());
+    return arr;
+}
+
+static std::vector<EffectDef> effectsFromVar (const var& parent)
+{
+    std::vector<EffectDef> out;
+    if (auto* arr = obj (parent) != nullptr ? obj (parent)->getProperty ("effects").getArray() : nullptr)
+        for (auto& e : *arr) out.push_back (EffectDef::fromVar (e));
+    return out;
+}
+
+var EffectDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    if (auto xml = plugin.createXml())
+        o->setProperty ("plugin", xml->toString (XmlElement::TextFormat().singleLine()));
+    o->setProperty ("state", state.toBase64Encoding());
+    o->setProperty ("bypassed", bypassed);
+    return var (o);
+}
+
+EffectDef EffectDef::fromVar (const var& v)
+{
+    EffectDef e;
+    if (auto xml = parseXML (propStr (v, "plugin")))
+        e.plugin.loadFromXml (*xml);
+    e.state.fromBase64Encoding (propStr (v, "state"));
+    e.bypassed = prop<bool> (v, "bypassed", false);
+    return e;
+}
+
+//==============================================================================
 var SlotDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -40,6 +76,7 @@ var SlotDef::toVar() const
     o->setProperty ("lowKey", lowKey);
     o->setProperty ("highKey", highKey);
     o->setProperty ("outChannel", outChannel);
+    o->setProperty ("effects", effectsToVar (effects));
     return var (o);
 }
 
@@ -55,6 +92,7 @@ SlotDef SlotDef::fromVar (const var& v)
     s.lowKey     = prop<int>   (v, "lowKey", 0);
     s.highKey    = prop<int>   (v, "highKey", 127);
     s.outChannel = prop<int>   (v, "outChannel", 0);
+    s.effects    = effectsFromVar (v);
     return s;
 }
 
@@ -76,6 +114,7 @@ var MappingDef::toVar() const
     o->setProperty ("source", (int) source);
     o->setProperty ("number", number);
     o->setProperty ("slot", slot);
+    o->setProperty ("effect", effect);
     o->setProperty ("paramId", paramId);
     o->setProperty ("paramName", paramName);
     o->setProperty ("min", minValue);
@@ -90,6 +129,7 @@ MappingDef MappingDef::fromVar (const var& v)
     m.source      = (Source) prop<int> (v, "source", 0);
     m.number      = prop<int>   (v, "number", 1);
     m.slot        = prop<int>   (v, "slot", 0);
+    m.effect      = prop<int>   (v, "effect", -1);
     m.paramId     = propStr (v, "paramId");
     m.paramName   = propStr (v, "paramName");
     m.minValue    = prop<float> (v, "min", 0.0f);
@@ -107,6 +147,7 @@ var ProgramDef::toVar() const
     Array<var> slotArr;
     for (auto& s : slots) slotArr.add (s.toVar());
     o->setProperty ("slots", slotArr);
+    o->setProperty ("effects", effectsToVar (effects));
 
     Array<var> mapArr;
     for (auto& m : mappings) mapArr.add (m.toVar());
@@ -120,6 +161,7 @@ ProgramDef ProgramDef::fromVar (const var& v)
     p.name = propStr (v, "name");
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("slots").getArray() : nullptr)
         for (auto& s : *arr) p.slots.push_back (SlotDef::fromVar (s));
+    p.effects = effectsFromVar (v);
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("mappings").getArray() : nullptr)
         for (auto& m : *arr) p.mappings.push_back (MappingDef::fromVar (m));
     return p;

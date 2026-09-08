@@ -19,6 +19,12 @@ namespace perf
     All public methods must be called from the message thread. Audio and MIDI
     callbacks run on their own threads and touch only the runtime structures,
     guarded by a single lock that is held for the duration of each audio block.
+
+    Signal flow per program:
+        for each slot:   MIDI -> instrument -> [effect chain] -> * gain  --+
+                                                                            +-> sum -> [program effect chain] -> out
+    Plugins are addressed by (slot, effect): slot >= 0 selects an instrument slot,
+    slot == -1 the program-level chain; effect == -1 means the instrument itself.
 */
 class Engine : private juce::AudioIODeviceCallback,
                private juce::MidiInputCallback,
@@ -34,12 +40,12 @@ public:
         virtual void setupChanged() {}
         /** The active program of an input changed (via MIDI or UI). */
         virtual void programChanged (int inputIndex, int program) { juce::ignoreUnused (inputIndex, program); }
-        /** Slots or mappings of a program were edited, or its load state changed. */
+        /** Slots, effects or mappings of a program were edited, or its load state changed. */
         virtual void programContentChanged (int inputIndex, int program) { juce::ignoreUnused (inputIndex, program); }
         /** A MIDI controller arrived while learn mode was armed. */
         virtual void learnReceived (int inputIndex, MappingDef::Source source, int number) { juce::ignoreUnused (inputIndex, source, number); }
-        /** The user touched a parameter in a plugin GUI. */
-        virtual void parameterTouched (int inputIndex, int program, int slot, int paramIndex) { juce::ignoreUnused (inputIndex, program, slot, paramIndex); }
+        /** The user touched a parameter in a plugin GUI (effect == -1 for an instrument). */
+        virtual void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) { juce::ignoreUnused (inputIndex, program, slot, effect, paramIndex); }
         /** Called synchronously before a plugin instance is destroyed (close its editor!). */
         virtual void instanceAboutToBeDeleted (juce::AudioPluginInstance*) {}
         virtual void statusMessage (const juce::String&) {}
@@ -82,7 +88,7 @@ public:
     void clearProgram (int inputIndex, int program);
 
     //==============================================================================
-    // Slots
+    // Slots (instruments)
     bool addSlot (int inputIndex, int program, const juce::PluginDescription&, juce::String& error);
     void removeSlot (int inputIndex, int program, int slot);
     void setSlotEnabled   (int inputIndex, int program, int slot, bool);
@@ -90,9 +96,21 @@ public:
     void setSlotTranspose (int inputIndex, int program, int slot, int);
     void setSlotKeyRange  (int inputIndex, int program, int slot, int low, int high);
     void setSlotOutChannel(int inputIndex, int program, int slot, int);
-    /** May return nullptr if the program isn't loaded or the plugin failed to load. */
-    juce::AudioPluginInstance* getSlotInstance (int inputIndex, int program, int slot) const;
-    juce::String getSlotLoadError (int inputIndex, int program, int slot) const;
+
+    //==============================================================================
+    // Effects. slot == -1 addresses the program-level chain.
+    bool addEffect (int inputIndex, int program, int slot, const juce::PluginDescription&, juce::String& error);
+    void removeEffect (int inputIndex, int program, int slot, int effect);
+    /** Moves an effect within its chain. */
+    void moveEffect (int inputIndex, int program, int slot, int from, int to);
+    void setEffectBypassed (int inputIndex, int program, int slot, int effect, bool);
+
+    /** Any plugin in a program: effect == -1 is the instrument of `slot`; slot == -1 the
+        program chain. Returns nullptr if the program isn't loaded or the plugin failed. */
+    juce::AudioPluginInstance* getPluginInstance (int inputIndex, int program, int slot, int effect = -1) const;
+    juce::String getPluginLoadError (int inputIndex, int program, int slot, int effect = -1) const;
+    juce::AudioPluginInstance* getSlotInstance (int inputIndex, int program, int slot) const { return getPluginInstance (inputIndex, program, slot, -1); }
+    juce::String getSlotLoadError (int inputIndex, int program, int slot) const              { return getPluginLoadError (inputIndex, program, slot, -1); }
 
     //==============================================================================
     // Mappings
@@ -105,7 +123,7 @@ public:
     void setLearnArmed (bool);
     bool isLearnArmed() const                       { return learnArmed.load(); }
 
-    struct TouchedParam { int inputIndex = -1, program = -1, slot = -1, paramIndex = -1; bool valid() const { return paramIndex >= 0; } };
+    struct TouchedParam { int inputIndex = -1, program = -1, slot = -1, effect = -1, paramIndex = -1; bool valid() const { return paramIndex >= 0; } };
     TouchedParam getLastTouchedParam() const        { return lastTouched; }
 
     static juce::String getParameterId (const juce::AudioProcessorParameter&);
@@ -131,7 +149,9 @@ public:
 
 private:
     //==============================================================================
+    struct PluginNode;
     struct SlotRuntime;
+    struct EffectRuntime;
     struct MappingRuntime;
     struct ProgramRuntime;
     struct InputRuntime;
@@ -139,7 +159,7 @@ private:
     struct Event
     {
         enum Type { programChange, learn, touched };
-        Type type; int input = 0, a = 0, b = 0, c = 0;
+        Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
     // AudioIODeviceCallback
@@ -165,23 +185,33 @@ private:
     ProgramRuntime* ensureProgramLoaded (int inputIndex, int program);
     std::unique_ptr<ProgramRuntime> buildProgram (int inputIndex, int program);
     std::unique_ptr<SlotRuntime> buildSlot (int inputIndex, int program, int slotIndex, const SlotDef&);
+    std::unique_ptr<EffectRuntime> buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef&);
+    void loadPluginInto (PluginNode&, const juce::PluginDescription&, const juce::MemoryBlock& state);
     void unloadProgram (InputRuntime&, int program);
-    void destroySlot (std::unique_ptr<SlotRuntime>);
+    void destroyProgramPlugins (ProgramRuntime&);
+    void destroyNode (PluginNode*);
     void captureProgramState (int inputIndex, ProgramRuntime&);
     void resolveMappings (ProgramRuntime&, const ProgramDef&);
     void prepareInstance (juce::AudioPluginInstance&);
     void openMidiDevices();
     void housekeeping();
+    std::vector<std::unique_ptr<EffectRuntime>>* runtimeChainFor (ProgramRuntime&, int slot) const;
+    std::vector<EffectDef>* defChainFor (ProgramDef&, int slot) const;
+    void renumberChain (std::vector<std::unique_ptr<EffectRuntime>>&);
 
     // audio thread
     void processInput (InputRuntime&, float* const* out, int numOut, int numSamples, bool panic);
     void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, float* const* out, int numOut, int numSamples, bool panic);
+    void renderNode (PluginNode&, juce::AudioBuffer<float>& stereo, int numSamples, bool feedStereoIn);
+    void runChain (std::vector<std::unique_ptr<EffectRuntime>>&, const juce::MidiBuffer& midi, juce::AudioBuffer<float>& stereo, int numSamples);
 
     bool validInput (int i) const     { return i >= 0 && i < (int) setup.inputs.size(); }
     bool validProgram (int p) const   { return p >= 0 && p < InputDef::numPrograms; }
     ProgramRuntime* getLoaded (int inputIndex, int program) const;
+    PluginNode* getNode (int inputIndex, int program, int slot, int effect) const;
 
-    void noteParameterTouched (int inputIndex, int program, int slot, int paramIndex);
+    void noteParameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex);
+    void notifyContent (int inputIndex, int program);
 
     //==============================================================================
     PluginHost& host;
@@ -205,7 +235,7 @@ private:
 
     juce::ListenerList<Listener> listeners;
 
-    friend struct SlotRuntime;
+    friend struct PluginNode;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Engine)
 };
 

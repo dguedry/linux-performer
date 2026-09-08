@@ -17,7 +17,8 @@ class MainComponent : public juce::Component,
                       private juce::Timer
 {
 public:
-    MainComponent (Engine&, juce::PropertiesFile& settings);
+    /** @param initialSetup  a setup file to open instead of the last one (may be empty). */
+    MainComponent (Engine&, juce::PropertiesFile& settings, const juce::File& initialSetup = {});
     ~MainComponent() override;
 
     void paint (juce::Graphics&) override;
@@ -29,9 +30,10 @@ public:
     int getSelectedInput() const            { return selectedInput; }
     int getEditedProgram() const;
 
-    void openPluginEditor (int inputIndex, int program, int slot);
+    void openPluginEditor (int inputIndex, int program, int slot, int effect = -1);
     void showStatus (const juce::String&);
     void selectInput (int);
+    void loadSetupFile (const juce::File&);
 
 private:
     // Engine::Listener
@@ -39,7 +41,7 @@ private:
     void programChanged (int inputIndex, int program) override;
     void programContentChanged (int inputIndex, int program) override;
     void learnReceived (int inputIndex, MappingDef::Source, int number) override;
-    void parameterTouched (int inputIndex, int program, int slot, int paramIndex) override;
+    void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) override;
     void instanceAboutToBeDeleted (juce::AudioPluginInstance*) override;
     void statusMessage (const juce::String&) override;
 
@@ -52,7 +54,6 @@ private:
     void newSetup();
     void openSetup();
     void saveSetup (bool forceAskForFile);
-    void loadSetupFile (const juce::File&);
     bool writeSetupFile (const juce::File&);
     void setCurrentFile (const juce::File&);
     juce::File getAutosaveFile() const;

@@ -8,10 +8,54 @@ namespace perf
 //==============================================================================
 // Runtime structures
 //==============================================================================
-struct Engine::SlotRuntime : public AudioProcessorListener
+
+/** A hosted plugin instance: an instrument or an effect. */
+struct Engine::PluginNode : public AudioProcessorListener
 {
-    SlotRuntime (Engine& e, int in, int prog, int slot) : engine (e), inputIndex (in), program (prog), slotIndex (slot) {}
-    ~SlotRuntime() override { if (instance != nullptr) instance->removeListener (this); }
+    PluginNode (Engine& e, int in, int prog, int slot, int effect)
+        : engine (e), inputIndex (in), program (prog), slotIndex (slot), effectIndex (effect) {}
+
+    ~PluginNode() override { if (instance != nullptr) instance->removeListener (this); }
+
+    void ensureScratch (int numSamples)
+    {
+        if (instance == nullptr) return;
+        const int ch = jmax (2, instance->getTotalNumInputChannels(), instance->getTotalNumOutputChannels());
+        if (scratch.getNumChannels() != ch || scratch.getNumSamples() < numSamples)
+            scratch.setSize (ch, numSamples, false, false, true);
+        midi.ensureSize (2048);
+    }
+
+    // AudioProcessorListener -- used for "last touched parameter"
+    void audioProcessorParameterChanged (AudioProcessor*, int paramIndex, float) override
+    {
+        if (! engine.suppressTouch.load())
+            engine.noteParameterTouched (inputIndex, program, slotIndex.load(), effectIndex.load(), paramIndex);
+    }
+    void audioProcessorChanged (AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorParameterChangeGestureBegin (AudioProcessor*, int paramIndex) override
+    {
+        engine.noteParameterTouched (inputIndex, program, slotIndex.load(), effectIndex.load(), paramIndex);
+    }
+
+    Engine& engine;
+    int inputIndex, program;
+    std::atomic<int> slotIndex, effectIndex;
+    std::unique_ptr<AudioPluginInstance> instance;
+    String loadError;
+    AudioBuffer<float> scratch;    // full plugin channel count
+    MidiBuffer midi;
+};
+
+struct Engine::EffectRuntime : public PluginNode
+{
+    using PluginNode::PluginNode;
+    std::atomic<bool> bypassed { false };
+};
+
+struct Engine::SlotRuntime : public PluginNode
+{
+    SlotRuntime (Engine& e, int in, int prog, int slot) : PluginNode (e, in, prog, slot, -1) {}
 
     void applyDef (const SlotDef& d)
     {
@@ -23,36 +67,11 @@ struct Engine::SlotRuntime : public AudioProcessorListener
         outChannel.store (d.outChannel);
     }
 
-    void ensureScratch (int numSamples)
-    {
-        if (instance == nullptr) return;
-        const int ch = jmax (1, instance->getTotalNumInputChannels(), instance->getTotalNumOutputChannels());
-        if (scratch.getNumChannels() != ch || scratch.getNumSamples() < numSamples)
-            scratch.setSize (ch, numSamples, false, false, true);
-    }
-
-    // AudioProcessorListener -- used for "last touched parameter"
-    void audioProcessorParameterChanged (AudioProcessor*, int paramIndex, float) override
-    {
-        if (! engine.suppressTouch.load())
-            engine.noteParameterTouched (inputIndex, program, slotIndex, paramIndex);
-    }
-    void audioProcessorChanged (AudioProcessor*, const ChangeDetails&) override {}
-    void audioProcessorParameterChangeGestureBegin (AudioProcessor*, int paramIndex) override
-    {
-        engine.noteParameterTouched (inputIndex, program, slotIndex, paramIndex);
-    }
-
-    Engine& engine;
-    int inputIndex, program;
-    std::atomic<int> slotIndex;
-    std::unique_ptr<AudioPluginInstance> instance;
-    String loadError;
     std::atomic<bool> enabled { true };
     std::atomic<float> gain { 1.0f };
     std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, outChannel { 0 };
-    AudioBuffer<float> scratch;
-    MidiBuffer midi;
+    std::vector<std::unique_ptr<EffectRuntime>> effects;
+    AudioBuffer<float> stereo;     // the slot's signal as it travels down the chain
 };
 
 struct Engine::MappingRuntime
@@ -65,7 +84,10 @@ struct Engine::ProgramRuntime
 {
     int program = 0;
     std::vector<std::unique_ptr<SlotRuntime>> slots;
+    std::vector<std::unique_ptr<EffectRuntime>> effects;   // program-level chain
     std::vector<MappingRuntime> mappings;
+    AudioBuffer<float> mix;        // summed slots, before the program chain
+    MidiBuffer programMidi;        // MIDI seen by the program chain
     int releaseSamplesLeft = 0;
     bool needsNotesOff = false;
 };
@@ -124,6 +146,11 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
     else
         settings.removeValue ("audioDeviceState");
     settings.saveIfNeeded();
+}
+
+void Engine::notifyContent (int inputIndex, int program)
+{
+    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
 }
 
 //==============================================================================
@@ -188,9 +215,7 @@ void Engine::teardownRuntimes()
         {
             if (i < (int) setup.inputs.size())
                 captureProgramState (i, *rt);
-            for (auto& s : rt->slots)
-                destroySlot (std::move (s));
-            rt->slots.clear();
+            destroyProgramPlugins (*rt);
         }
     }
 }
@@ -229,16 +254,21 @@ void Engine::removeInput (int inputIndex)
         const ScopedLock sl (lock);
         in = std::move (runtimes[(size_t) inputIndex]);
         runtimes.erase (runtimes.begin() + inputIndex);
-        // Slot runtimes report their input index for "touched" events; fix the survivors.
+        // Nodes report their input index for "touched" events; fix the survivors.
         for (int i = inputIndex; i < (int) runtimes.size(); ++i)
             for (auto& [p, rt] : runtimes[(size_t) i]->loaded)
+            {
                 for (auto& s : rt->slots)
+                {
                     s->inputIndex = i;
+                    for (auto& e : s->effects) e->inputIndex = i;
+                }
+                for (auto& e : rt->effects) e->inputIndex = i;
+            }
     }
 
     for (auto& [p, rt] : in->loaded)
-        for (auto& s : rt->slots)
-            destroySlot (std::move (s));
+        destroyProgramPlugins (*rt);
 
     setup.inputs.erase (setup.inputs.begin() + inputIndex);
     openMidiDevices();
@@ -380,7 +410,7 @@ void Engine::copyProgram (int inputIndex, int from, int to)
         if (in.currentProgram == to)
             runtimes[(size_t) inputIndex]->active = prog;
     }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, to); });
+    notifyContent (inputIndex, to);
 }
 
 void Engine::clearProgram (int inputIndex, int program)
@@ -398,7 +428,7 @@ void Engine::clearProgram (int inputIndex, int program)
         const ScopedLock sl (lock);
         in.active = prog;
     }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
 }
 
 Engine::ProgramRuntime* Engine::ensureProgramLoaded (int inputIndex, int program)
@@ -412,7 +442,7 @@ Engine::ProgramRuntime* Engine::ensureProgramLoaded (int inputIndex, int program
         const ScopedLock sl (lock);
         runtimes[(size_t) inputIndex]->loaded[program] = std::move (built);
     }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
     return raw;
 }
 
@@ -420,10 +450,14 @@ std::unique_ptr<Engine::ProgramRuntime> Engine::buildProgram (int inputIndex, in
 {
     auto rt = std::make_unique<ProgramRuntime>();
     rt->program = program;
+    rt->mix.setSize (2, blockSize);
+    rt->programMidi.ensureSize (2048);
 
     const auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
     for (int s = 0; s < (int) def.slots.size(); ++s)
         rt->slots.push_back (buildSlot (inputIndex, program, s, def.slots[(size_t) s]));
+    for (int e = 0; e < (int) def.effects.size(); ++e)
+        rt->effects.push_back (buildEffect (inputIndex, program, -1, e, def.effects[(size_t) e]));
 
     resolveMappings (*rt, def);
     return rt;
@@ -433,35 +467,50 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
 {
     auto slot = std::make_unique<SlotRuntime> (*this, inputIndex, program, slotIndex);
     slot->applyDef (def);
+    slot->stereo.setSize (2, blockSize);
+    loadPluginInto (*slot, def.plugin, def.state);
+    for (int e = 0; e < (int) def.effects.size(); ++e)
+        slot->effects.push_back (buildEffect (inputIndex, program, slotIndex, e, def.effects[(size_t) e]));
+    return slot;
+}
 
+std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef& def)
+{
+    auto fx = std::make_unique<EffectRuntime> (*this, inputIndex, program, slotIndex, effectIndex);
+    fx->bypassed.store (def.bypassed);
+    loadPluginInto (*fx, def.plugin, def.state);
+    return fx;
+}
+
+void Engine::loadPluginInto (PluginNode& node, const PluginDescription& desc, const MemoryBlock& state)
+{
     String error;
-    auto instance = host.createInstance (def.plugin, sampleRate, blockSize, error);
+    auto instance = host.createInstance (desc, sampleRate, blockSize, error);
 
     if (instance == nullptr)
     {
-        slot->loadError = error;
-        listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load " + def.plugin.name + ": " + error); });
-        return slot;
+        node.loadError = error;
+        listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load " + desc.name + ": " + error); });
+        return;
     }
 
     // Activate every bus and give the plugin real buffers for all of them. JUCE hands
     // inactive buses null channel pointers, and some plugins (Kontakt via yabridge, for
-    // one) write into those anyway and crash the host. Only the main bus gets mixed.
+    // one) write into those anyway and crash the host. Only the main bus is used.
     instance->enableAllBuses();
 
-    if (def.state.getSize() > 0)
+    if (state.getSize() > 0)
     {
         // Restoring state fires parameter callbacks; don't let them count as "touched".
         suppressTouch.store (true);
-        instance->setStateInformation (def.state.getData(), (int) def.state.getSize());
+        instance->setStateInformation (state.getData(), (int) state.getSize());
         suppressTouch.store (false);
     }
 
     prepareInstance (*instance);
-    instance->addListener (slot.get());
-    slot->instance = std::move (instance);
-    slot->ensureScratch (blockSize);
-    return slot;
+    instance->addListener (&node);
+    node.instance = std::move (instance);
+    node.ensureScratch (blockSize);
 }
 
 void Engine::prepareInstance (AudioPluginInstance& inst)
@@ -489,32 +538,56 @@ void Engine::unloadProgram (InputRuntime& in, int program)
         if (runtimes[(size_t) i].get() == &in)
             captureProgramState (i, *rt);
 
-    for (auto& s : rt->slots)
-        destroySlot (std::move (s));
+    destroyProgramPlugins (*rt);
 }
 
-void Engine::destroySlot (std::unique_ptr<SlotRuntime> slot)
+void Engine::destroyProgramPlugins (ProgramRuntime& rt)
 {
-    if (slot == nullptr || slot->instance == nullptr) return;
-    auto* inst = slot->instance.get();
+    for (auto& s : rt.slots)
+    {
+        for (auto& e : s->effects) destroyNode (e.get());
+        destroyNode (s.get());
+    }
+    for (auto& e : rt.effects) destroyNode (e.get());
+    rt.slots.clear();
+    rt.effects.clear();
+}
+
+void Engine::destroyNode (PluginNode* node)
+{
+    if (node == nullptr || node->instance == nullptr) return;
+    auto* inst = node->instance.get();
     listeners.call ([inst] (Listener& l) { l.instanceAboutToBeDeleted (inst); });
-    inst->removeListener (slot.get());
+    inst->removeListener (node);
     inst->releaseResources();
-    slot->instance.reset();
+    node->instance.reset();
 }
 
 void Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
 {
     if (! validInput (inputIndex)) return;
     auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) rt.program];
-    for (size_t s = 0; s < rt.slots.size() && s < def.slots.size(); ++s)
-        if (auto* inst = rt.slots[s]->instance.get())
+
+    auto capture = [] (PluginNode& node, MemoryBlock& dest)
+    {
+        if (auto* inst = node.instance.get())
         {
             MemoryBlock mb;
             inst->getStateInformation (mb);
-            if (mb.getSize() > 0)
-                def.slots[s].state = std::move (mb);
+            if (mb.getSize() > 0) dest = std::move (mb);
         }
+    };
+
+    for (size_t s = 0; s < rt.slots.size() && s < def.slots.size(); ++s)
+    {
+        capture (*rt.slots[s], def.slots[s].state);
+        auto& fxRt = rt.slots[s]->effects;
+        auto& fxDef = def.slots[s].effects;
+        for (size_t e = 0; e < fxRt.size() && e < fxDef.size(); ++e)
+            capture (*fxRt[e], fxDef[e].state);
+    }
+    for (size_t e = 0; e < rt.effects.size() && e < def.effects.size(); ++e)
+        capture (*rt.effects[e], def.effects[e].state);
 }
 
 //==============================================================================
@@ -530,21 +603,17 @@ bool Engine::addSlot (int inputIndex, int program, const PluginDescription& desc
     def.slots.push_back (sd);
     const int slotIndex = (int) def.slots.size() - 1;
 
+    bool ok = true;
     if (auto* rt = getLoaded (inputIndex, program))
     {
         auto slot = buildSlot (inputIndex, program, slotIndex, sd);
-        const bool ok = slot->instance != nullptr;
+        ok = slot->instance != nullptr;
         error = slot->loadError;
-        {
-            const ScopedLock sl (lock);
-            rt->slots.push_back (std::move (slot));
-        }
-        listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
-        return ok;
+        const ScopedLock sl (lock);
+        rt->slots.push_back (std::move (slot));
     }
-
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
-    return true;
+    notifyContent (inputIndex, program);
+    return ok;
 }
 
 void Engine::removeSlot (int inputIndex, int program, int slotIndex)
@@ -571,13 +640,20 @@ void Engine::removeSlot (int inputIndex, int program, int slotIndex)
                 removed = std::move (rt->slots[(size_t) slotIndex]);
                 rt->slots.erase (rt->slots.begin() + slotIndex);
                 for (int s = slotIndex; s < (int) rt->slots.size(); ++s)
+                {
                     rt->slots[(size_t) s]->slotIndex.store (s);
+                    for (auto& e : rt->slots[(size_t) s]->effects) e->slotIndex.store (s);
+                }
             }
             resolveMappings (*rt, def);
         }
-        destroySlot (std::move (removed));
+        if (removed != nullptr)
+        {
+            for (auto& e : removed->effects) destroyNode (e.get());
+            destroyNode (removed.get());
+        }
     }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
 }
 
 #define PERF_SLOT_SETTER(name, field, expr)                                                    \
@@ -614,20 +690,163 @@ void Engine::setSlotKeyRange (int inputIndex, int program, int slotIndex, int lo
         }
 }
 
-AudioPluginInstance* Engine::getSlotInstance (int inputIndex, int program, int slot) const
+//==============================================================================
+// Effects
+//==============================================================================
+std::vector<std::unique_ptr<Engine::EffectRuntime>>* Engine::runtimeChainFor (ProgramRuntime& rt, int slot) const
 {
-    if (auto* rt = getLoaded (inputIndex, program))
-        if (slot >= 0 && slot < (int) rt->slots.size())
-            return rt->slots[(size_t) slot]->instance.get();
-    return nullptr;
+    if (slot < 0) return &rt.effects;
+    return slot < (int) rt.slots.size() ? &rt.slots[(size_t) slot]->effects : nullptr;
 }
 
-String Engine::getSlotLoadError (int inputIndex, int program, int slot) const
+std::vector<EffectDef>* Engine::defChainFor (ProgramDef& def, int slot) const
 {
+    if (slot < 0) return &def.effects;
+    return slot < (int) def.slots.size() ? &def.slots[(size_t) slot].effects : nullptr;
+}
+
+void Engine::renumberChain (std::vector<std::unique_ptr<EffectRuntime>>& chain)
+{
+    for (int i = 0; i < (int) chain.size(); ++i)
+        chain[(size_t) i]->effectIndex.store (i);
+}
+
+bool Engine::addEffect (int inputIndex, int program, int slot, const PluginDescription& desc, String& error)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return false;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* chainDef = defChainFor (def, slot);
+    if (chainDef == nullptr) return false;
+
+    EffectDef ed;
+    ed.plugin = desc;
+    chainDef->push_back (ed);
+    const int effectIndex = (int) chainDef->size() - 1;
+
+    bool ok = true;
     if (auto* rt = getLoaded (inputIndex, program))
-        if (slot >= 0 && slot < (int) rt->slots.size())
-            return rt->slots[(size_t) slot]->loadError;
-    return {};
+        if (auto* chain = runtimeChainFor (*rt, slot))
+        {
+            auto fx = buildEffect (inputIndex, program, slot, effectIndex, ed);
+            ok = fx->instance != nullptr;
+            error = fx->loadError;
+            const ScopedLock sl (lock);
+            chain->push_back (std::move (fx));
+        }
+    notifyContent (inputIndex, program);
+    return ok;
+}
+
+void Engine::removeEffect (int inputIndex, int program, int slot, int effect)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* chainDef = defChainFor (def, slot);
+    if (chainDef == nullptr || effect < 0 || effect >= (int) chainDef->size()) return;
+
+    for (auto it = def.mappings.begin(); it != def.mappings.end();)
+    {
+        if (it->slot == slot && it->effect == effect)       it = def.mappings.erase (it);
+        else { if (it->slot == slot && it->effect > effect) --it->effect; ++it; }
+    }
+    chainDef->erase (chainDef->begin() + effect);
+
+    if (auto* rt = getLoaded (inputIndex, program))
+    {
+        std::unique_ptr<EffectRuntime> removed;
+        {
+            const ScopedLock sl (lock);
+            if (auto* chain = runtimeChainFor (*rt, slot))
+                if (effect < (int) chain->size())
+                {
+                    removed = std::move ((*chain)[(size_t) effect]);
+                    chain->erase (chain->begin() + effect);
+                    renumberChain (*chain);
+                }
+            resolveMappings (*rt, def);
+        }
+        destroyNode (removed.get());
+    }
+    notifyContent (inputIndex, program);
+}
+
+void Engine::moveEffect (int inputIndex, int program, int slot, int from, int to)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* chainDef = defChainFor (def, slot);
+    if (chainDef == nullptr) return;
+    const int n = (int) chainDef->size();
+    if (from < 0 || from >= n || to < 0 || to >= n || from == to) return;
+
+    auto moveItem = [] (auto& vec, int a, int b)
+    {
+        auto item = std::move (vec[(size_t) a]);
+        vec.erase (vec.begin() + a);
+        vec.insert (vec.begin() + b, std::move (item));
+    };
+    moveItem (*chainDef, from, to);
+
+    for (auto& m : def.mappings)
+        if (m.slot == slot && m.effect >= 0)
+        {
+            if (m.effect == from)                       m.effect = to;
+            else if (from < to && m.effect > from && m.effect <= to) --m.effect;
+            else if (to < from && m.effect >= to && m.effect < from) ++m.effect;
+        }
+
+    if (auto* rt = getLoaded (inputIndex, program))
+    {
+        const ScopedLock sl (lock);
+        if (auto* chain = runtimeChainFor (*rt, slot))
+            if (from < (int) chain->size() && to < (int) chain->size())
+            {
+                moveItem (*chain, from, to);
+                renumberChain (*chain);
+            }
+        resolveMappings (*rt, def);
+    }
+    notifyContent (inputIndex, program);
+}
+
+void Engine::setEffectBypassed (int inputIndex, int program, int slot, int effect, bool b)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* chainDef = defChainFor (def, slot);
+    if (chainDef == nullptr || effect < 0 || effect >= (int) chainDef->size()) return;
+    (*chainDef)[(size_t) effect].bypassed = b;
+
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (auto* chain = runtimeChainFor (*rt, slot))
+            if (effect < (int) chain->size())
+                (*chain)[(size_t) effect]->bypassed.store (b);
+}
+
+Engine::PluginNode* Engine::getNode (int inputIndex, int program, int slot, int effect) const
+{
+    auto* rt = getLoaded (inputIndex, program);
+    if (rt == nullptr) return nullptr;
+    if (effect < 0)
+    {
+        if (slot < 0 || slot >= (int) rt->slots.size()) return nullptr;
+        return rt->slots[(size_t) slot].get();
+    }
+    auto* chain = runtimeChainFor (*rt, slot);
+    if (chain == nullptr || effect >= (int) chain->size()) return nullptr;
+    return (*chain)[(size_t) effect].get();
+}
+
+AudioPluginInstance* Engine::getPluginInstance (int inputIndex, int program, int slot, int effect) const
+{
+    auto* node = getNode (inputIndex, program, slot, effect);
+    return node != nullptr ? node->instance.get() : nullptr;
+}
+
+String Engine::getPluginLoadError (int inputIndex, int program, int slot, int effect) const
+{
+    auto* node = getNode (inputIndex, program, slot, effect);
+    return node != nullptr ? node->loadError : String();
 }
 
 //==============================================================================
@@ -663,9 +882,21 @@ void Engine::resolveMappings (ProgramRuntime& rt, const ProgramDef& def)
     {
         MappingRuntime mr;
         mr.def = m;
-        if (m.slot >= 0 && m.slot < (int) rt.slots.size())
-            if (auto* inst = rt.slots[(size_t) m.slot]->instance.get())
-                mr.param = findParameter (*inst, m.paramId);
+
+        PluginNode* node = nullptr;
+        if (m.effect < 0)
+        {
+            if (m.slot >= 0 && m.slot < (int) rt.slots.size())
+                node = rt.slots[(size_t) m.slot].get();
+        }
+        else if (auto* chain = runtimeChainFor (rt, m.slot))
+        {
+            if (m.effect < (int) chain->size())
+                node = (*chain)[(size_t) m.effect].get();
+        }
+
+        if (node != nullptr && node->instance != nullptr)
+            mr.param = findParameter (*node->instance, m.paramId);
         resolved.push_back (mr);
     }
     rt.mappings = std::move (resolved);
@@ -677,7 +908,7 @@ void Engine::addMapping (int inputIndex, int program, const MappingDef& m)
     auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
     def.mappings.push_back (m);
     if (auto* rt = getLoaded (inputIndex, program)) { const ScopedLock sl (lock); resolveMappings (*rt, def); }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
 }
 
 void Engine::updateMapping (int inputIndex, int program, int mappingIndex, const MappingDef& m)
@@ -687,7 +918,7 @@ void Engine::updateMapping (int inputIndex, int program, int mappingIndex, const
     if (mappingIndex < 0 || mappingIndex >= (int) def.mappings.size()) return;
     def.mappings[(size_t) mappingIndex] = m;
     if (auto* rt = getLoaded (inputIndex, program)) { const ScopedLock sl (lock); resolveMappings (*rt, def); }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
 }
 
 void Engine::removeMapping (int inputIndex, int program, int mappingIndex)
@@ -697,16 +928,15 @@ void Engine::removeMapping (int inputIndex, int program, int mappingIndex)
     if (mappingIndex < 0 || mappingIndex >= (int) def.mappings.size()) return;
     def.mappings.erase (def.mappings.begin() + mappingIndex);
     if (auto* rt = getLoaded (inputIndex, program)) { const ScopedLock sl (lock); resolveMappings (*rt, def); }
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    notifyContent (inputIndex, program);
 }
 
 void Engine::setLearnArmed (bool b) { learnArmed.store (b); }
 
-void Engine::noteParameterTouched (int inputIndex, int program, int slot, int paramIndex)
+void Engine::noteParameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex)
 {
     // Can arrive on any thread; dedupe and hand off to the message thread.
-    Event e { Event::touched, inputIndex, program, slot, paramIndex };
-    postEvent (e);
+    postEvent ({ Event::touched, inputIndex, program, slot, effect, paramIndex });
 }
 
 void Engine::panic() { panicRequested.store (true); }
@@ -722,7 +952,7 @@ void Engine::postEvent (const Event& e)
         {
             // Coalesce bursts of the same parameter moving.
             for (auto& p : pendingEvents)
-                if (p.type == Event::touched && p.input == e.input && p.a == e.a && p.b == e.b && p.c == e.c)
+                if (p.type == Event::touched && p.input == e.input && p.a == e.a && p.b == e.b && p.c == e.c && p.d == e.d)
                     return;
         }
         pendingEvents.push_back (e);
@@ -751,8 +981,8 @@ void Engine::handleAsyncUpdate()
                 break;
 
             case Event::touched:
-                lastTouched = { e.input, e.a, e.b, e.c };
-                listeners.call ([&] (Listener& l) { l.parameterTouched (e.input, e.a, e.b, e.c); });
+                lastTouched = { e.input, e.a, e.b, e.c, e.d };
+                listeners.call ([&] (Listener& l) { l.parameterTouched (e.input, e.a, e.b, e.c, e.d); });
                 break;
         }
     }
@@ -792,7 +1022,7 @@ void Engine::housekeeping()
             for (int p : idle)
             {
                 unloadProgram (in, p);
-                listeners.call ([=] (Listener& l) { l.programContentChanged (i, p); });
+                notifyContent (i, p);
             }
         }
     }
@@ -833,15 +1063,15 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
     if (m.isProgramChange())
     {
         if (in.respondToProgramChange.load())
-            postEvent ({ Event::programChange, i, m.getProgramChangeNumber(), 0, 0 });
+            postEvent ({ Event::programChange, i, m.getProgramChangeNumber(), 0, 0, 0 });
         return;
     }
 
     if (learnArmed.load())
     {
-        if (m.isController())            { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::CC, m.getControllerNumber(), 0 }); }
-        else if (m.isPitchWheel())       { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::PitchBend, 0, 0 }); }
-        else if (m.isChannelPressure())  { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::ChannelPressure, 0, 0 }); }
+        if (m.isController())            { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::CC, m.getControllerNumber(), 0, 0 }); }
+        else if (m.isPitchWheel())       { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::PitchBend, 0, 0, 0 }); }
+        else if (m.isChannelPressure())  { learnArmed = false; postEvent ({ Event::learn, i, (int) MappingDef::Source::ChannelPressure, 0, 0, 0 }); }
     }
 
     in.collector.addMessageToQueue (m);
@@ -865,13 +1095,23 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
     {
         in->collector.reset (sampleRate);
         for (auto& [p, rt] : in->loaded)
+        {
+            rt->mix.setSize (2, blockSize, false, false, true);
+            auto prep = [this] (PluginNode& node)
+            {
+                if (node.instance == nullptr) return;
+                node.instance->releaseResources();
+                prepareInstance (*node.instance);
+                node.ensureScratch (blockSize);
+            };
             for (auto& s : rt->slots)
-                if (s->instance != nullptr)
-                {
-                    s->instance->releaseResources();
-                    prepareInstance (*s->instance);
-                    s->ensureScratch (blockSize);
-                }
+            {
+                s->stereo.setSize (2, blockSize, false, false, true);
+                prep (*s);
+                for (auto& e : s->effects) prep (*e);
+            }
+            for (auto& e : rt->effects) prep (*e);
+        }
     }
 }
 
@@ -935,22 +1175,70 @@ static inline bool mappingMatches (const MappingDef& d, const MidiMessage& m)
     return false;
 }
 
+static void addNotesOff (MidiBuffer& midi, bool allSoundOff)
+{
+    for (int ch = 1; ch <= 16; ++ch)
+    {
+        midi.addEvent (MidiMessage::controllerEvent (ch, 64, 0), 0);   // sustain off
+        midi.addEvent (MidiMessage::allNotesOff (ch), 0);
+        if (allSoundOff)
+            midi.addEvent (MidiMessage::allSoundOff (ch), 0);
+    }
+}
+
+/** Runs a plugin on the working stereo signal. Instruments (feedStereoIn == false) render
+    from silence; effects receive the stereo signal on their first two inputs. The main
+    output bus (mono duplicated) becomes the new stereo signal. */
+void Engine::renderNode (PluginNode& node, AudioBuffer<float>& stereo, int numSamples, bool feedStereoIn)
+{
+    auto* inst = node.instance.get();
+    node.ensureScratch (numSamples);
+    AudioBuffer<float> view (node.scratch.getArrayOfWritePointers(), node.scratch.getNumChannels(), numSamples);
+    view.clear();
+
+    if (feedStereoIn)
+    {
+        const int nIn = inst->getMainBusNumInputChannels();
+        for (int c = 0; c < jmin (nIn, 2); ++c)
+            view.copyFrom (c, 0, stereo, c, 0, numSamples);
+        if (nIn == 1)   // mono-in effect: feed the average of both sides
+        {
+            view.addFrom (0, 0, stereo, 1, 0, numSamples);
+            view.applyGain (0, 0, numSamples, 0.5f);
+        }
+    }
+
+    inst->processBlock (view, node.midi);
+
+    const int nOut = inst->getMainBusNumOutputChannels();
+    if (nOut <= 0) { stereo.clear(); return; }
+    for (int c = 0; c < 2; ++c)
+        stereo.copyFrom (c, 0, view, (nOut == 1) ? 0 : jmin (c, nOut - 1), 0, numSamples);
+}
+
+void Engine::runChain (std::vector<std::unique_ptr<EffectRuntime>>& chain, const MidiBuffer& midi, AudioBuffer<float>& stereo, int numSamples)
+{
+    for (auto& fx : chain)
+    {
+        if (fx->instance == nullptr || fx->instance->isSuspended() || fx->bypassed.load()) continue;
+        fx->midi.clear();
+        fx->midi.addEvents (midi, 0, numSamples, 0);
+        renderNode (*fx, stereo, numSamples, true);
+    }
+}
+
 void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* const* out, int numOut, int numSamples, bool panicNow)
 {
     for (auto& slot : prog.slots)
         slot->midi.clear();
+    prog.programMidi.clear();
 
     if (prog.needsNotesOff || panicNow)
     {
         prog.needsNotesOff = false;
         for (auto& slot : prog.slots)
-            for (int ch = 1; ch <= 16; ++ch)
-            {
-                slot->midi.addEvent (MidiMessage::controllerEvent (ch, 64, 0), 0);   // sustain off
-                slot->midi.addEvent (MidiMessage::allNotesOff (ch), 0);
-                if (panicNow)
-                    slot->midi.addEvent (MidiMessage::allSoundOff (ch), 0);
-            }
+            addNotesOff (slot->midi, panicNow);
+        addNotesOff (prog.programMidi, panicNow);
     }
 
     // Route incoming MIDI: mappings first, then per-slot filtering.
@@ -972,6 +1260,8 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
         }
         if (consumed) continue;
 
+        prog.programMidi.addEvent (m, pos);
+
         for (auto& slot : prog.slots)
         {
             if (slot->instance == nullptr || ! slot->enabled.load()) continue;
@@ -991,29 +1281,33 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
         }
     }
 
-    // Render each slot and mix to the main outputs.
+    // Render each slot through its chain and sum into the program mix.
+    if (prog.mix.getNumSamples() < numSamples) prog.mix.setSize (2, numSamples, false, false, true);
+    AudioBuffer<float> mix (prog.mix.getArrayOfWritePointers(), 2, numSamples);
+    mix.clear();
+
     for (auto& slot : prog.slots)
     {
         auto* inst = slot->instance.get();
         if (inst == nullptr || inst->isSuspended()) continue;
 
-        slot->ensureScratch (numSamples);
-        AudioBuffer<float> view (slot->scratch.getArrayOfWritePointers(), slot->scratch.getNumChannels(), numSamples);
-        view.clear();
-        inst->processBlock (view, slot->midi);
+        if (slot->stereo.getNumSamples() < numSamples) slot->stereo.setSize (2, numSamples, false, false, true);
+        AudioBuffer<float> stereo (slot->stereo.getArrayOfWritePointers(), 2, numSamples);
 
-        const int n = inst->getMainBusNumOutputChannels();
-        if (n <= 0) continue;
+        renderNode (*slot, stereo, numSamples, false);
+        runChain (slot->effects, slot->midi, stereo, numSamples);
+
         const float g = slot->enabled.load() ? slot->gain.load() : 0.0f;
         if (g <= 0.0f) continue;
-
-        for (int c = 0; c < jmin (numOut, 2); ++c)
-        {
-            if (out[c] == nullptr) continue;
-            const int src = (n == 1) ? 0 : jmin (c, n - 1);
-            FloatVectorOperations::addWithMultiply (out[c], view.getReadPointer (src), g, numSamples);
-        }
+        for (int c = 0; c < 2; ++c)
+            mix.addFrom (c, 0, stereo, c, 0, numSamples, g);
     }
+
+    runChain (prog.effects, prog.programMidi, mix, numSamples);
+
+    for (int c = 0; c < jmin (numOut, 2); ++c)
+        if (out[c] != nullptr)
+            FloatVectorOperations::add (out[c], mix.getReadPointer (c), numSamples);
 }
 
 } // namespace perf

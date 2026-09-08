@@ -8,7 +8,19 @@ namespace perf
 {
 
 //==============================================================================
-/** One plugin inside a program. */
+/** An effect plugin in an insert chain (per slot, or per program). */
+struct EffectDef
+{
+    juce::PluginDescription plugin;
+    juce::MemoryBlock state;
+    bool bypassed = false;
+
+    juce::var toVar() const;
+    static EffectDef fromVar (const juce::var&);
+};
+
+//==============================================================================
+/** One instrument inside a program, with its own insert-effect chain. */
 struct SlotDef
 {
     juce::PluginDescription plugin;   // which plugin
@@ -18,6 +30,7 @@ struct SlotDef
     int transpose = 0;                // semitones
     int lowKey = 0, highKey = 127;    // key zone
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
+    std::vector<EffectDef> effects;   // processed in order after the instrument
 
     juce::var toVar() const;
     static SlotDef fromVar (const juce::var&);
@@ -31,7 +44,8 @@ struct MappingDef
 
     Source source = Source::CC;
     int number = 1;                   // CC number (ignored for other sources)
-    int slot = 0;                     // index into ProgramDef::slots
+    int slot = 0;                     // index into ProgramDef::slots, or -1 for the program chain
+    int effect = -1;                  // -1 = the instrument itself, else index into the effect chain
     juce::String paramId;             // HostedAudioProcessorParameter ID (or index as string)
     juce::String paramName;           // for display only
     float minValue = 0.0f, maxValue = 1.0f;
@@ -48,9 +62,17 @@ struct ProgramDef
 {
     juce::String name;
     std::vector<SlotDef> slots;
+    std::vector<EffectDef> effects;   // program-level chain, applied to the summed slots
     std::vector<MappingDef> mappings;
 
-    bool isEmpty() const { return slots.empty(); }
+    bool isEmpty() const { return slots.empty() && effects.empty(); }
+
+    /** Returns the chain a mapping/effect index refers to, or nullptr. */
+    const std::vector<EffectDef>* chainFor (int slot) const
+    {
+        if (slot < 0) return &effects;
+        return slot < (int) slots.size() ? &slots[(size_t) slot].effects : nullptr;
+    }
 
     juce::var toVar() const;
     static ProgramDef fromVar (const juce::var&);

@@ -327,14 +327,155 @@ private:
 };
 
 //==============================================================================
+//  EffectChainComponent -- an ordered list of insert effects (per slot or per program)
+//==============================================================================
+class EffectChainComponent : public Component
+{
+public:
+    static constexpr int rowHeight = 26;
+
+    EffectChainComponent (Engine& e, MainComponent& o, int slotIndex) : engine (e), owner (o), slot (slotIndex)
+    {
+        addAndMakeVisible (addBtn);
+        addBtn.onClick = [this] { showAddMenu(); };
+        addBtn.setTooltip (slot < 0 ? "Add an effect after the mix of all slots" : "Add an insert effect after this instrument");
+    }
+
+    void setSlot (int s) { slot = s; }
+
+    void rebuild (const std::vector<EffectDef>& effects, int inputIndex, int program)
+    {
+        rows.clear();
+        for (int i = 0; i < (int) effects.size(); ++i)
+        {
+            auto row = std::make_unique<Row> (*this, i);
+            row->update (effects[(size_t) i],
+                         engine.getPluginInstance (inputIndex, program, slot, i) != nullptr,
+                         engine.getPluginLoadError (inputIndex, program, slot, i),
+                         i > 0, i + 1 < (int) effects.size());
+            addAndMakeVisible (row.get());
+            rows.push_back (std::move (row));
+        }
+        resized();
+    }
+
+    int preferredHeight() const { return (int) rows.size() * rowHeight + rowHeight; }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        for (auto& row : rows)
+            row->setBounds (r.removeFromTop (rowHeight));
+        auto last = r.removeFromTop (rowHeight).reduced (0, 2);
+        addBtn.setBounds (last.removeFromRight (110));
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (rows.empty()) return;
+        g.setColour (textDim.withAlpha (0.35f));
+        g.drawVerticalLine (10, 0.0f, (float) rows.size() * rowHeight);
+    }
+
+private:
+    struct Row : public Component
+    {
+        Row (EffectChainComponent& c, int idx) : chain (c), index (idx)
+        {
+            addAndMakeVisible (on);
+            addAndMakeVisible (name);
+            addAndMakeVisible (guiBtn);
+            addAndMakeVisible (upBtn);
+            addAndMakeVisible (downBtn);
+            addAndMakeVisible (removeBtn);
+            name.setFont (FontOptions (13.0f));
+            on.setTooltip ("Effect active (off = bypassed)");
+            upBtn.setTooltip ("Move earlier in the chain");
+            downBtn.setTooltip ("Move later in the chain");
+
+            auto& e = chain.engine;
+            auto& o = chain.owner;
+            on.onClick        = [this, &e, &o] { e.setEffectBypassed (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, ! on.getToggleState()); };
+            guiBtn.onClick    = [this, &o]     { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
+            upBtn.onClick     = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index - 1); };
+            downBtn.onClick   = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index + 1); };
+            removeBtn.onClick = [this, &e, &o] { e.removeEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
+        }
+
+        void update (const EffectDef& def, bool loaded, const String& error, bool canUp, bool canDown)
+        {
+            on.setToggleState (! def.bypassed, dontSendNotification);
+            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
+            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (def.bypassed ? textDim : Colours::white));
+            name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
+            guiBtn.setEnabled (loaded);
+            upBtn.setEnabled (canUp);
+            downBtn.setEnabled (canDown);
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (0, 2);
+            r.removeFromLeft (18);   // indent under the chain line
+            on.setBounds (r.removeFromLeft (24));
+            removeBtn.setBounds (r.removeFromRight (28)); r.removeFromRight (4);
+            downBtn.setBounds (r.removeFromRight (26));
+            upBtn.setBounds (r.removeFromRight (26));     r.removeFromRight (4);
+            guiBtn.setBounds (r.removeFromRight (64));    r.removeFromRight (4);
+            name.setBounds (r);
+        }
+
+        EffectChainComponent& chain;
+        int index;
+        ToggleButton on;
+        Label name;
+        TextButton guiBtn { "Edit GUI" }, upBtn { "^" }, downBtn { "v" }, removeBtn { "X" };
+    };
+
+    void showAddMenu()
+    {
+        Array<PluginDescription> types;
+        for (auto& d : engine.getPluginHost().getKnownPlugins().getTypes())
+            if (! d.isInstrument) types.add (d);
+        if (types.isEmpty())
+        {
+            owner.showStatus ("No effect plugins known yet. Use Plugins... to scan for VST3/LV2 plugins.");
+            return;
+        }
+        PopupMenu menu;
+        KnownPluginList::addToMenu (menu, types, KnownPluginList::sortByManufacturer);
+        menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types] (int result)
+        {
+            const int idx = KnownPluginList::getIndexChosenByMenu (types, result);
+            if (idx < 0) return;
+            String error;
+            if (! engine.addEffect (owner.getSelectedInput(), owner.getEditedProgram(), slot, types[idx], error))
+                owner.showStatus ("Could not load " + types[idx].name + ": " + error);
+            else
+                owner.showStatus ("Added effect " + types[idx].name);
+        });
+    }
+
+    Engine& engine;
+    MainComponent& owner;
+    int slot;
+    TextButton addBtn { "+ Add effect..." };
+    std::vector<std::unique_ptr<Row>> rows;
+
+    friend struct Row;
+};
+
+//==============================================================================
 //  SlotsPanel
 //==============================================================================
 class SlotsPanel : public Component
 {
 public:
+    static constexpr int slotHeaderHeight = 64;
+
     struct SlotRow : public Component
     {
-        SlotRow (SlotsPanel& p, int idx) : panel (p), index (idx)
+        SlotRow (SlotsPanel& p, int idx) : panel (p), index (idx), chain (p.engine, p.owner, idx)
         {
             addAndMakeVisible (enabled);
             addAndMakeVisible (name);
@@ -345,6 +486,7 @@ public:
             addAndMakeVisible (outCh);
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (removeBtn);
+            addAndMakeVisible (chain);
 
             name.setFont (FontOptions (14.0f, Font::bold));
             name.setColour (Label::textColourId, Colours::white);
@@ -353,7 +495,7 @@ public:
             gain.setSliderStyle (Slider::LinearBar);
             gain.setTextValueSuffix (" dB");
             gain.setDoubleClickReturnValue (true, 0.0);
-            gain.setTooltip ("Gain");
+            gain.setTooltip ("Gain (after the slot's effects)");
 
             transpose.setRange (-36, 36, 1);
             transpose.setSliderStyle (Slider::LinearBar);
@@ -385,11 +527,11 @@ public:
             highKey.onValueChange   = [this, &e, &o] { if (highKey.getValue() < lowKey.getValue()) lowKey.setValue (highKey.getValue(), dontSendNotification);
                                                        e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); };
-            guiBtn.onClick    = [this, &o] { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index); };
+            guiBtn.onClick    = [this, &o] { o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
 
-        void update (const SlotDef& def, bool loaded, const String& error)
+        void update (const SlotDef& def, bool loaded, const String& error, int inputIndex, int program)
         {
             enabled.setToggleState (def.enabled, dontSendNotification);
             name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
@@ -401,7 +543,10 @@ public:
             highKey.setValue (def.highKey, dontSendNotification);
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
             guiBtn.setEnabled (loaded);
+            chain.rebuild (def.effects, inputIndex, program);
         }
+
+        int preferredHeight() const { return slotHeaderHeight + chain.preferredHeight() + 4; }
 
         void paint (Graphics& g) override
         {
@@ -427,6 +572,9 @@ public:
             lowKey.setBounds (bottom.removeFromLeft (w * 17 / 100).reduced (2, 0));
             highKey.setBounds (bottom.removeFromLeft (w * 17 / 100).reduced (2, 0));
             outCh.setBounds (bottom.reduced (2, 0));
+
+            r.removeFromTop (6);
+            chain.setBounds (r.withTrimmedLeft (24));
         }
 
         SlotsPanel& panel;
@@ -436,6 +584,33 @@ public:
         Slider gain, transpose, lowKey, highKey;
         ComboBox outCh;
         TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
+        EffectChainComponent chain;
+    };
+
+    /** The program-level chain, shown after the slots. */
+    struct ProgramChainRow : public Component
+    {
+        ProgramChainRow (SlotsPanel& p) : chain (p.engine, p.owner, -1)
+        {
+            addAndMakeVisible (header);
+            addAndMakeVisible (chain);
+            header.setFont (FontOptions (13.0f, Font::bold));
+            header.setColour (Label::textColourId, accent);
+        }
+        int preferredHeight() const { return 26 + chain.preferredHeight() + 6; }
+        void paint (Graphics& g) override
+        {
+            g.setColour (bgRow.darker (0.15f));
+            g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0, 1), 4.0f);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (6, 4);
+            header.setBounds (r.removeFromTop (22));
+            chain.setBounds (r.withTrimmedLeft (24));
+        }
+        Label header { {}, "PROGRAM EFFECTS  (after the mix of all slots)" };
+        EffectChainComponent chain;
     };
 
     SlotsPanel (Engine& e, MainComponent& o) : engine (e), owner (o)
@@ -458,18 +633,22 @@ public:
         const int in = owner.getSelectedInput();
         const int prog = owner.getEditedProgram();
         rows.clear();
+        programChain.reset();
         if (in >= 0 && in < (int) inputs.size())
         {
             const auto& def = inputs[(size_t) in].programs[(size_t) prog];
             for (int s = 0; s < (int) def.slots.size(); ++s)
             {
                 auto row = std::make_unique<SlotRow> (*this, s);
-                row->update (def.slots[(size_t) s], engine.getSlotInstance (in, prog, s) != nullptr, engine.getSlotLoadError (in, prog, s));
+                row->update (def.slots[(size_t) s], engine.getSlotInstance (in, prog, s) != nullptr, engine.getSlotLoadError (in, prog, s), in, prog);
                 container.addAndMakeVisible (row.get());
                 rows.push_back (std::move (row));
             }
+            programChain = std::make_unique<ProgramChainRow> (*this);
+            programChain->chain.rebuild (def.effects, in, prog);
+            container.addAndMakeVisible (programChain.get());
         }
-        emptyLabel.setVisible (rows.empty());
+        emptyLabel.setVisible (rows.empty() && (programChain == nullptr || def_hasNoEffects (in, prog)));
         layoutRows();
     }
 
@@ -477,22 +656,33 @@ public:
     {
         auto r = getLocalBounds().reduced (6);
         auto top = r.removeFromTop (24);
-        addBtn.setBounds (top.removeFromRight (120));
+        addBtn.setBounds (top.removeFromRight (140));
         header.setBounds (top);
         r.removeFromTop (4);
         viewport.setBounds (r);
-        emptyLabel.setBounds (r);
+        emptyLabel.setBounds (r.withTrimmedBottom (r.getHeight() / 3));
         layoutRows();
     }
 
 private:
+    bool def_hasNoEffects (int in, int prog) const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        if (in < 0 || in >= (int) inputs.size()) return true;
+        return inputs[(size_t) in].programs[(size_t) prog].effects.empty();
+    }
+
     void layoutRows()
     {
-        const int rowH = 64;
-        const int w = viewport.getWidth() - (rows.size() * rowH > (size_t) viewport.getHeight() ? viewport.getScrollBarThickness() : 0);
-        container.setSize (jmax (1, w), jmax (1, (int) rows.size() * rowH));
+        int total = 0;
+        for (auto& r : rows) total += r->preferredHeight() + 4;
+        if (programChain != nullptr) total += programChain->preferredHeight() + 4;
+
+        const int w = viewport.getWidth() - (total > viewport.getHeight() ? viewport.getScrollBarThickness() : 0);
+        container.setSize (jmax (1, w), jmax (1, total));
         int y = 0;
-        for (auto& r : rows) { r->setBounds (0, y, w, rowH); y += rowH; }
+        for (auto& r : rows) { r->setBounds (0, y, w, r->preferredHeight()); y += r->preferredHeight() + 4; }
+        if (programChain != nullptr) programChain->setBounds (0, y, w, programChain->preferredHeight());
     }
 
     void showAddMenu()
@@ -520,13 +710,15 @@ private:
     Engine& engine;
     MainComponent& owner;
     Label header { {}, "PLUGINS" };
-    TextButton addBtn { "+ Add plugin..." };
+    TextButton addBtn { "+ Add instrument..." };
     Viewport viewport;
     Component container;
     std::vector<std::unique_ptr<SlotRow>> rows;
-    Label emptyLabel { {}, "No plugins in this program. Click \"Add plugin...\"" };
+    std::unique_ptr<ProgramChainRow> programChain;
+    Label emptyLabel { {}, "No plugins in this program. Click \"Add instrument...\"" };
 
     friend struct SlotRow;
+    friend struct ProgramChainRow;
 };
 
 //==============================================================================
@@ -536,7 +728,9 @@ class MappingsPanel : public Component,
                       private TableListBoxModel
 {
 public:
-    enum Columns { colSource = 1, colSlot, colParam, colMin, colMax, colPass };
+    enum Columns { colSource = 1, colTarget, colParam, colMin, colMax, colPass };
+
+    struct Target { int slot = 0, effect = -1; String label; };
 
     MappingsPanel (Engine& e, MainComponent& o) : engine (e), owner (o)
     {
@@ -549,7 +743,7 @@ public:
         table.setRowHeight (22);
         auto& th = table.getHeader();
         th.addColumn ("Source", colSource, 90);
-        th.addColumn ("Slot", colSlot, 50);
+        th.addColumn ("Target", colTarget, 150);
         th.addColumn ("Parameter", colParam, 220);
         th.addColumn ("Min", colMin, 50);
         th.addColumn ("Max", colMax, 50);
@@ -557,10 +751,10 @@ public:
         th.setStretchToFitActive (true);
 
         // Editor row 1: target
-        addAndMakeVisible (slotBox);
+        addAndMakeVisible (targetBox);
         addAndMakeVisible (paramBox);
         addAndMakeVisible (touchedBtn);
-        slotBox.onChange = [this] { fillParams(); };
+        targetBox.onChange = [this] { fillParams(); };
         touchedBtn.onClick = [this] { useTouched(); };
         touchedBtn.setTooltip ("Select the parameter you last moved in a plugin GUI");
 
@@ -597,14 +791,32 @@ public:
 
     void refresh()
     {
-        const int prevSlot = slotBox.getSelectedId();
-        slotBox.clear (dontSendNotification);
-        const auto* def = currentProgram();
-        if (def != nullptr)
+        Target prev;
+        bool hadPrev = false;
+        if (auto* t = selectedTarget()) { prev = *t; hadPrev = true; }
+
+        targets.clear();
+        targetBox.clear (dontSendNotification);
+        if (const auto* def = currentProgram())
+        {
             for (int s = 0; s < (int) def->slots.size(); ++s)
-                slotBox.addItem (String (s + 1) + ": " + def->slots[(size_t) s].plugin.name, s + 1);
-        if (prevSlot > 0 && prevSlot <= slotBox.getNumItems()) slotBox.setSelectedId (prevSlot, dontSendNotification);
-        else if (slotBox.getNumItems() > 0) slotBox.setSelectedId (1, dontSendNotification);
+            {
+                targets.push_back ({ s, -1, String (s + 1) + ": " + def->slots[(size_t) s].plugin.name });
+                for (int e = 0; e < (int) def->slots[(size_t) s].effects.size(); ++e)
+                    targets.push_back ({ s, e, String (s + 1) + " > FX" + String (e + 1) + ": " + def->slots[(size_t) s].effects[(size_t) e].plugin.name });
+            }
+            for (int e = 0; e < (int) def->effects.size(); ++e)
+                targets.push_back ({ -1, e, "Program FX" + String (e + 1) + ": " + def->effects[(size_t) e].plugin.name });
+        }
+        for (int i = 0; i < (int) targets.size(); ++i)
+            targetBox.addItem (targets[(size_t) i].label, i + 1);
+
+        int reselect = targets.empty() ? 0 : 1;
+        if (hadPrev)
+            for (int i = 0; i < (int) targets.size(); ++i)
+                if (targets[(size_t) i].slot == prev.slot && targets[(size_t) i].effect == prev.effect) reselect = i + 1;
+        if (reselect > 0) targetBox.setSelectedId (reselect, dontSendNotification);
+
         fillParams();
         table.updateContent();
         table.repaint();
@@ -623,11 +835,11 @@ public:
         updateButtons();
     }
 
-    void onTouched (int slot, int paramIndex)
+    void onTouched (int slot, int effect, int paramIndex)
     {
-        touchedSlot = slot; touchedParam = paramIndex;
+        touchedSlot = slot; touchedEffect = effect; touchedParam = paramIndex;
         touchedBtn.setEnabled (true);
-        if (auto* inst = engine.getSlotInstance (owner.getSelectedInput(), owner.getEditedProgram(), slot))
+        if (auto* inst = engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), slot, effect))
         {
             auto& params = inst->getParameters();
             if (paramIndex >= 0 && paramIndex < params.size())
@@ -644,7 +856,7 @@ public:
         table.setBounds (r);
 
         auto row1 = editor.removeFromTop (24);
-        slotBox.setBounds (row1.removeFromLeft (160)); row1.removeFromLeft (4);
+        targetBox.setBounds (row1.removeFromLeft (220)); row1.removeFromLeft (4);
         touchedBtn.setBounds (row1.removeFromRight (200)); row1.removeFromRight (4);
         paramBox.setBounds (row1);
         editor.removeFromTop (4);
@@ -681,7 +893,7 @@ public:
         switch (col)
         {
             case colSource: text = m.sourceDescription(); break;
-            case colSlot:   text = String (m.slot + 1); break;
+            case colTarget: text = targetLabel (m.slot, m.effect); break;
             case colParam:  text = m.paramName.isNotEmpty() ? m.paramName : m.paramId; break;
             case colMin:    text = String (m.minValue, 2); break;
             case colMax:    text = String (m.maxValue, 2); break;
@@ -700,7 +912,9 @@ public:
         const auto& m = def->mappings[(size_t) row];
         learnedSource = m.source; learnedNumber = m.number; haveSource = true;
         sourceLabel.setText (m.sourceDescription(), dontSendNotification);
-        slotBox.setSelectedId (m.slot + 1, dontSendNotification);
+        for (int i = 0; i < (int) targets.size(); ++i)
+            if (targets[(size_t) i].slot == m.slot && targets[(size_t) i].effect == m.effect)
+                targetBox.setSelectedId (i + 1, dontSendNotification);
         fillParams();
         for (int i = 0; i < paramIds.size(); ++i)
             if (paramIds[i] == m.paramId) { paramBox.setSelectedId (i + 1, dontSendNotification); break; }
@@ -719,17 +933,31 @@ private:
         return &inputs[(size_t) in].programs[(size_t) owner.getEditedProgram()];
     }
 
+    String targetLabel (int slot, int effect) const
+    {
+        for (auto& t : targets)
+            if (t.slot == slot && t.effect == effect) return t.label;
+        if (slot < 0) return "Program FX" + String (effect + 1);
+        return String (slot + 1) + (effect >= 0 ? " > FX" + String (effect + 1) : String());
+    }
+
+    const Target* selectedTarget() const
+    {
+        const int i = targetBox.getSelectedId() - 1;
+        return (i >= 0 && i < (int) targets.size()) ? &targets[(size_t) i] : nullptr;
+    }
+
     void fillParams()
     {
         const String prev = paramBox.getSelectedId() > 0 && paramBox.getSelectedId() <= paramIds.size()
                                 ? paramIds[paramBox.getSelectedId() - 1] : String();
         paramBox.clear (dontSendNotification);
         paramIds.clear();
-        const int slot = slotBox.getSelectedId() - 1;
-        auto* inst = engine.getSlotInstance (owner.getSelectedInput(), owner.getEditedProgram(), slot);
+        auto* t = selectedTarget();
+        auto* inst = t != nullptr ? engine.getPluginInstance (owner.getSelectedInput(), owner.getEditedProgram(), t->slot, t->effect) : nullptr;
         if (inst == nullptr)
         {
-            paramBox.setTextWhenNothingSelected (slot >= 0 ? "(plugin not loaded)" : "(no plugin)");
+            paramBox.setTextWhenNothingSelected (t != nullptr ? "(plugin not loaded)" : "(no plugin)");
             updateButtons();
             return;
         }
@@ -750,23 +978,25 @@ private:
 
     void useTouched()
     {
-        if (touchedSlot < 0) return;
-        slotBox.setSelectedId (touchedSlot + 1, dontSendNotification);
+        if (touchedParam < 0) return;
+        for (int i = 0; i < (int) targets.size(); ++i)
+            if (targets[(size_t) i].slot == touchedSlot && targets[(size_t) i].effect == touchedEffect)
+                targetBox.setSelectedId (i + 1, dontSendNotification);
         fillParams();
-        if (touchedParam >= 0 && touchedParam < paramIds.size())
+        if (touchedParam < paramIds.size())
             paramBox.setSelectedId (touchedParam + 1, dontSendNotification);
         updateButtons();
     }
 
     std::optional<MappingDef> makeMapping()
     {
-        const int slot = slotBox.getSelectedId() - 1;
+        auto* t = selectedTarget();
         const int pi = paramBox.getSelectedId() - 1;
         if (! haveSource) { owner.showStatus ("Click Learn MIDI and move a controller first."); return {}; }
-        if (slot < 0 || pi < 0 || pi >= paramIds.size()) { owner.showStatus ("Choose a slot and a parameter."); return {}; }
+        if (t == nullptr || pi < 0 || pi >= paramIds.size()) { owner.showStatus ("Choose a target plugin and a parameter."); return {}; }
         MappingDef m;
         m.source = learnedSource; m.number = learnedNumber;
-        m.slot = slot; m.paramId = paramIds[pi];
+        m.slot = t->slot; m.effect = t->effect; m.paramId = paramIds[pi];
         m.paramName = paramBox.getItemText (pi);
         m.minValue = (float) minSlider.getValue();
         m.maxValue = (float) maxSlider.getValue();
@@ -776,18 +1006,19 @@ private:
 
     void updateButtons()
     {
-        const bool canMake = haveSource && slotBox.getSelectedId() > 0 && paramBox.getSelectedId() > 0;
+        const bool canMake = haveSource && targetBox.getSelectedId() > 0 && paramBox.getSelectedId() > 0;
         addBtn.setEnabled (canMake);
         updateBtn.setEnabled (canMake && table.getSelectedRow() >= 0);
         removeBtn.setEnabled (table.getSelectedRow() >= 0);
-        touchedBtn.setEnabled (touchedSlot >= 0);
+        touchedBtn.setEnabled (touchedParam >= 0);
     }
 
     Engine& engine;
     MainComponent& owner;
     Label header { {}, "MIDI MAPPINGS" };
     TableListBox table;
-    ComboBox slotBox, paramBox;
+    ComboBox targetBox, paramBox;
+    std::vector<Target> targets;
     StringArray paramIds;
     TextButton touchedBtn { "Use touched parameter" }, learnBtn { "Learn MIDI" }, addBtn { "Add" }, updateBtn { "Update" }, removeBtn { "Remove" };
     Label sourceLabel { {}, "-" };
@@ -796,13 +1027,13 @@ private:
     MappingDef::Source learnedSource = MappingDef::Source::CC;
     int learnedNumber = 1;
     bool haveSource = false;
-    int touchedSlot = -1, touchedParam = -1;
+    int touchedSlot = -1, touchedEffect = -1, touchedParam = -1;
 };
 
 //==============================================================================
 //  MainComponent
 //==============================================================================
-MainComponent::MainComponent (Engine& e, PropertiesFile& s) : engine (e), settings (s)
+MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialSetup) : engine (e), settings (s)
 {
     inputsPanel   = std::make_unique<InputsPanel> (engine, *this);
     programsPanel = std::make_unique<ProgramsPanel> (engine, *this);
@@ -847,11 +1078,12 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s) : engine (e), settin
 
     engine.addListener (this);
 
-    // Restore the last setup.
+    // Open the requested setup, else restore the last one.
     File last (settings.getValue ("lastSetup"));
-    if (last.existsAsFile())              loadSetupFile (last);
-    else if (getAutosaveFile().existsAsFile()) loadSetupFile (getAutosaveFile());
-    else                                  refreshAll();
+    if (initialSetup.existsAsFile())            loadSetupFile (initialSetup);
+    else if (last.existsAsFile())               loadSetupFile (last);
+    else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
+    else                                        refreshAll();
 
     startTimerHz (4);
     setSize (1280, 800);
@@ -984,19 +1216,19 @@ void MainComponent::learnReceived (int, MappingDef::Source source, int number)
     mappingsPanel->onLearn (source, number);
 }
 
-void MainComponent::parameterTouched (int inputIndex, int program, int slot, int paramIndex)
+void MainComponent::parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex)
 {
     if (inputIndex == selectedInput && program == getEditedProgram())
-        mappingsPanel->onTouched (slot, paramIndex);
+        mappingsPanel->onTouched (slot, effect, paramIndex);
 }
 
 void MainComponent::instanceAboutToBeDeleted (AudioPluginInstance* inst) { closePluginWindowsFor (inst); }
 void MainComponent::statusMessage (const String& s) { showStatus (s); }
 
 //==============================================================================
-void MainComponent::openPluginEditor (int inputIndex, int program, int slot)
+void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int effect)
 {
-    auto* inst = engine.getSlotInstance (inputIndex, program, slot);
+    auto* inst = engine.getPluginInstance (inputIndex, program, slot, effect);
     if (inst == nullptr) { showStatus ("Plugin is not loaded"); return; }
 
     for (auto& w : pluginWindows)

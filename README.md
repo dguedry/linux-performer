@@ -15,8 +15,9 @@ appear as normal VST3s and work too.
 |------|---------|
 | **Input** | A MIDI source: a MIDI device plus an optional channel filter. Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
 | **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds plugin slots and MIDI mappings. |
-| **Slot** | One plugin instance inside a program, with enable, gain, transpose, key range and output-channel settings. |
-| **Mapping** | A CC / pitch-bend / aftertouch message → one plugin parameter, scaled between min and max. Optionally also passed through to the plugin. |
+| **Slot** | One instrument inside a program, with enable, gain, transpose, key range and output-channel settings, plus its own insert-effect chain. |
+| **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
+| **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Setup** | The whole document (inputs, programs, plugin states). Saved as `*.performer.json`. |
 
 Program switching keeps the outgoing program rendering for a configurable
@@ -33,7 +34,8 @@ libxcursor-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk`.
 git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git external/JUCE   # if not present
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/Performer_artefacts/Release/Performer
+./build/Performer_artefacts/Release/Performer            # opens the last setup
+./build/Performer_artefacts/Release/Performer my.performer.json
 ```
 
 ## Using it
@@ -45,8 +47,11 @@ cmake --build build
    blacklisted automatically on the next start.
 3. Select an input on the left, give it a **MIDI device** and **channel**.
 4. Click a program in the middle list (this also activates it), name it, and
-   **Add plugin...**. Use **Edit GUI** to open the plugin's own editor.
-5. To map a controller: open **MIDI mappings**, pick a slot and parameter
+   **Add instrument...**. Use **Edit GUI** to open the plugin's own editor.
+   **Add effect...** under a slot inserts an effect after that instrument;
+   the **Program effects** section at the bottom processes the mix of all slots.
+   Toggle an effect off to bypass it, use ^ / v to reorder.
+5. To map a controller: open **MIDI mappings**, pick a target plugin and parameter
    (or move a knob in the plugin GUI and press **Use touched parameter**),
    press **Learn MIDI**, move the controller, then **Add**.
 6. **Save** the setup. It is reloaded automatically next start; the setup is

@@ -46,6 +46,16 @@ int main()
     MappingDef pb; pb.source = MappingDef::Source::PitchBend; pb.paramId = "7";
     prog.mappings.push_back (pb);
 
+    EffectDef fx;
+    fx.plugin.name = "Test Reverb"; fx.plugin.pluginFormatName = "LV2"; fx.plugin.fileOrIdentifier = "urn:test:reverb";
+    fx.bypassed = true;
+    fx.state.append ("fx", 2);
+    prog.slots[0].effects.push_back (fx);
+    EffectDef progFx = fx; progFx.plugin.name = "Test Limiter"; progFx.bypassed = false;
+    prog.effects.push_back (progFx);
+    MappingDef fxMap; fxMap.number = 11; fxMap.slot = -1; fxMap.effect = 0; fxMap.paramId = "threshold";
+    prog.mappings.push_back (fxMap);
+
     // Name-only program (no slots) must survive too.
     upper.programs[9].name = "Empty but named";
 
@@ -89,9 +99,25 @@ int main()
         CHECK (ls.outChannel == 3);
         CHECK (ls.enabled == false);
     }
-    CHECK (p.mappings.size() == 2);
-    if (p.mappings.size() == 2)
+    CHECK (p.slots.size() == 1 && p.slots[0].effects.size() == 1);
+    if (p.slots.size() == 1 && p.slots[0].effects.size() == 1)
     {
+        auto& e = p.slots[0].effects[0];
+        CHECK (e.plugin.name == "Test Reverb" && e.plugin.pluginFormatName == "LV2");
+        CHECK (e.bypassed == true);
+        CHECK (e.state == fx.state);
+    }
+    CHECK (p.effects.size() == 1);
+    if (p.effects.size() == 1)
+    {
+        CHECK (p.effects[0].plugin.name == "Test Limiter");
+        CHECK (p.effects[0].bypassed == false);
+    }
+    CHECK (p.mappings.size() == 3);
+    if (p.mappings.size() == 3)
+    {
+        CHECK (p.mappings[0].effect == -1);          // default target: the instrument
+        CHECK (p.mappings[2].slot == -1 && p.mappings[2].effect == 0 && p.mappings[2].paramId == "threshold");
         auto& lm = p.mappings[0];
         CHECK (lm.source == MappingDef::Source::CC && lm.number == 74);
         CHECK (lm.slot == 0 && lm.paramId == "cutoff" && lm.paramName == "Cutoff");

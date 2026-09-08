@@ -239,6 +239,169 @@ int main()
     CHECK (reloaded.inputs[0].programs[7].slots.size() == 1 && reloaded.inputs[0].programs[7].slots[0].plugin.name == synth.name);
     CHECK (reloaded.preloadAllPrograms);
 
+    // --- effect chains ----------------------------------------------------------------------
+    {
+        // Pick a Calf effect with a controllable input level; fall back to any effect.
+        PluginDescription fx; bool haveFx = false;
+        for (auto& d : host.getKnownPlugins().getTypes())
+            if (! d.isInstrument && d.name.containsIgnoreCase ("Stereo Tools")) { fx = d; haveFx = true; }
+        if (! haveFx)
+            for (auto& d : host.getKnownPlugins().getTypes())
+                if (! d.isInstrument && d.name.containsIgnoreCase ("Compressor")) { fx = d; haveFx = true; break; }
+        CHECK (haveFx);
+        if (haveFx)
+        {
+            std::printf ("     using effect: %s\n", fx.name.toRawUTF8());
+            engine.setPreloadAllPrograms (false);
+            engine.selectProgram (0, 0);
+            CHECK (engine.addSlot (0, 0, synth, err));
+            auto* synthInst = engine.getSlotInstance (0, 0, 0);
+            CHECK (synthInst != nullptr);
+
+            // Baseline level, instrument only.
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+            render (engine, 10);
+            const float dry = render (engine, 10);
+            std::printf ("     dry rms: %f\n", dry);
+            CHECK (dry > 0.01f);
+
+            // Slot insert chain: audio must still pass with the effect in place.
+            CHECK (engine.addEffect (0, 0, 0, fx, err));
+            if (err.isNotEmpty()) std::printf ("     addEffect error: %s\n", err.toRawUTF8());
+            CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects.size() == 1);
+            auto* fxInst = engine.getPluginInstance (0, 0, 0, 0);
+            CHECK (fxInst != nullptr);
+            render (engine, 5);
+            const float wet = render (engine, 10);
+            std::printf ("     rms through slot effect: %f\n", wet);
+            CHECK (wet > 0.01f);
+
+            // Find a level/gain parameter and turn it down: output must drop.
+            AudioProcessorParameter* level = nullptr;
+            if (fxInst != nullptr)
+                for (auto* p : fxInst->getParameters())
+                {
+                    const auto n = p->getName (64);
+                    if (n.containsIgnoreCase ("Level In") || n.containsIgnoreCase ("Input Gain") || n.containsIgnoreCase ("Input Level")) { level = p; break; }
+                }
+            if (level == nullptr && fxInst != nullptr)
+                for (auto* p : fxInst->getParameters())
+                    if (p->getName (64).containsIgnoreCase ("Level Out") || p->getName (64).containsIgnoreCase ("Output")) { level = p; break; }
+            CHECK (level != nullptr);
+            if (level != nullptr)
+            {
+                std::printf ("     effect level parameter: '%s'\n", level->getName (64).toRawUTF8());
+                const String levelId = Engine::getParameterId (*level);
+
+                // Via a mapping to the effect (slot 0, effect 0): CC 7 -> level, min 0.
+                MappingDef m;
+                m.source = MappingDef::Source::CC; m.number = 7; m.slot = 0; m.effect = 0;
+                m.paramId = levelId; m.minValue = 0.0f; m.maxValue = 1.0f;
+                engine.addMapping (0, 0, m);
+                engine.injectMidi (0, MidiMessage::controllerEvent (1, 7, 0));
+                render (engine, 5);
+                const float muted = render (engine, 10);
+                std::printf ("     rms with effect level at min: %f\n", muted);
+                CHECK (muted < wet * 0.2f);
+
+                // Bypass restores the dry signal even though the level is still down.
+                engine.setEffectBypassed (0, 0, 0, 0, true);
+                CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects[0].bypassed);
+                render (engine, 5);
+                const float bypassed = render (engine, 10);
+                std::printf ("     rms with effect bypassed: %f\n", bypassed);
+                CHECK (bypassed > 0.01f);
+                engine.setEffectBypassed (0, 0, 0, 0, false);
+
+                // Removing the effect drops its mapping and leaves the instrument alone.
+                engine.removeEffect (0, 0, 0, 0);
+                level = nullptr;   // instance destroyed with the effect
+                CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects.empty());
+                CHECK (engine.getSetup().inputs[0].programs[0].mappings.empty());
+                render (engine, 5);
+                CHECK (render (engine, 10) > 0.01f);
+
+                // Program-level chain: same effect after the mix, mapped via slot == -1.
+                CHECK (engine.addEffect (0, 0, -1, fx, err));
+                CHECK (engine.getSetup().inputs[0].programs[0].effects.size() == 1);
+                auto* progFx = engine.getPluginInstance (0, 0, -1, 0);
+                CHECK (progFx != nullptr);
+                if (progFx != nullptr)
+                {
+                    auto* pLevel = Engine::findParameter (*progFx, levelId);
+                    CHECK (pLevel != nullptr);
+                    const float unity = pLevel != nullptr ? pLevel->getValue() : 0.0f;
+                    MappingDef pm = m; pm.slot = -1; pm.effect = 0; pm.number = 8;
+                    engine.addMapping (0, 0, pm);
+                    render (engine, 5);
+                    CHECK (render (engine, 10) > 0.01f);
+                    engine.injectMidi (0, MidiMessage::controllerEvent (1, 8, 0));
+                    render (engine, 5);
+                    const float progMuted = render (engine, 10);
+                    std::printf ("     rms with program effect level at min: %f\n", progMuted);
+                    CHECK (progMuted < wet * 0.2f);
+                    if (pLevel != nullptr) pLevel->setValueNotifyingHost (unity);   // back to unity gain
+                    render (engine, 2);
+                }
+
+                // Reordering: add a second program effect, move it first, mapping follows.
+                CHECK (engine.addEffect (0, 0, -1, fx, err));
+                engine.moveEffect (0, 0, -1, 1, 0);
+                CHECK (engine.getSetup().inputs[0].programs[0].mappings.size() == 1);
+                CHECK (engine.getSetup().inputs[0].programs[0].mappings[0].effect == 1);   // the mapped one moved to index 1
+                engine.removeEffect (0, 0, -1, 0);
+                CHECK (engine.getSetup().inputs[0].programs[0].mappings[0].effect == 0);
+            }
+
+            engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+            render (engine, 20);
+
+            // Effects survive a save/load round trip, including on the program chain.
+            TemporaryFile fxTmp (".performer.json");
+            CHECK (engine.captureSetup().saveToFile (fxTmp.getFile()).wasOk());
+            Setup rl;
+            CHECK (Setup::loadFromFile (fxTmp.getFile(), rl).wasOk());
+            CHECK (rl.inputs[0].programs[0].effects.size() == 1);
+            CHECK (rl.inputs[0].programs[0].effects[0].plugin.name == fx.name);
+            CHECK (rl.inputs[0].programs[0].mappings.size() == 1 && rl.inputs[0].programs[0].mappings[0].slot == -1);
+
+            // Loading that setup rebuilds the chain live.
+            engine.loadSetup (rl);
+            CHECK (engine.getPluginInstance (0, 0, -1, 0) != nullptr);
+            engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+            render (engine, 10);
+            const float afterLoad = render (engine, 10);
+            std::printf ("     rms after reloading setup with chain: %f\n", afterLoad);
+            CHECK (afterLoad > 0.01f);
+            CHECK (afterLoad < dry * 1.5f);   // effect state (unity gain) survived the round trip
+            engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+            render (engine, 20);
+        }
+    }
+
+    // --- optional: write a demo setup for eyeballing the UI ----------------------------------
+    if (auto outPath = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_WRITE_SETUP", {}); outPath.isNotEmpty())
+    {
+        PluginDescription fx; bool haveFx = false;
+        for (auto& d : host.getKnownPlugins().getTypes())
+            if (! d.isInstrument && (d.name.containsIgnoreCase ("Stereo Tools") || d.name.containsIgnoreCase ("Reverb"))) { fx = d; haveFx = true; }
+        Setup demo = Setup::makeDefault();
+        auto& prog = demo.inputs[0].programs[0];
+        prog.name = "Demo Lead";
+        SlotDef sd; sd.plugin = synth; sd.gainDb = -3.0f; sd.lowKey = 48;
+        if (haveFx) { EffectDef e; e.plugin = fx; sd.effects.push_back (e); e.bypassed = true; sd.effects.push_back (e); }
+        prog.slots.push_back (sd);
+        SlotDef pad = sd; pad.effects.clear(); pad.transpose = -12; pad.highKey = 47; pad.lowKey = 0;
+        prog.slots.push_back (pad);
+        if (haveFx) { EffectDef e; e.plugin = fx; prog.effects.push_back (e); }
+        MappingDef mm; mm.number = 74; mm.slot = 0; mm.effect = -1; mm.paramId = "sym:cutoff"; mm.paramName = "Cutoff";
+        prog.mappings.push_back (mm);
+        if (haveFx) { MappingDef fm; fm.number = 7; fm.slot = -1; fm.effect = 0; fm.paramId = "sym:level_in"; fm.paramName = "Input Gain"; prog.mappings.push_back (fm); }
+        demo.inputs[0].programs[3].name = "Organ split";
+        CHECK (demo.saveToFile (File (outPath)).wasOk());
+        std::printf ("     demo setup written to %s\n", outPath.toRawUTF8());
+    }
+
     // --- optional: an arbitrary VST3 (e.g. a yabridge-bridged plugin) --------------------
     // PERFORMER_TEST_VST3=/path/to/Plugin.vst3 loads it, plays a note and renders blocks;
     // this reproduces the multi-out / inactive-bus crash seen with Kontakt via yabridge.
