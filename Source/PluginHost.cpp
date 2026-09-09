@@ -45,12 +45,12 @@ PluginHost::PluginHost (PropertiesFile& s) : settings (s)
 // Unlike juce::ChildProcess this never blocks inside a read: the scanner thread pool
 // kills threads that don't stop, and a thread killed inside fread() aborts the whole
 // application.
-bool PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args, int timeoutMs,
-                                       const std::function<bool()>& shouldStop, String& output)
+PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args, int timeoutMs,
+                                                           int graceAfterStopMs, const std::function<bool()>& shouldStop, String& output)
 {
     {
         int fds[2];
-        if (::pipe (fds) != 0) return false;
+        if (::pipe (fds) != 0) return HelperResult::timedOut;
 
         posix_spawn_file_actions_t actions;
         ::posix_spawn_file_actions_init (&actions);
@@ -68,39 +68,41 @@ bool PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args,
         const int rc = ::posix_spawn (&pid, storage[0].c_str(), &actions, nullptr, argv.data(), environ);
         ::posix_spawn_file_actions_destroy (&actions);
         ::close (fds[1]);
-        if (rc != 0) { ::close (fds[0]); return false; }
+        if (rc != 0) { ::close (fds[0]); return HelperResult::timedOut; }
 
         MemoryOutputStream collected;
         const auto start = Time::getMillisecondCounterHiRes();
-        bool finished = false, timedOut = false;
+        double stopRequestedAt = -1.0;
+        auto result = HelperResult::finished;
 
-        while (! finished)
+        for (;;)
         {
             pollfd pfd { fds[0], POLLIN, 0 };
-            const int pr = ::poll (&pfd, 1, 200);
+            const int pr = ::poll (&pfd, 1, 100);
             if (pr > 0)
             {
                 char buf[8192];
                 const auto n = ::read (fds[0], buf, sizeof (buf));
-                if (n > 0)       collected.write (buf, (size_t) n);
-                else if (n == 0) finished = true;                 // EOF: child closed stdout
-                else if (errno != EINTR && errno != EAGAIN) finished = true;
+                if (n > 0) { collected.write (buf, (size_t) n); continue; }
+                if (n == 0 || (errno != EINTR && errno != EAGAIN)) break;   // EOF: child closed stdout
             }
-            if (! finished && (shouldStop() || Time::getMillisecondCounterHiRes() - start > timeoutMs))
-            {
-                timedOut = true;
-                break;
-            }
+
+            const auto now = Time::getMillisecondCounterHiRes();
+            if (stopRequestedAt < 0.0 && shouldStop())
+                stopRequestedAt = now;
+
+            if (now - start > timeoutMs)                                      { result = HelperResult::timedOut; break; }
+            if (stopRequestedAt >= 0.0 && now - stopRequestedAt > graceAfterStopMs) { result = HelperResult::stopped; break; }
         }
         ::close (fds[0]);
 
-        if (timedOut)
+        if (result != HelperResult::finished)
             ::kill (pid, SIGKILL);
         int status = 0;
         ::waitpid (pid, &status, 0);
 
         output = collected.toString();
-        return ! timedOut;
+        return result;
     }
 }
 
@@ -113,9 +115,12 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
         return true;
     }
 
+    // JUCE's scan dialog asks every still-running probe to exit the moment one thread
+    // runs out of files, then waits up to a minute for them. Give slow (Wine-bridged)
+    // plugins a real chance to finish in that window instead of treating it as failure.
     String output;
-    const bool ok = runHelperWithTimeout (exe, StringArray { "--scan", format.getName(), fileOrIdentifier }, 120000,
-                                          [this] { return shouldExit(); }, output);
+    const auto res = runHelperWithTimeout (exe, StringArray { "--scan", format.getName(), fileOrIdentifier }, 120000, 45000,
+                                           [this] { return shouldExit(); }, output);
 
     int parsed = 0;
     for (auto& line : StringArray::fromLines (output))
@@ -128,11 +133,14 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
 
     if (SystemStats::getEnvironmentVariable ("PERFORMER_SCAN_DEBUG", {}).isNotEmpty())
         std::fprintf (stderr, "[scan] %s %s: %s, %d bytes of output, %d descriptions\n",
-                      format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(), ok ? "ok" : "TIMED OUT / cancelled", (int) output.length(), parsed);
+                      format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(),
+                      res == HelperResult::finished ? "ok" : res == HelperResult::timedOut ? "TIMED OUT" : "stopped before finishing",
+                      (int) output.length(), parsed);
 
-    // A timeout means the plugin hung while being probed; report failure so the
-    // list blacklists it instead of retrying forever.
-    return ok;
+    // Only a plugin that hung for the whole timeout on its own is reported as failed
+    // (and blacklisted). A probe that was asked to stop is simply not a result: the
+    // plugin will be scanned again next time.
+    return res != HelperResult::timedOut;
 }
 
 PluginHost::~PluginHost()

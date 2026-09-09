@@ -28,11 +28,16 @@ public:
 
     void saveKnownPlugins();
 
-    /** Runs `exe args...`, collecting stdout, with a hard timeout and a cancellation
-        check. Never blocks inside a read, so the calling thread can always be stopped
-        cleanly. Returns false (and kills the child) on timeout or cancellation. */
-    static bool runHelperWithTimeout (const juce::File& exe, const juce::StringArray& args, int timeoutMs,
-                                      const std::function<bool()>& shouldStop, juce::String& output);
+    enum class HelperResult { finished, timedOut, stopped };
+
+    /** Runs `exe args...`, collecting stdout, with a hard timeout and a stop check.
+        Never blocks inside a read, so the calling thread can always be stopped cleanly.
+        Once shouldStop() returns true the child is given `graceAfterStopMs` more to
+        finish (JUCE's scan dialog asks in-flight probes to exit as soon as the first
+        thread runs out of files); if it doesn't, it is killed and `stopped` is returned.
+        `timedOut` means the child hung for the full timeout on its own. */
+    static HelperResult runHelperWithTimeout (const juce::File& exe, const juce::StringArray& args, int timeoutMs,
+                                              int graceAfterStopMs, const std::function<bool()>& shouldStop, juce::String& output);
 
     /** Scans a plugin file in a performer-plugin-host process so a crashing plugin
         can't take Performer down. Falls back to in-process if the helper is missing. */

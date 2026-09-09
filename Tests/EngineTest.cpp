@@ -453,44 +453,80 @@ int main()
 
     // --- scanner robustness -----------------------------------------------------------------
     {
+        using HR = PluginHost::HelperResult;
         // A helper that never finishes must be killed at the timeout, not waited for.
         String out;
         auto t0 = Time::getMillisecondCounterHiRes();
-        const bool r1 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 600, [] { return false; }, out);
+        const auto r1 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 600, 100, [] { return false; }, out);
         const auto ms1 = Time::getMillisecondCounterHiRes() - t0;
-        std::printf ("     hung helper: returned %d after %.0f ms\n", (int) r1, ms1);
-        CHECK (! r1 && ms1 < 2000.0);
+        std::printf ("     hung helper: result %d after %.0f ms\n", (int) r1, ms1);
+        CHECK (r1 == HR::timedOut && ms1 < 2000.0);
 
-        // Cancellation (the scan dialog being closed) stops it within a poll interval.
+        // A stop request (dialog closing) gives the child a grace period, then kills it.
         t0 = Time::getMillisecondCounterHiRes();
-        const bool r2 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 60000,
+        const auto r2 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 60000, 300,
                                                           [t0] { return Time::getMillisecondCounterHiRes() - t0 > 250.0; }, out);
         const auto ms2 = Time::getMillisecondCounterHiRes() - t0;
-        std::printf ("     cancelled helper: returned %d after %.0f ms\n", (int) r2, ms2);
-        CHECK (! r2 && ms2 < 1500.0);
+        std::printf ("     stopped helper: result %d after %.0f ms\n", (int) r2, ms2);
+        CHECK (r2 == HR::stopped && ms2 > 500.0 && ms2 < 2000.0);
+
+        // A stop request while the child is about to finish still yields its output.
+        t0 = Time::getMillisecondCounterHiRes();
+        const auto r4 = PluginHost::runHelperWithTimeout (File ("/bin/sh"), StringArray { "-c", "sleep 0.5; echo late-result" }, 60000, 5000,
+                                                          [] { return true; }, out);
+        CHECK (r4 == HR::finished && out.trim() == "late-result");
 
         // Output is collected completely from a process that finishes.
-        const bool r3 = PluginHost::runHelperWithTimeout (File ("/bin/echo"), StringArray { "hello", "scanner" }, 5000, [] { return false; }, out);
-        CHECK (r3 && out.trim() == "hello scanner");
+        const auto r3 = PluginHost::runHelperWithTimeout (File ("/bin/echo"), StringArray { "hello", "scanner" }, 5000, 100, [] { return false; }, out);
+        CHECK (r3 == HR::finished && out.trim() == "hello scanner");
 
         // Nothing left behind.
         ChildProcess pgrep;
         pgrep.start (StringArray { "pgrep", "-P", String ((int) ::getpid()), "sleep" });
         CHECK (pgrep.readAllProcessOutput().trim().isEmpty());
 
-        // Real bridged VST3s, if this machine has them (yabridge + Wine): scanning must
-        // succeed out of process and give one description each.
-        for (auto path : { "/home/dguedry/.vst3/yabridge/Kontakt 8.vst3", "/usr/lib/vst3/Numa Player.vst3" })
+        // Real bridged VST3s, if this machine has them (yabridge + Wine): replay exactly
+        // what PluginListComponent does -- four pool threads, and as soon as one runs
+        // out of files the pool is torn down with removeAllJobs (true, ...), which asks
+        // the still-running probes to exit. Nothing may end up blacklisted.
+        File yabridgeDir ("/home/dguedry/.vst3/yabridge");
+        if (yabridgeDir.isDirectory())
         {
-            File f (path);
-            if (! f.exists()) continue;
             AudioPluginFormat* vst3 = nullptr;
             for (auto* fmt : host.getFormatManager().getFormats()) if (fmt->getName() == "VST3") vst3 = fmt;
-            OwnedArray<PluginDescription> found;
+
+            KnownPluginList list;
+            list.setCustomScanner (std::make_unique<PluginHost::OutOfProcessScanner>());
+            TemporaryFile dmp (".txt");
+            PluginDirectoryScanner ds (list, *vst3, FileSearchPath (yabridgeDir.getFullPathName()), true, dmp.getFile(), false);
+            const int expected = yabridgeDir.getNumberOfChildFiles (File::findFilesAndDirectories, "*.vst3");
+
+            struct Job : public ThreadPoolJob
+            {
+                Job (PluginDirectoryScanner& s, std::atomic<bool>& f) : ThreadPoolJob ("scan"), ds (s), finished (f) {}
+                JobStatus runJob() override
+                {
+                    String name;
+                    while (! finished.load() && ds.scanNextFile (true, name) && ! shouldExit()) {}
+                    finished.store (true);
+                    return jobHasFinished;
+                }
+                PluginDirectoryScanner& ds; std::atomic<bool>& finished;
+            };
+            std::atomic<bool> finished { false };
             t0 = Time::getMillisecondCounterHiRes();
-            host.getKnownPlugins().scanAndAddFile (f.getFullPathName(), false, found, *vst3);
-            std::printf ("     scanned %s: %d description(s) in %.1f s\n", f.getFileName().toRawUTF8(), found.size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
-            CHECK (found.size() == 1);
+            {
+                ThreadPool pool (ThreadPoolOptions{}.withNumberOfThreads (4));
+                for (int i = 0; i < 4; ++i) pool.addJob (new Job (ds, finished), true);
+                while (! finished.load()) Thread::sleep (20);
+                pool.removeAllJobs (true, 60000);        // what ~Scanner does
+            }
+            std::printf ("     dialog-style scan of %s: %d plugin(s) expected, %d found, %d blacklisted, %d failed, %.1f s\n",
+                         yabridgeDir.getFullPathName().toRawUTF8(), expected, list.getNumTypes(),
+                         list.getBlacklistedFiles().size(), ds.getFailedFiles().size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+            for (auto& b : list.getBlacklistedFiles()) std::printf ("       BLACKLISTED %s\n", b.toRawUTF8());
+            CHECK (list.getBlacklistedFiles().isEmpty());
+            CHECK (list.getNumTypes() == expected);
         }
     }
 
