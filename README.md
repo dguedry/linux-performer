@@ -43,8 +43,11 @@ cmake --build build
 1. **Audio...** – pick the output device. Under PipeWire both the JACK and
    ALSA device types work; JACK gives the lowest latency.
 2. **Plugins...** – *Options → Scan for new or updated VST3 plugins* (and LV2).
-   Scanning happens in-process; a plugin that crashes the scan is
-   blacklisted automatically on the next start.
+   Each plugin file is probed in a separate `performer-plugin-host` process
+   with a two-minute limit, so a crashing or hanging plugin can't take the
+   scan down. A file that was being probed when Performer itself died shows in
+   red as "Deactivated"; select it and use *Options → Remove selected plug-in
+   from list* (or *Clear list*) and scan again.
 3. Select an input on the left, give it a **MIDI device** and **channel**.
 4. Click a program in the middle list (this also activates it), name it, and
    **Add instrument...**. Use **Edit GUI** to open the plugin's own editor.

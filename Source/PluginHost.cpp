@@ -1,6 +1,14 @@
 #include "PluginHost.h"
 #include "RemotePlugin.h"
 #include <cstdio>
+#include <functional>
+#include <poll.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char** environ;
 
 using namespace juce;
 
@@ -34,6 +42,68 @@ PluginHost::PluginHost (PropertiesFile& s) : settings (s)
     knownPlugins.setCustomScanner (std::make_unique<OutOfProcessScanner>());
 }
 
+// Unlike juce::ChildProcess this never blocks inside a read: the scanner thread pool
+// kills threads that don't stop, and a thread killed inside fread() aborts the whole
+// application.
+bool PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args, int timeoutMs,
+                                       const std::function<bool()>& shouldStop, String& output)
+{
+    {
+        int fds[2];
+        if (::pipe (fds) != 0) return false;
+
+        posix_spawn_file_actions_t actions;
+        ::posix_spawn_file_actions_init (&actions);
+        ::posix_spawn_file_actions_adddup2 (&actions, fds[1], STDOUT_FILENO);
+        ::posix_spawn_file_actions_addclose (&actions, fds[0]);
+        ::posix_spawn_file_actions_addclose (&actions, fds[1]);
+
+        std::vector<std::string> storage { exe.getFullPathName().toStdString() };
+        for (auto& a : args) storage.push_back (a.toStdString());
+        std::vector<char*> argv;
+        for (auto& a : storage) argv.push_back (const_cast<char*> (a.c_str()));
+        argv.push_back (nullptr);
+
+        pid_t pid = -1;
+        const int rc = ::posix_spawn (&pid, storage[0].c_str(), &actions, nullptr, argv.data(), environ);
+        ::posix_spawn_file_actions_destroy (&actions);
+        ::close (fds[1]);
+        if (rc != 0) { ::close (fds[0]); return false; }
+
+        MemoryOutputStream collected;
+        const auto start = Time::getMillisecondCounterHiRes();
+        bool finished = false, timedOut = false;
+
+        while (! finished)
+        {
+            pollfd pfd { fds[0], POLLIN, 0 };
+            const int pr = ::poll (&pfd, 1, 200);
+            if (pr > 0)
+            {
+                char buf[8192];
+                const auto n = ::read (fds[0], buf, sizeof (buf));
+                if (n > 0)       collected.write (buf, (size_t) n);
+                else if (n == 0) finished = true;                 // EOF: child closed stdout
+                else if (errno != EINTR && errno != EAGAIN) finished = true;
+            }
+            if (! finished && (shouldStop() || Time::getMillisecondCounterHiRes() - start > timeoutMs))
+            {
+                timedOut = true;
+                break;
+            }
+        }
+        ::close (fds[0]);
+
+        if (timedOut)
+            ::kill (pid, SIGKILL);
+        int status = 0;
+        ::waitpid (pid, &status, 0);
+
+        output = collected.toString();
+        return ! timedOut;
+    }
+}
+
 bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& format, OwnedArray<PluginDescription>& result, const String& fileOrIdentifier)
 {
     const auto exe = RemotePlugin::findHostExecutable();
@@ -43,23 +113,9 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
         return true;
     }
 
-    ChildProcess proc;
-    if (! proc.start (StringArray { exe.getFullPathName(), "--scan", format.getName(), fileOrIdentifier }, ChildProcess::wantStdOut))
-        return false;
-
-    // Drain stdout while it runs so a chatty plugin can't fill the pipe and stall.
     String output;
-    const auto start = Time::getMillisecondCounterHiRes();
-    while (proc.isRunning())
-    {
-        char buf[4096];
-        const int n = proc.readProcessOutput (buf, sizeof (buf));
-        if (n > 0) output += String::fromUTF8 (buf, n);
-        else if (Time::getMillisecondCounterHiRes() - start > 120000.0) { proc.kill(); return false; }
-        else Thread::sleep (10);
-        if (shouldExit()) { proc.kill(); return false; }
-    }
-    output += proc.readAllProcessOutput();
+    const bool ok = runHelperWithTimeout (exe, StringArray { "--scan", format.getName(), fileOrIdentifier }, 120000,
+                                          [this] { return shouldExit(); }, output);
 
     int parsed = 0;
     for (auto& line : StringArray::fromLines (output))
@@ -71,9 +127,12 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
             }
 
     if (SystemStats::getEnvironmentVariable ("PERFORMER_SCAN_DEBUG", {}).isNotEmpty())
-        std::fprintf (stderr, "[scan] %s %s: %d bytes of output, %d descriptions, exit %u\n",
-                      format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(), (int) output.length(), parsed, proc.getExitCode());
-    return true;
+        std::fprintf (stderr, "[scan] %s %s: %s, %d bytes of output, %d descriptions\n",
+                      format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(), ok ? "ok" : "TIMED OUT / cancelled", (int) output.length(), parsed);
+
+    // A timeout means the plugin hung while being probed; report failure so the
+    // list blacklists it instead of retrying forever.
+    return ok;
 }
 
 PluginHost::~PluginHost()

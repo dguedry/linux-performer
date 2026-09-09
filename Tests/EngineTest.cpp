@@ -451,6 +451,49 @@ int main()
         engine.clearProgram (0, 30);
     }
 
+    // --- scanner robustness -----------------------------------------------------------------
+    {
+        // A helper that never finishes must be killed at the timeout, not waited for.
+        String out;
+        auto t0 = Time::getMillisecondCounterHiRes();
+        const bool r1 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 600, [] { return false; }, out);
+        const auto ms1 = Time::getMillisecondCounterHiRes() - t0;
+        std::printf ("     hung helper: returned %d after %.0f ms\n", (int) r1, ms1);
+        CHECK (! r1 && ms1 < 2000.0);
+
+        // Cancellation (the scan dialog being closed) stops it within a poll interval.
+        t0 = Time::getMillisecondCounterHiRes();
+        const bool r2 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 60000,
+                                                          [t0] { return Time::getMillisecondCounterHiRes() - t0 > 250.0; }, out);
+        const auto ms2 = Time::getMillisecondCounterHiRes() - t0;
+        std::printf ("     cancelled helper: returned %d after %.0f ms\n", (int) r2, ms2);
+        CHECK (! r2 && ms2 < 1500.0);
+
+        // Output is collected completely from a process that finishes.
+        const bool r3 = PluginHost::runHelperWithTimeout (File ("/bin/echo"), StringArray { "hello", "scanner" }, 5000, [] { return false; }, out);
+        CHECK (r3 && out.trim() == "hello scanner");
+
+        // Nothing left behind.
+        ChildProcess pgrep;
+        pgrep.start (StringArray { "pgrep", "-P", String ((int) ::getpid()), "sleep" });
+        CHECK (pgrep.readAllProcessOutput().trim().isEmpty());
+
+        // Real bridged VST3s, if this machine has them (yabridge + Wine): scanning must
+        // succeed out of process and give one description each.
+        for (auto path : { "/home/dguedry/.vst3/yabridge/Kontakt 8.vst3", "/usr/lib/vst3/Numa Player.vst3" })
+        {
+            File f (path);
+            if (! f.exists()) continue;
+            AudioPluginFormat* vst3 = nullptr;
+            for (auto* fmt : host.getFormatManager().getFormats()) if (fmt->getName() == "VST3") vst3 = fmt;
+            OwnedArray<PluginDescription> found;
+            t0 = Time::getMillisecondCounterHiRes();
+            host.getKnownPlugins().scanAndAddFile (f.getFullPathName(), false, found, *vst3);
+            std::printf ("     scanned %s: %d description(s) in %.1f s\n", f.getFileName().toRawUTF8(), found.size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+            CHECK (found.size() == 1);
+        }
+    }
+
     // --- crash isolation --------------------------------------------------------------------
     {
         engine.setPreloadAllPrograms (false);

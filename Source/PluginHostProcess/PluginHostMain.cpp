@@ -15,6 +15,8 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
+#include <signal.h>
+#include <unistd.h>
 
 using namespace juce;
 using namespace perf;
@@ -32,12 +34,14 @@ public:
     ~PluginServer()
     {
         stopAudioThread();
-        editorWindow.reset();
+        // Bridged plugins (yabridge) throw if their other half is already gone;
+        // nothing here may escape, we're on our way out anyway.
+        try { editorWindow.reset(); } catch (...) {}
         if (instance != nullptr)
         {
-            instance->removeListener (this);
-            instance->releaseResources();
-            instance.reset();
+            try { instance->removeListener (this); } catch (...) {}
+            try { instance->releaseResources(); } catch (...) {}
+            try { instance.reset(); } catch (...) {}
         }
         if (control.joinable()) control.join();
     }
@@ -58,7 +62,9 @@ private:
             MessageManager::getInstance()->callFunctionOnMessageThread ([] (void* c) -> void*
             {
                 auto* x = static_cast<Ctx*> (c);
-                x->reply = x->self->handleRequest ((ipc::Msg) x->h->type, *x->p);
+                try                          { x->reply = x->self->handleRequest ((ipc::Msg) x->h->type, *x->p); }
+                catch (const std::exception& e) { x->reply = fail (String ("plugin threw: ") + e.what()); }
+                catch (...)                  { x->reply = fail ("plugin threw an unknown exception"); }
                 return nullptr;
             }, &ctx);
 
@@ -354,7 +360,13 @@ private:
             if (shm->completedSeq.load (std::memory_order_relaxed) == seq)
                 continue;   // spurious wake
 
-            renderBlock();
+            try { renderBlock(); }
+            catch (...)
+            {
+                // A throwing plugin produces silence for this block instead of killing the process.
+                FloatVectorOperations::clear (shm->outL, ipc::kMaxBlock);
+                FloatVectorOperations::clear (shm->outR, ipc::kMaxBlock);
+            }
 
             shm->completedSeq.store (seq, std::memory_order_release);
             ::sem_post (&shm->done);
@@ -431,6 +443,18 @@ private:
 };
 
 //==============================================================================
+/** Plugin teardown can hang (yabridge waits for a Wine process that never exits).
+    Once we've decided to exit, give cleanup a moment, then kill our whole process
+    group, which includes any Wine helpers we started. */
+static void armExitWatchdog (int graceMs)
+{
+    std::thread ([graceMs]
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (graceMs));
+        ::kill (-::getpid(), SIGKILL);
+    }).detach();
+}
+
 class PluginHostApplication : public JUCEApplication
 {
 public:
@@ -440,6 +464,10 @@ public:
 
     void initialise (const String& commandLine) override
     {
+        // Own process group: lets the watchdog take stuck Wine children down with us,
+        // without touching Performer.
+        ::setpgid (0, 0);
+
         ArgumentList args ("performer-plugin-host", commandLine);
 
         if (args.containsOption ("--scan"))
@@ -467,6 +495,8 @@ public:
                             std::cout << xml->toString (XmlElement::TextFormat().singleLine()).toRawUTF8() << "\n";
                 }
             std::cout.flush();
+            ::close (STDOUT_FILENO);      // the parent has everything; don't make it wait for teardown
+            armExitWatchdog (3000);
             quit();
             return;
         }
@@ -496,6 +526,7 @@ public:
 
     void shutdown() override
     {
+        armExitWatchdog (3000);
         server.reset();
     }
 

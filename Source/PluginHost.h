@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include "MappingSuggestions.h"
+#include <functional>
 
 namespace perf
 {
@@ -26,6 +27,12 @@ public:
                                                                juce::String& errorMessage);
 
     void saveKnownPlugins();
+
+    /** Runs `exe args...`, collecting stdout, with a hard timeout and a cancellation
+        check. Never blocks inside a read, so the calling thread can always be stopped
+        cleanly. Returns false (and kills the child) on timeout or cancellation. */
+    static bool runHelperWithTimeout (const juce::File& exe, const juce::StringArray& args, int timeoutMs,
+                                      const std::function<bool()>& shouldStop, juce::String& output);
 
     /** Scans a plugin file in a performer-plugin-host process so a crashing plugin
         can't take Performer down. Falls back to in-process if the helper is missing. */
