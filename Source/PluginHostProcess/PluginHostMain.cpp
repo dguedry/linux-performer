@@ -525,6 +525,21 @@ public:
             const auto formatName = args[i + 1].text;
             const auto fileOrId = args[i + 2].text;
 
+            // Bridged plugins sometimes hang in module unload, after their descriptions
+            // have been collected, waiting for a Wine process that won't exit. If the
+            // probe runs suspiciously long, kill our Wine descendants: the unload then
+            // returns and the results still get printed.
+            static std::atomic<bool> probeDone { false };
+            std::thread ([]
+            {
+                std::this_thread::sleep_for (std::chrono::seconds (30));
+                if (! probeDone.load())
+                {
+                    std::cerr << "performer-plugin-host: probe still running after 30 s, killing bridge processes\n";
+                    killDescendants (::getpid());
+                }
+            }).detach();
+
             AudioPluginFormatManager fm;
             addDefaultFormatsToManager (fm);
             for (auto* f : fm.getFormats())
@@ -541,6 +556,7 @@ public:
                         if (auto xml = d->createXml())
                             std::cout << xml->toString (XmlElement::TextFormat().singleLine()).toRawUTF8() << "\n";
                 }
+            probeDone.store (true);
             std::cout << "<SCAN-DONE>\n";
             std::cout.flush();
             ::close (STDOUT_FILENO);      // the parent has everything; don't make it wait for teardown
