@@ -450,9 +450,8 @@ private:
 };
 
 //==============================================================================
-/** Kills every process descended from us. Wine processes started by yabridge put
-    themselves in their own session, so a process-group kill alone misses them. */
-static void killDescendants (pid_t root)
+/** Every process descended from `root` (not including root itself). */
+static std::vector<pid_t> collectDescendants (pid_t root)
 {
     std::vector<std::pair<pid_t, pid_t>> procs;   // (pid, ppid)
     if (DIR* d = ::opendir ("/proc"))
@@ -477,13 +476,41 @@ static void killDescendants (pid_t root)
         ::closedir (d);
     }
 
-    std::vector<pid_t> toKill { root };
-    for (size_t i = 0; i < toKill.size(); ++i)
+    std::vector<pid_t> found { root };
+    for (size_t i = 0; i < found.size(); ++i)
         for (auto& [pid, ppid] : procs)
-            if (ppid == toKill[i] && std::find (toKill.begin(), toKill.end(), pid) == toKill.end())
-                toKill.push_back (pid);
-    for (size_t i = 1; i < toKill.size(); ++i)      // skip ourselves
-        ::kill (toKill[i], SIGKILL);
+            if (ppid == found[i] && std::find (found.begin(), found.end(), pid) == found.end())
+                found.push_back (pid);
+    found.erase (found.begin());
+    return found;
+}
+
+/** Kills every process descended from us. Wine processes started by yabridge put
+    themselves in their own session, so a process-group kill alone misses them. */
+static void killDescendants (pid_t root)
+{
+    for (auto pid : collectDescendants (root))
+        ::kill (pid, SIGKILL);
+}
+
+/** If Performer dies while our message thread is stuck inside a plugin call, the
+    control thread never sees the connection close. Watch the parent directly. */
+static void armParentWatchdog()
+{
+    const pid_t parent = ::getppid();
+    std::thread ([parent]
+    {
+        for (;;)
+        {
+            std::this_thread::sleep_for (std::chrono::milliseconds (300));
+            if (::getppid() != parent)
+            {
+                std::cerr << "performer-plugin-host: Performer is gone, exiting\n";
+                killDescendants (::getpid());
+                ::kill (-::getpid(), SIGKILL);
+            }
+        }
+    }).detach();
 }
 
 /** Plugin teardown can hang (yabridge waits for a Wine process that never exits).
@@ -511,6 +538,7 @@ public:
         // Own process group: lets the watchdog take stuck Wine children down with us,
         // without touching Performer.
         ::setpgid (0, 0);
+        armParentWatchdog();
 
         ArgumentList args ("performer-plugin-host", commandLine);
 
