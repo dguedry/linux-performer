@@ -480,6 +480,14 @@ int main()
         const auto r3 = PluginHost::runHelperWithTimeout (File ("/bin/echo"), StringArray { "hello", "scanner" }, 5000, 100, [] { return false; }, out);
         CHECK (r3 == HR::finished && out.trim() == "hello scanner");
 
+        // A hard stop (application exiting) ignores the grace period.
+        t0 = Time::getMillisecondCounterHiRes();
+        const auto r5 = PluginHost::runHelperWithTimeout (File ("/bin/sleep"), StringArray { "30" }, 60000, 45000, [] { return false; }, out,
+                                                          [t0] { return Time::getMillisecondCounterHiRes() - t0 > 200.0; });
+        const auto ms5 = Time::getMillisecondCounterHiRes() - t0;
+        std::printf ("     hard-stopped helper: result %d after %.0f ms\n", (int) r5, ms5);
+        CHECK (r5 == HR::stopped && ms5 < 1500.0);
+
         // Nothing left behind.
         ChildProcess pgrep;
         pgrep.start (StringArray { "pgrep", "-P", String ((int) ::getpid()), "sleep" });
@@ -530,6 +538,32 @@ int main()
             CHECK (list.getBlacklistedFiles().isEmpty());
             CHECK (list.getNumTypes() + ds.getFailedFiles().size() == expected);
             CHECK (list.getNumTypes() >= 1);
+
+            // The app-owned background scanner (what the Plugins window uses).
+            auto& sc = host.getScanner();
+            CHECK (! sc.isScanning());
+            CHECK (sc.startScan (*vst3, FileSearchPath (yabridgeDir.getFullPathName())));
+            CHECK (sc.isScanning());
+            CHECK (! sc.startScan (*vst3, FileSearchPath (yabridgeDir.getFullPathName())));   // busy
+            t0 = Time::getMillisecondCounterHiRes();
+            double lastReport = 0.0;
+            while (sc.isScanning() && Time::getMillisecondCounterHiRes() - t0 < 120000.0)
+            {
+                pump (50);
+                const auto el = Time::getMillisecondCounterHiRes() - t0;
+                if (el - lastReport > 5000.0)
+                {
+                    lastReport = el;
+                    std::printf ("       ... %.0f s: progress %.2f, current '%s'\n", el / 1000.0, sc.getProgress(), sc.getCurrentFile().toRawUTF8());
+                }
+            }
+            int fromYabridge = 0;
+            for (auto& d : host.getKnownPlugins().getTypes()) if (d.fileOrIdentifier.startsWith (yabridgeDir.getFullPathName())) ++fromYabridge;
+            std::printf ("     background scanner: %d/%d yabridge plugins, %d newly blacklisted, %d failed, %.1f s\n",
+                         fromYabridge, expected, sc.getNewlyBlacklistedFiles().size(), sc.getFailedFiles().size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
+            CHECK (! sc.isScanning());
+            CHECK (sc.getNewlyBlacklistedFiles().isEmpty());
+            CHECK (fromYabridge == expected);
         }
     }
 

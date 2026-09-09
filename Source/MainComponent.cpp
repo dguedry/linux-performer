@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "MappingSuggestions.h"
+#include "PluginManagerComponent.h"
 #include <optional>
 
 using namespace juce;
@@ -1542,13 +1543,11 @@ void MainComponent::showAudioSettings()
 
 void MainComponent::showPluginManager()
 {
-    auto& host = engine.getPluginHost();
-    auto* list = new PluginListComponent (host.getFormatManager(), host.getKnownPlugins(), host.getDeadMansPedalFile(), &host.getSettings(), true);
-    list->setNumberOfThreadsForScanning (4);
-    list->setSize (860, 560);
+    auto* content = new PluginManagerComponent (engine.getPluginHost(), [this] (const String& s) { showStatus (s); });
+    content->setSize (960, 600);
     DialogWindow::LaunchOptions o;
-    o.content.setOwned (list);
-    o.dialogTitle = "Plugins  -  use Options to scan for VST3 / LV2 / LADSPA";
+    o.content.setOwned (content);
+    o.dialogTitle = "Plugins";
     o.dialogBackgroundColour = bgPanel;
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;

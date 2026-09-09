@@ -2,6 +2,7 @@
 #include "RemotePlugin.h"
 #include <cstdio>
 #include <functional>
+#include <mutex>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -40,13 +41,46 @@ PluginHost::PluginHost (PropertiesFile& s) : settings (s)
     listListener = std::make_unique<ListListener> (*this);
     knownPlugins.addChangeListener (listListener.get());
     knownPlugins.setCustomScanner (std::make_unique<OutOfProcessScanner>());
+    scanner = std::make_unique<PluginScanner> (*this);
+}
+
+FileSearchPath PluginHost::getScanPaths (AudioPluginFormat& format) const
+{
+    auto paths = format.getDefaultLocationsToSearch();
+    for (auto& p : StringArray::fromTokens (settings.getValue ("extraScanFolders"), "\n", {}))
+        if (p.trim().isNotEmpty())
+            paths.addIfNotAlreadyThere (File (p.trim()));
+    return paths;
+}
+
+void PluginHost::addScanFolder (const File& folder)
+{
+    auto folders = StringArray::fromTokens (settings.getValue ("extraScanFolders"), "\n", {});
+    folders.removeEmptyStrings();
+    folders.addIfNotAlreadyThere (folder.getFullPathName());
+    settings.setValue ("extraScanFolders", folders.joinIntoString ("\n"));
+    settings.saveIfNeeded();
 }
 
 // Unlike juce::ChildProcess this never blocks inside a read: the scanner thread pool
 // kills threads that don't stop, and a thread killed inside fread() aborts the whole
 // application.
+bool PluginHost::isWineBridged (const String& fileOrIdentifier)
+{
+    File f (fileOrIdentifier);
+    if (! f.exists()) return false;
+    if (f.getFullPathName().containsIgnoreCase ("yabridge")) return true;
+    // A yabridge VST3 bundle contains a .so that is a symlink to libyabridge-vst3.so.
+    for (const auto& so : f.findChildFiles (File::findFiles, true, "*.so"))
+        if (so.isSymbolicLink() && so.getLinkedTarget().getFileName().containsIgnoreCase ("yabridge"))
+            return true;
+    return false;
+}
+
 PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args, int timeoutMs,
-                                                           int graceAfterStopMs, const std::function<bool()>& shouldStop, String& output)
+                                                           int graceAfterStopMs, const std::function<bool()>& shouldStop,
+                                                           String& output, const std::function<bool()>& hardStop,
+                                                           const String& endMarker)
 {
     {
         int fds[2];
@@ -75,6 +109,7 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
         double stopRequestedAt = -1.0;
         auto result = HelperResult::finished;
 
+        bool sawEndMarker = false;
         for (;;)
         {
             pollfd pfd { fds[0], POLLIN, 0 };
@@ -83,7 +118,14 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
             {
                 char buf[8192];
                 const auto n = ::read (fds[0], buf, sizeof (buf));
-                if (n > 0) { collected.write (buf, (size_t) n); continue; }
+                if (n > 0)
+                {
+                    collected.write (buf, (size_t) n);
+                    // The child signals completion explicitly: don't wait for EOF, which
+                    // a grandchild holding the pipe open could delay indefinitely.
+                    if (endMarker.isNotEmpty() && collected.toString().contains (endMarker)) { sawEndMarker = true; break; }
+                    continue;
+                }
                 if (n == 0 || (errno != EINTR && errno != EAGAIN)) break;   // EOF: child closed stdout
             }
 
@@ -91,6 +133,7 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
             if (stopRequestedAt < 0.0 && shouldStop())
                 stopRequestedAt = now;
 
+            if (hardStop && hardStop())                                       { result = HelperResult::stopped; break; }
             if (now - start > timeoutMs)                                      { result = HelperResult::timedOut; break; }
             if (stopRequestedAt >= 0.0 && now - stopRequestedAt > graceAfterStopMs) { result = HelperResult::stopped; break; }
         }
@@ -98,8 +141,19 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
 
         if (result != HelperResult::finished)
             ::kill (pid, SIGKILL);
+
+        // Reap; a child that finished its work but can't tear down gets a few seconds.
         int status = 0;
-        ::waitpid (pid, &status, 0);
+        if (sawEndMarker)
+        {
+            for (int i = 0; i < 100 && ::waitpid (pid, &status, WNOHANG) == 0; ++i)
+                Thread::sleep (50);
+            if (::waitpid (pid, &status, WNOHANG) == 0) { ::kill (pid, SIGKILL); ::waitpid (pid, &status, 0); }
+        }
+        else
+        {
+            ::waitpid (pid, &status, 0);
+        }
 
         output = collected.toString();
         return result;
@@ -115,12 +169,29 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
         return true;
     }
 
+    // Wine-bridged plugins are probed one at a time: concurrent Wine start-ups are what
+    // makes them stall. Native plugins run in parallel.
+    static std::mutex wineMutex;
+    std::unique_lock<std::mutex> wineLock (wineMutex, std::defer_lock);
+    const bool bridged = isWineBridged (fileOrIdentifier);
+    if (bridged) wineLock.lock();
+
     // JUCE's scan dialog asks every still-running probe to exit the moment one thread
     // runs out of files, then waits up to a minute for them. Give slow (Wine-bridged)
     // plugins a real chance to finish in that window instead of treating it as failure.
+    // A probe that hangs is retried once: Wine occasionally stalls and recovers.
     String output;
-    const auto res = runHelperWithTimeout (exe, StringArray { "--scan", format.getName(), fileOrIdentifier }, 120000, 45000,
-                                           [this] { return shouldExit(); }, output);
+    const auto started = Time::getMillisecondCounterHiRes();
+    auto res = HelperResult::timedOut;
+    for (int attempt = 0; attempt < 2 && res == HelperResult::timedOut; ++attempt)
+    {
+        if (attempt > 0) Thread::sleep (2000);
+        output.clear();
+        res = runHelperWithTimeout (exe, StringArray { "--scan", format.getName(), fileOrIdentifier }, 60000, 45000,
+                                    [this] { return shouldExit(); }, output,
+                                    [] { return PluginScanner::hardStop.load(); }, "<SCAN-DONE>");
+    }
+    const auto elapsedMs = Time::getMillisecondCounterHiRes() - started;
 
     int parsed = 0;
     for (auto& line : StringArray::fromLines (output))
@@ -132,10 +203,10 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
             }
 
     if (SystemStats::getEnvironmentVariable ("PERFORMER_SCAN_DEBUG", {}).isNotEmpty())
-        std::fprintf (stderr, "[scan] %s %s: %s, %d bytes of output, %d descriptions\n",
+        std::fprintf (stderr, "[scan] %s %s: %s in %.1f s, %d bytes of output, %d descriptions\n",
                       format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(),
                       res == HelperResult::finished ? "ok" : res == HelperResult::timedOut ? "TIMED OUT" : "stopped before finishing",
-                      (int) output.length(), parsed);
+                      elapsedMs / 1000.0, (int) output.length(), parsed);
 
     // Only a plugin that hung for the whole timeout on its own is reported as failed
     // (and blacklisted). A probe that was asked to stop is simply not a result: the
@@ -145,6 +216,7 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
 
 PluginHost::~PluginHost()
 {
+    scanner->shutdown();
     knownPlugins.removeChangeListener (listListener.get());
 }
 

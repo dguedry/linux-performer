@@ -14,9 +14,16 @@
 #include "../Ipc/Protocol.h"
 #include <iostream>
 #include <mutex>
+#include <algorithm>
+#include <cstring>
+#include <string>
+#include <vector>
 #include <thread>
 #include <signal.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <sys/types.h>
 
 using namespace juce;
 using namespace perf;
@@ -443,14 +450,51 @@ private:
 };
 
 //==============================================================================
+/** Kills every process descended from us. Wine processes started by yabridge put
+    themselves in their own session, so a process-group kill alone misses them. */
+static void killDescendants (pid_t root)
+{
+    std::vector<std::pair<pid_t, pid_t>> procs;   // (pid, ppid)
+    if (DIR* d = ::opendir ("/proc"))
+    {
+        while (auto* e = ::readdir (d))
+        {
+            const pid_t pid = (pid_t) atoi (e->d_name);
+            if (pid <= 0) continue;
+            FILE* f = ::fopen (("/proc/" + std::string (e->d_name) + "/stat").c_str(), "r");
+            if (f == nullptr) continue;
+            char buf[512] = {};
+            const auto n = ::fread (buf, 1, sizeof (buf) - 1, f);
+            ::fclose (f);
+            if (n == 0) continue;
+            // "pid (comm) state ppid ..." -- comm may contain spaces, so find the last ')'
+            const char* close = ::strrchr (buf, ')');
+            if (close == nullptr) continue;
+            int ppid = 0; char state = 0;
+            if (::sscanf (close + 1, " %c %d", &state, &ppid) == 2)
+                procs.emplace_back (pid, (pid_t) ppid);
+        }
+        ::closedir (d);
+    }
+
+    std::vector<pid_t> toKill { root };
+    for (size_t i = 0; i < toKill.size(); ++i)
+        for (auto& [pid, ppid] : procs)
+            if (ppid == toKill[i] && std::find (toKill.begin(), toKill.end(), pid) == toKill.end())
+                toKill.push_back (pid);
+    for (size_t i = 1; i < toKill.size(); ++i)      // skip ourselves
+        ::kill (toKill[i], SIGKILL);
+}
+
 /** Plugin teardown can hang (yabridge waits for a Wine process that never exits).
-    Once we've decided to exit, give cleanup a moment, then kill our whole process
-    group, which includes any Wine helpers we started. */
+    Once we've decided to exit, give cleanup a moment, then take our descendants and
+    our whole process group down with us. */
 static void armExitWatchdog (int graceMs)
 {
     std::thread ([graceMs]
     {
         std::this_thread::sleep_for (std::chrono::milliseconds (graceMs));
+        killDescendants (::getpid());
         ::kill (-::getpid(), SIGKILL);
     }).detach();
 }
@@ -472,7 +516,10 @@ public:
 
         if (args.containsOption ("--scan"))
         {
-            // --scan <format> <file-or-identifier>: print PluginDescription XML, one per line.
+            // --scan <format> <file-or-identifier>: print PluginDescription XML, one per
+            // line, then an end marker. Our stdout must not leak into Wine processes the
+            // plugin bridge spawns, or the parent would wait for them to exit.
+            ::fcntl (STDOUT_FILENO, F_SETFD, FD_CLOEXEC);
             const int i = args.indexOfOption ("--scan");
             if (i < 0 || i + 2 >= args.size()) { setApplicationReturnValue (2); quit(); return; }
             const auto formatName = args[i + 1].text;
@@ -494,6 +541,7 @@ public:
                         if (auto xml = d->createXml())
                             std::cout << xml->toString (XmlElement::TextFormat().singleLine()).toRawUTF8() << "\n";
                 }
+            std::cout << "<SCAN-DONE>\n";
             std::cout.flush();
             ::close (STDOUT_FILENO);      // the parent has everything; don't make it wait for teardown
             armExitWatchdog (3000);
@@ -512,6 +560,7 @@ public:
 
         auto* shm = ipc::openSharedBlock (args[i + 1].text);
         const int fd = args[i + 2].text.getIntValue();
+        if (fd >= 0) ::fcntl (fd, F_SETFD, FD_CLOEXEC);   // Wine children must not hold the control socket open
         if (shm == nullptr || fd < 0)
         {
             std::cerr << "performer-plugin-host: cannot open shared block\n";

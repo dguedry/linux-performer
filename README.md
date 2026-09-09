@@ -42,12 +42,14 @@ cmake --build build
 
 1. **Audio...** – pick the output device. Under PipeWire both the JACK and
    ALSA device types work; JACK gives the lowest latency.
-2. **Plugins...** – *Options → Scan for new or updated VST3 plugins* (and LV2).
-   Each plugin file is probed in a separate `performer-plugin-host` process
-   with a two-minute limit, so a crashing or hanging plugin can't take the
-   scan down. A file that was being probed when Performer itself died shows in
-   red as "Deactivated"; select it and use *Options → Remove selected plug-in
-   from list* (or *Clear list*) and scan again.
+2. **Plugins...** – press **Scan VST3** (or LV2 / LADSPA) to look in the
+   standard folders, or **Scan folder...** to add one of your own. Progress is
+   shown at the bottom of the window and the scan keeps running if you close
+   it. Each plugin file is probed in a separate `performer-plugin-host` process;
+   Wine-bridged plugins are probed one at a time and retried once if they stall,
+   so a crashing or hanging plugin can't take the scan down. A plugin shown in
+   red as "Deactivated" hung twice while being probed; select it and press
+   **Remove selected** to give it another chance, or **Clear list** to start over.
 3. Select an input on the left, give it a **MIDI device** and **channel**.
 4. Click a program in the middle list (this also activates it), name it, and
    **Add instrument...**. Use **Edit GUI** to open the plugin's own editor.
@@ -104,7 +106,8 @@ tree, then via `$PERFORMER_PLUGIN_HOST`.
 ## Layout of the code
 
 - `Source/Model.*` – the document (`Setup → InputDef → ProgramDef → SlotDef / MappingDef`) and JSON persistence.
-- `Source/PluginHost.*` – plugin formats, known-plugin list, instantiation, mapping templates.
+- `Source/PluginHost.*` – plugin formats, known-plugin list, out-of-process probing, mapping templates.
+- `Source/PluginScanner.*` – app-owned background scan; `Source/PluginManagerComponent.h` – the Plugins window.
 - `Source/MappingSuggestions.*` – per-plugin mapping templates and name-based CC suggestions.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
 - `Source/RemotePlugin.*` – host-side proxy for one plugin process (spawn, control channel, real-time block exchange).
