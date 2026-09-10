@@ -507,7 +507,11 @@ int main()
             list.setCustomScanner (std::make_unique<PluginHost::OutOfProcessScanner>());
             TemporaryFile dmp (".txt");
             PluginDirectoryScanner ds (list, *vst3, FileSearchPath (yabridgeDir.getFullPathName()), true, dmp.getFile(), false);
-            const int expected = yabridgeDir.getNumberOfChildFiles (File::findFilesAndDirectories, "*.vst3");
+            // Bundles whose Windows plugin is currently missing (being reinstalled) can't load.
+            int expected = 0;
+            for (const auto& bundle : yabridgeDir.findChildFiles (File::findFilesAndDirectories, false, "*.vst3"))
+                if (PluginHost::brokenBridgeTarget (bundle.getFullPathName()).isEmpty()) ++expected;
+                else std::printf ("     (skipping %s: bridge target missing)\n", bundle.getFileName().toRawUTF8());
 
             struct Job : public ThreadPoolJob
             {
@@ -536,7 +540,7 @@ int main()
             // A probe stopped by the teardown may legitimately yield nothing (it will be
             // scanned next time); what must never happen is a blacklist entry.
             CHECK (list.getBlacklistedFiles().isEmpty());
-            CHECK (list.getNumTypes() + ds.getFailedFiles().size() == expected);
+            CHECK (list.getNumTypes() <= expected && list.getNumTypes() + ds.getFailedFiles().size() >= expected);
             CHECK (list.getNumTypes() >= 1);
 
             // The app-owned background scanner (what the Plugins window uses).
