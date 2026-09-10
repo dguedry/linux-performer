@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "KeyboardPanel.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -73,6 +74,8 @@ private:
                      audioBtn { "Audio..." }, pluginsBtn { "Plugins..." }, midiRefreshBtn { "Rescan MIDI" },
                      panicBtn { "PANIC" };
     juce::ToggleButton preloadToggle { "Preload all programs" };
+    juce::TextButton keyboardBtn { "Keyboard" };
+    std::unique_ptr<KeyboardPanel> keyboardPanel;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
     juce::Label statusLabel, cpuLabel, fileLabel;

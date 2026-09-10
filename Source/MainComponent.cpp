@@ -1238,6 +1238,23 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     preloadToggle.setTooltip ("Keep every used program's plugins loaded so program changes are instant (uses more RAM)");
     preloadToggle.onClick = [this] { engine.setPreloadAllPrograms (preloadToggle.getToggleState()); };
 
+    keyboardPanel = std::make_unique<KeyboardPanel> (engine);
+    addChildComponent (keyboardPanel.get());
+    addAndMakeVisible (keyboardBtn);
+    keyboardBtn.setClickingTogglesState (true);
+    keyboardBtn.setColour (TextButton::buttonOnColourId, accentDim);
+    keyboardBtn.setTooltip ("Show an on-screen keyboard and controllers that play into the selected input");
+    keyboardBtn.onClick = [this]
+    {
+        const bool show = keyboardBtn.getToggleState();
+        if (! show) keyboardPanel->releaseAll();
+        keyboardPanel->setVisible (show);
+        settings.setValue ("showKeyboard", show);
+        resized();
+    };
+    keyboardBtn.setToggleState (settings.getBoolValue ("showKeyboard", false), dontSendNotification);
+    keyboardPanel->setVisible (keyboardBtn.getToggleState());
+
     addAndMakeVisible (tailLabel);
     tailLabel.setColour (Label::textColourId, textDim);
     addAndMakeVisible (tailSlider);
@@ -1308,6 +1325,7 @@ void MainComponent::resized()
     pluginsBtn.setBounds (toolbar.removeFromLeft (80));     toolbar.removeFromLeft (4);
     midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (12);
     panicBtn.setBounds (toolbar.removeFromRight (90));      toolbar.removeFromRight (12);
+    keyboardBtn.setBounds (toolbar.removeFromRight (90));   toolbar.removeFromRight (12);
     tailSlider.setBounds (toolbar.removeFromRight (70));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (34));     toolbar.removeFromRight (8);
     preloadToggle.setBounds (toolbar.removeFromRight (170));
@@ -1316,6 +1334,12 @@ void MainComponent::resized()
     cpuLabel.setBounds (status.removeFromRight (110));
     fileLabel.setBounds (status.removeFromRight (400));
     statusLabel.setBounds (status);
+
+    if (keyboardPanel != nullptr && keyboardPanel->isVisible())
+    {
+        keyboardPanel->setBounds (r.removeFromBottom (KeyboardPanel::preferredHeight).reduced (8, 0));
+        r.removeFromBottom (8);
+    }
 
     r.reduce (8, 0);
     inputsPanel->setBounds (r.removeFromLeft (260));
@@ -1330,6 +1354,7 @@ void MainComponent::resized()
 void MainComponent::timerCallback()
 {
     const auto now = Time::getMillisecondCounterHiRes();
+    if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->refreshLabel();   // input name/channel may have been edited
     cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + String (engine.getSampleRate() / 1000.0, 1) + " kHz"
                       + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
@@ -1361,6 +1386,7 @@ void MainComponent::selectInput (int idx)
 {
     const auto& inputs = engine.getSetup().inputs;
     selectedInput = jlimit (0, jmax (0, (int) inputs.size() - 1), idx);
+    if (keyboardPanel != nullptr) keyboardPanel->setTargetInput (inputs.empty() ? -1 : selectedInput);
     refreshProgramView();
 }
 
@@ -1372,6 +1398,7 @@ void MainComponent::refreshAll()
     tailSlider.setValue (setup.releaseTailSeconds, dontSendNotification);
     inputsPanel->refresh();
     inputsPanel->setSelected (selectedInput);
+    if (keyboardPanel != nullptr) keyboardPanel->setTargetInput (setup.inputs.empty() ? -1 : selectedInput);
     refreshProgramView();
 }
 
@@ -1388,6 +1415,7 @@ void MainComponent::setupChanged() { markDirty(); refreshAll(); }
 void MainComponent::programChanged (int inputIndex, int)
 {
     markDirty();
+    if (keyboardPanel != nullptr) keyboardPanel->refreshLabel();
     inputsPanel->repaint();
     if (inputIndex == selectedInput) refreshProgramView();
 }

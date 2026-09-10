@@ -66,7 +66,13 @@ cmake --build build
    10 pan, 91 reverb, 93 chorus, 94 detune, 5 portamento, 12 drive, 13 delay mix).
    Untick what you don't want and press **Add selected**. Templates live in
    `~/.config/Performer/mapping-templates.json`.
-6. **Save** the setup. It is reloaded automatically next start; the setup is
+6. **Keyboard** (toolbar) opens an on-screen keyboard with velocity, sustain,
+   mod wheel, pitch bend and a free CC number/value pair. It plays into the
+   selected input on that input's channel, through the same path as real MIDI,
+   so it works for trying sounds, program key zones and MIDI learn without a
+   controller. Click the keys, or focus the keyboard and use the computer
+   keyboard (A S D F G H J K, W E T Y U for sharps, Z / X to shift octave).
+7. **Save** the setup. It is reloaded automatically next start; the setup is
    also autosaved on quit.
 
 Plugin state is captured into the setup file whenever a program is unloaded
@@ -114,6 +120,7 @@ tree, then via `$PERFORMER_PLUGIN_HOST`.
 - `Source/Ipc/Protocol.*` – shared-memory layout and framing shared by both executables.
 - `Source/PluginHostProcess/PluginHostMain.cpp` – the `performer-plugin-host` executable.
 - `Source/MainComponent.*` – the UI (inputs, programs, slots, mappings panels).
+- `Source/KeyboardPanel.h` – on-screen keyboard and test controllers.
 - `Source/Main.cpp` – application entry.
 
 ## Tests
