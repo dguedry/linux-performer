@@ -311,6 +311,9 @@ public:
         if (! prog.isEmpty())
         {
             g.setColour (engine.isProgramLoaded (in, row) ? Colours::limegreen : textDim);
+            if (engine.isProgramLoaded (in, row))
+                for (int sIdx = 0; sIdx < (int) prog.slots.size(); ++sIdx)
+                    if (engine.isPluginLoading (in, row, sIdx)) { g.setColour (Colours::orange); break; }
             g.setFont (FontOptions (11.0f));
             g.drawText (String (prog.slots.size()) + (prog.slots.size() == 1 ? " plugin" : " plugins"), w - 70, 0, 64, h, Justification::centredRight, true);
         }
@@ -358,6 +361,7 @@ public:
             auto row = std::make_unique<Row> (*this, i);
             row->update (effects[(size_t) i],
                          engine.isPluginAlive (inputIndex, program, slot, i),
+                         engine.isPluginLoading (inputIndex, program, slot, i),
                          engine.getPluginLoadError (inputIndex, program, slot, i),
                          i > 0, i + 1 < (int) effects.size());
             addAndMakeVisible (row.get());
@@ -410,15 +414,16 @@ private:
             removeBtn.onClick = [this, &e, &o] { e.removeEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
         }
 
-        void update (const EffectDef& def, bool loaded, const String& error, bool canUp, bool canDown)
+        void update (const EffectDef& def, bool loaded, bool loading, const String& error, bool canUp, bool canDown)
         {
             alive = loaded;
             on.setToggleState (! def.bypassed, dontSendNotification);
-            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
-            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (def.bypassed ? textDim : Colours::white));
+            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
+            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (def.bypassed || loading ? textDim : Colours::white));
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
-            guiBtn.setButtonText (loaded ? "Edit GUI" : "Reload");
-            guiBtn.setColour (TextButton::buttonColourId, loaded ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
+            guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
+            guiBtn.setEnabled (! loading);
+            guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             upBtn.setEnabled (canUp);
             downBtn.setEnabled (canDown);
         }
@@ -545,20 +550,21 @@ public:
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
 
-        void update (const SlotDef& def, bool loaded, const String& error, int inputIndex, int program)
+        void update (const SlotDef& def, bool loaded, bool loading, const String& error, int inputIndex, int program)
         {
             alive = loaded;
             enabled.setToggleState (def.enabled, dontSendNotification);
-            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]", dontSendNotification);
-            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : Colours::white);
+            name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
+            name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
             gain.setValue (def.gainDb, dontSendNotification);
             transpose.setValue (def.transpose, dontSendNotification);
             lowKey.setValue (def.lowKey, dontSendNotification);
             highKey.setValue (def.highKey, dontSendNotification);
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
-            guiBtn.setButtonText (loaded ? "Edit GUI" : "Reload");
-            guiBtn.setColour (TextButton::buttonColourId, loaded ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
+            guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
+            guiBtn.setEnabled (! loading);
+            guiBtn.setColour (TextButton::buttonColourId, loaded || loading ? getLookAndFeel().findColour (TextButton::buttonColourId) : Colours::darkred);
             chain.rebuild (def.effects, inputIndex, program);
         }
 
@@ -657,7 +663,7 @@ public:
             for (int s = 0; s < (int) def.slots.size(); ++s)
             {
                 auto row = std::make_unique<SlotRow> (*this, s);
-                row->update (def.slots[(size_t) s], engine.isPluginAlive (in, prog, s), engine.getPluginLoadError (in, prog, s), in, prog);
+                row->update (def.slots[(size_t) s], engine.isPluginAlive (in, prog, s), engine.isPluginLoading (in, prog, s), engine.getPluginLoadError (in, prog, s), in, prog);
                 container.addAndMakeVisible (row.get());
                 rows.push_back (std::move (row));
             }

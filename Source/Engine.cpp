@@ -13,11 +13,13 @@ namespace perf
 struct Engine::PluginNode : public RemotePlugin::Listener
 {
     PluginNode (Engine& e, int in, int prog, int slot, int effect)
-        : engine (e), inputIndex (in), program (prog), slotIndex (slot), effectIndex (effect) {}
+        : engine (e), inputIndex (in), program (prog), slotIndex (slot), effectIndex (effect), id (nextId++) {}
 
     ~PluginNode() override { if (plugin != nullptr) plugin->setListener (nullptr); }
 
     bool alive() const { return plugin != nullptr && plugin->isAlive(); }
+
+    static inline std::atomic<uint64_t> nextId { 1 };
 
     // RemotePlugin::Listener (reader thread)
     void remoteParameterTouched (RemotePlugin&, int index, float) override
@@ -37,6 +39,8 @@ struct Engine::PluginNode : public RemotePlugin::Listener
     std::atomic<int> inputIndex;
     int program;
     std::atomic<int> slotIndex, effectIndex;
+    const uint64_t id;
+    std::atomic<bool> loading { false };
     std::unique_ptr<RemotePlugin> plugin;
     String loadError;
     MidiBuffer midi;
@@ -121,6 +125,8 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
+    loaderThread = std::thread ([this] { loaderThreadFunc(); });
+
     loadSetup (Setup::makeDefault());
     startTimer (750);
 }
@@ -133,6 +139,18 @@ Engine::~Engine()
     deviceManager.removeAudioCallback (this);
     deviceManager.removeChangeListener (this);
     teardownRuntimes();
+
+    // Stop the loader: drop queued jobs, cut short a load in progress, join.
+    {
+        std::lock_guard<std::mutex> l (loaderMutex);
+        loaderQuit.store (true);
+        loadQueue.clear();
+        if (loadInProgress != nullptr) loadInProgress->shutdown();
+    }
+    loaderCv.notify_all();
+    if (loaderThread.joinable()) loaderThread.join();
+    for (auto& r : loadResults)
+        if (r.plugin != nullptr) r.plugin->shutdown();
 }
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
@@ -464,7 +482,9 @@ std::unique_ptr<Engine::SlotRuntime> Engine::buildSlot (int inputIndex, int prog
     auto slot = std::make_unique<SlotRuntime> (*this, inputIndex, program, slotIndex);
     slot->applyDef (def);
     slot->stereo.setSize (2, blockSize);
-    loadPluginInto (*slot, def.plugin, def.state);
+    slot->midi.ensureSize (2048);
+    nodeRegistry[slot->id] = slot.get();
+    queueLoad (*slot, def.plugin, def.state);
     for (int e = 0; e < (int) def.effects.size(); ++e)
         slot->effects.push_back (buildEffect (inputIndex, program, slotIndex, e, def.effects[(size_t) e]));
     return slot;
@@ -474,29 +494,102 @@ std::unique_ptr<Engine::EffectRuntime> Engine::buildEffect (int inputIndex, int 
 {
     auto fx = std::make_unique<EffectRuntime> (*this, inputIndex, program, slotIndex, effectIndex);
     fx->bypassed.store (def.bypassed);
-    loadPluginInto (*fx, def.plugin, def.state);
+    fx->midi.ensureSize (2048);
+    nodeRegistry[fx->id] = fx.get();
+    queueLoad (*fx, def.plugin, def.state);
     return fx;
 }
 
-void Engine::loadPluginInto (PluginNode& node, const PluginDescription& desc, const MemoryBlock& state)
+void Engine::queueLoad (PluginNode& node, const PluginDescription& desc, const MemoryBlock& state)
 {
-    auto plugin = std::make_unique<RemotePlugin>();
-    String error;
-    if (! plugin->load (desc, sampleRate, blockSize, error))
+    node.loading.store (true);
+    node.loadError.clear();
+    ++pendingLoads;
     {
-        if (const auto missing = PluginHost::brokenBridgeTarget (desc.fileOrIdentifier); missing.isNotEmpty())
-            error << "  (its yabridge link points to a missing file: " << missing << " -- reinstall the plugin, then run yabridgectl sync and rescan)";
-        node.loadError = error;
-        listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load " + desc.name + ": " + error); });
+        std::lock_guard<std::mutex> l (loaderMutex);
+        loadQueue.push_back ({ node.id, desc, state, sampleRate, blockSize });
+    }
+    loaderCv.notify_one();
+}
+
+void Engine::loaderThreadFunc()
+{
+    for (;;)
+    {
+        LoadJob job;
+        {
+            std::unique_lock<std::mutex> l (loaderMutex);
+            loaderCv.wait (l, [this] { return loaderQuit.load() || ! loadQueue.empty(); });
+            if (loaderQuit.load()) return;
+            job = std::move (loadQueue.front());
+            loadQueue.pop_front();
+        }
+
+        LoadResult result { job.nodeId, std::make_unique<RemotePlugin>(), {}, job.sampleRate, job.blockSize };
+        {
+            std::lock_guard<std::mutex> l (loaderMutex);
+            loadInProgress = result.plugin.get();
+        }
+
+        if (! result.plugin->load (job.desc, job.sampleRate, job.blockSize, result.error))
+        {
+            if (const auto missing = PluginHost::brokenBridgeTarget (job.desc.fileOrIdentifier); missing.isNotEmpty())
+                result.error << "  (its yabridge link points to a missing file: " << missing << " -- reinstall the plugin, then run yabridgectl sync and rescan)";
+            result.plugin->shutdown();
+            result.plugin.reset();
+        }
+        else if (job.state.getSize() > 0 && ! result.plugin->setState (job.state))
+        {
+            result.error = job.desc.name + ": could not restore its saved state (" + result.plugin->getLastError() + ")";
+        }
+
+        {
+            std::lock_guard<std::mutex> l (loaderMutex);
+            loadInProgress = nullptr;
+            loadResults.push_back (std::move (result));
+        }
+        postEvent ({ Event::pluginLoaded, 0, 0, 0, 0, 0 });
+    }
+}
+
+void Engine::attachLoaded (LoadResult& r)
+{
+    --pendingLoads;
+    auto it = nodeRegistry.find (r.nodeId);
+    if (it == nodeRegistry.end())
+    {
+        // The node went away while its plugin was loading (program unloaded, slot removed).
+        if (r.plugin != nullptr) r.plugin->shutdown();
         return;
     }
+    auto* node = it->second;
+    node->loading.store (false);
 
-    if (state.getSize() > 0 && ! plugin->setState (state))
-        listeners.call ([&] (Listener& l) { l.statusMessage (desc.name + ": could not restore its saved state (" + plugin->getLastError() + ")"); });
+    if (r.plugin == nullptr)
+    {
+        node->loadError = r.error;
+        listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load plugin: " + r.error); });
+    }
+    else
+    {
+        if (r.error.isNotEmpty())
+            listeners.call ([&] (Listener& l) { l.statusMessage (r.error); });
+        if (r.sampleRate != sampleRate || r.blockSize != blockSize)
+            r.plugin->prepare (sampleRate, blockSize);      // device changed while loading
+        r.plugin->setListener (node);
+        const ScopedLock sl (lock);
+        node->plugin = std::move (r.plugin);
+    }
 
-    node.midi.ensureSize (2048);
-    plugin->setListener (&node);
-    node.plugin = std::move (plugin);
+    const int inputIndex = node->inputIndex.load();
+    const int program = node->program;
+    if (validInput (inputIndex) && validProgram (program))
+        if (auto* rt = getLoaded (inputIndex, program))
+        {
+            const ScopedLock sl (lock);
+            resolveMappings (*rt, setup.inputs[(size_t) inputIndex].programs[(size_t) program]);
+        }
+    notifyContent (inputIndex, program);
 }
 
 void Engine::unloadProgram (InputRuntime& in, int program)
@@ -534,7 +627,10 @@ void Engine::destroyProgramPlugins (ProgramRuntime& rt)
 
 void Engine::destroyNode (PluginNode* node)
 {
-    if (node == nullptr || node->plugin == nullptr) return;
+    if (node == nullptr) return;
+    nodeRegistry.erase (node->id);       // a load still in flight will be discarded on arrival
+    node->loading.store (false);
+    if (node->plugin == nullptr) return;
     node->plugin->setListener (nullptr);
     node->plugin->shutdown();
     node->plugin.reset();
@@ -584,8 +680,7 @@ bool Engine::addSlot (int inputIndex, int program, const PluginDescription& desc
     if (auto* rt = getLoaded (inputIndex, program))
     {
         auto slot = buildSlot (inputIndex, program, slotIndex, sd);
-        ok = slot->plugin != nullptr;
-        error = slot->loadError;
+        error.clear();     // loading continues in the background; failures arrive as status messages
         const ScopedLock sl (lock);
         rt->slots.push_back (std::move (slot));
     }
@@ -705,8 +800,7 @@ bool Engine::addEffect (int inputIndex, int program, int slot, const PluginDescr
         if (auto* chain = runtimeChainFor (*rt, slot))
         {
             auto fx = buildEffect (inputIndex, program, slot, effectIndex, ed);
-            ok = fx->plugin != nullptr;
-            error = fx->loadError;
+            error.clear();
             const ScopedLock sl (lock);
             chain->push_back (std::move (fx));
         }
@@ -826,10 +920,16 @@ bool Engine::isPluginAlive (int inputIndex, int program, int slot, int effect) c
     return node != nullptr && node->alive();
 }
 
+bool Engine::isPluginLoading (int inputIndex, int program, int slot, int effect) const
+{
+    auto* node = getNode (inputIndex, program, slot, effect);
+    return node != nullptr && node->loading.load();
+}
+
 String Engine::getPluginLoadError (int inputIndex, int program, int slot, int effect) const
 {
     auto* node = getNode (inputIndex, program, slot, effect);
-    if (node == nullptr) return {};
+    if (node == nullptr || node->loading.load()) return {};
     if (node->plugin != nullptr && ! node->plugin->isAlive())
         return "Plugin process stopped: " + node->plugin->getLastError();
     return node->loadError;
@@ -858,21 +958,20 @@ void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
     }
     if (desc == nullptr) return;
 
-    // Detach the old process from the audio thread, then start a fresh one.
+    if (node->loading.load()) return;
+
+    // Detach the old process from the audio thread, then start a fresh one in the background.
     std::unique_ptr<RemotePlugin> old;
     {
         const ScopedLock sl (lock);
         old = std::move (node->plugin);
-    }
-    if (old != nullptr) { old->setListener (nullptr); old->shutdown(); }
-
-    node->loadError.clear();
-    loadPluginInto (*node, *desc, *state);
-    {
-        const ScopedLock sl (lock);
         if (auto* rt = getLoaded (inputIndex, program))
             resolveMappings (*rt, def);
     }
+    if (old != nullptr) { old->setListener (nullptr); old->shutdown(); }
+
+    nodeRegistry[node->id] = node;
+    queueLoad (*node, *desc, *state);
     notifyContent (inputIndex, program);
 }
 
@@ -996,6 +1095,17 @@ void Engine::handleAsyncUpdate()
                 lastTouched = { e.input, e.a, e.b, e.c, e.d };
                 listeners.call ([&] (Listener& l) { l.parameterTouched (e.input, e.a, e.b, e.c, e.d); });
                 break;
+
+            case Event::pluginLoaded:
+            {
+                std::vector<LoadResult> done;
+                {
+                    std::lock_guard<std::mutex> l (loaderMutex);
+                    done.swap (loadResults);
+                }
+                for (auto& r : done) attachLoaded (r);
+                break;
+            }
 
             case Event::pluginDied:
                 if (auto* node = getNode (e.input, e.a, e.b, e.c))

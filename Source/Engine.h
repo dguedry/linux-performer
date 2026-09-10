@@ -6,8 +6,12 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace perf
@@ -109,6 +113,10 @@ public:
         start; a plugin whose process died is returned but reports isAlive() == false. */
     RemotePlugin* getPlugin (int inputIndex, int program, int slot, int effect = -1) const;
     bool isPluginAlive (int inputIndex, int program, int slot, int effect = -1) const;
+    /** True while the plugin's process is being started on the loader thread. */
+    bool isPluginLoading (int inputIndex, int program, int slot, int effect = -1) const;
+    /** True while any plugin is still loading. */
+    bool hasPendingLoads() const                    { return pendingLoads.load() > 0; }
     juce::String getPluginLoadError (int inputIndex, int program, int slot, int effect = -1) const;
     /** Restarts a plugin that failed or crashed, from its saved definition and state. */
     void reloadPlugin (int inputIndex, int program, int slot, int effect = -1);
@@ -158,8 +166,27 @@ private:
 
     struct Event
     {
-        enum Type { programChange, learn, touched, pluginDied };
+        enum Type { programChange, learn, touched, pluginDied, pluginLoaded };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
+    };
+
+    /** Plugins load on a background thread (starting Kontakt takes ~10 s; a Wine stall
+        can take far longer) so program changes and preloading never block the UI. */
+    struct LoadJob
+    {
+        uint64_t nodeId;
+        juce::PluginDescription desc;
+        juce::MemoryBlock state;
+        double sampleRate;
+        int blockSize;
+    };
+    struct LoadResult
+    {
+        uint64_t nodeId;
+        std::unique_ptr<RemotePlugin> plugin;
+        juce::String error;
+        double sampleRate;
+        int blockSize;
     };
 
     // AudioIODeviceCallback
@@ -186,7 +213,9 @@ private:
     std::unique_ptr<ProgramRuntime> buildProgram (int inputIndex, int program);
     std::unique_ptr<SlotRuntime> buildSlot (int inputIndex, int program, int slotIndex, const SlotDef&);
     std::unique_ptr<EffectRuntime> buildEffect (int inputIndex, int program, int slotIndex, int effectIndex, const EffectDef&);
-    void loadPluginInto (PluginNode&, const juce::PluginDescription&, const juce::MemoryBlock& state);
+    void queueLoad (PluginNode&, const juce::PluginDescription&, const juce::MemoryBlock& state);
+    void loaderThreadFunc();
+    void attachLoaded (LoadResult&);
     void unloadProgram (InputRuntime&, int program);
     void destroyProgramPlugins (ProgramRuntime&);
     void destroyNode (PluginNode*);
@@ -234,6 +263,17 @@ private:
     TouchedParam lastTouched;
 
     juce::ListenerList<Listener> listeners;
+
+    // background loader
+    std::thread loaderThread;
+    std::mutex loaderMutex;
+    std::condition_variable loaderCv;
+    std::deque<LoadJob> loadQueue;
+    std::vector<LoadResult> loadResults;
+    RemotePlugin* loadInProgress = nullptr;      // guarded by loaderMutex
+    std::atomic<bool> loaderQuit { false };
+    std::atomic<int> pendingLoads { 0 };
+    std::map<uint64_t, PluginNode*> nodeRegistry;   // message thread only
 
     friend struct PluginNode;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Engine)

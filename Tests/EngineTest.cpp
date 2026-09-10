@@ -96,6 +96,15 @@ int main()
     engine.addListener (&listener);
     engine.setReleaseTailSeconds (0.1);
 
+    // Plugins load on a background thread; wait for them (pumping the message loop so
+    // the loaded processes get attached) before checking anything that needs them.
+    auto settle = [&engine]
+    {
+        const auto t0 = Time::getMillisecondCounterHiRes();
+        pump (30);
+        while (engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0 < 120000.0) pump (30);
+    };
+
     CHECK (engine.getSetup().inputs.size() == 2);         // Upper (ch1), Lower (ch2)
     CHECK (engine.isProgramLoaded (0, 0));
 
@@ -104,6 +113,7 @@ int main()
 
     String err;
     CHECK (engine.addSlot (0, 0, synth, err));
+    settle();
     if (err.isNotEmpty()) std::printf ("     addSlot error: %s\n", err.toRawUTF8());
     auto* inst = engine.getPlugin (0, 0, 0);
     CHECK (inst != nullptr && inst->isAlive());
@@ -213,6 +223,7 @@ int main()
 
     // Switching back reloads program 0 from its definition and it plays again.
     engine.selectProgram (0, 0);
+    settle();
     CHECK (engine.isProgramLoaded (0, 0));
     CHECK (engine.isPluginAlive (0, 0, 0));
     CHECK (engine.getSetup().inputs[0].programs[0].mappings.size() == 1);
@@ -227,14 +238,17 @@ int main()
     CHECK (! engine.isProgramLoaded (0, 7));
     engine.setPreloadAllPrograms (true);
     pump (1600);
+    settle();
     CHECK (engine.isProgramLoaded (0, 7));
     CHECK (engine.isPluginAlive (0, 7, 0));
 
     // --- copy / clear / removeSlot ------------------------------------------------------
     engine.copyProgram (0, 0, 9);
+    settle();
     CHECK (engine.getSetup().inputs[0].programs[9].slots.size() == 1);
     CHECK (engine.getSetup().inputs[0].programs[9].mappings.size() == 1);
     engine.clearProgram (0, 9);
+    settle();
     CHECK (engine.getSetup().inputs[0].programs[9].isEmpty());
     engine.removeSlot (0, 0, 0);
     CHECK (engine.getSetup().inputs[0].programs[0].slots.empty());
@@ -266,7 +280,9 @@ int main()
             std::printf ("     using effect: %s\n", fx.name.toRawUTF8());
             engine.setPreloadAllPrograms (false);
             engine.selectProgram (0, 0);
+            settle();
             CHECK (engine.addSlot (0, 0, synth, err));
+            settle();
             CHECK (engine.isPluginAlive (0, 0, 0));
 
             // Baseline level, instrument only.
@@ -278,6 +294,7 @@ int main()
 
             // Slot insert chain: audio must still pass with the effect in place.
             CHECK (engine.addEffect (0, 0, 0, fx, err));
+            settle();
             if (err.isNotEmpty()) std::printf ("     addEffect error: %s\n", err.toRawUTF8());
             CHECK (engine.getSetup().inputs[0].programs[0].slots[0].effects.size() == 1);
             auto* fxInst = engine.getPlugin (0, 0, 0, 0);
@@ -334,6 +351,7 @@ int main()
 
                 // Program-level chain: same effect after the mix, mapped via slot == -1.
                 CHECK (engine.addEffect (0, 0, -1, fx, err));
+                settle();
                 CHECK (engine.getSetup().inputs[0].programs[0].effects.size() == 1);
                 auto* progFx = engine.getPlugin (0, 0, -1, 0);
                 CHECK (progFx != nullptr && progFx->isAlive());
@@ -358,6 +376,7 @@ int main()
 
                 // Reordering: add a second program effect, move it first, mapping follows.
                 CHECK (engine.addEffect (0, 0, -1, fx, err));
+                settle();
                 engine.moveEffect (0, 0, -1, 1, 0);
                 CHECK (engine.getSetup().inputs[0].programs[0].mappings.size() == 1);
                 CHECK (engine.getSetup().inputs[0].programs[0].mappings[0].effect == 1);   // the mapped one moved to index 1
@@ -379,6 +398,7 @@ int main()
 
             // Loading that setup rebuilds the chain live.
             engine.loadSetup (rl);
+            settle();
             CHECK (engine.isPluginAlive (0, 0, -1, 0));
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
             render (engine, 10);
@@ -395,7 +415,9 @@ int main()
     {
         engine.setPreloadAllPrograms (false);
         engine.selectProgram (0, 30);
+        settle();
         CHECK (engine.addSlot (0, 30, synth, err));
+        settle();
         auto* mono = engine.getPlugin (0, 30, 0);
         CHECK (mono != nullptr && mono->isAlive());
         if (mono != nullptr)
@@ -449,6 +471,7 @@ int main()
             CHECK (! templates.has (synth));
         }
         engine.clearProgram (0, 30);
+        settle();
     }
 
     // --- helper environment -----------------------------------------------------------------
@@ -593,7 +616,9 @@ int main()
     {
         engine.setPreloadAllPrograms (false);
         engine.selectProgram (0, 40);
+        settle();
         CHECK (engine.addSlot (0, 40, synth, err));
+        settle();
         auto* victim = engine.getPlugin (0, 40, 0);
         CHECK (victim != nullptr && victim->isAlive());
         if (victim != nullptr && victim->isAlive())
@@ -621,6 +646,7 @@ int main()
 
             // Reload brings a fresh process and sound comes back.
             engine.reloadPlugin (0, 40, 0);
+            settle();
             CHECK (engine.isPluginAlive (0, 40, 0));
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
             const float back = render (engine, 20);
@@ -630,6 +656,7 @@ int main()
             render (engine, 10);
         }
         engine.clearProgram (0, 40);
+        settle();
     }
 
     // --- optional: write a demo setup for eyeballing the UI ----------------------------------
@@ -675,7 +702,9 @@ int main()
                 std::printf ("     extra VST3: %s (%s)\n", desc.name.toRawUTF8(), desc.manufacturerName.toRawUTF8());
                 engine.setPreloadAllPrograms (false);
                 engine.selectProgram (0, 20);
+                settle();
                 CHECK (engine.addSlot (0, 20, desc, err));
+                settle();
                 if (err.isNotEmpty()) std::printf ("     addSlot error: %s\n", err.toRawUTF8());
                 if (auto* x = engine.getPlugin (0, 20, 0); x != nullptr && x->isAlive())
                 {
