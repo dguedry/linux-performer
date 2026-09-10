@@ -451,6 +451,24 @@ int main()
         engine.clearProgram (0, 30);
     }
 
+    // --- helper environment -----------------------------------------------------------------
+    {
+        std::vector<char*> envp;
+        auto env = RemotePlugin::buildHelperEnvironment (envp);
+        CHECK (envp.size() == env.size() + 1 && envp.back() == nullptr);
+        String path;
+        int pathEntries = 0;
+        for (auto& e : env) if (String (e).startsWith ("PATH=")) { path = String (e).substring (5); ++pathEntries; }
+        CHECK (pathEntries == 1);
+        const auto localBin = File::getSpecialLocation (File::userHomeDirectory).getChildFile (".local/bin");
+        if (localBin.getChildFile ("wine").existsAsFile())
+        {
+            std::printf ("     ~/.local/bin/wine shim present: PATH starts with %s\n", StringArray::fromTokens (path, ":", {})[0].toRawUTF8());
+            CHECK (StringArray::fromTokens (path, ":", {})[0] == localBin.getFullPathName());
+        }
+        for (auto& e : env) if (String (e).startsWith ("WINELOADER=")) std::printf ("     %s\n", e.c_str());
+    }
+
     // --- scanner robustness -----------------------------------------------------------------
     {
         using HR = PluginHost::HelperResult;

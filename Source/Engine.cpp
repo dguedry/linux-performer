@@ -484,6 +484,8 @@ void Engine::loadPluginInto (PluginNode& node, const PluginDescription& desc, co
     String error;
     if (! plugin->load (desc, sampleRate, blockSize, error))
     {
+        if (const auto missing = PluginHost::brokenBridgeTarget (desc.fileOrIdentifier); missing.isNotEmpty())
+            error << "  (its yabridge link points to a missing file: " << missing << " -- reinstall the plugin, then run yabridgectl sync and rescan)";
         node.loadError = error;
         listeners.call ([&] (Listener& l) { l.statusMessage ("Failed to load " + desc.name + ": " + error); });
         return;

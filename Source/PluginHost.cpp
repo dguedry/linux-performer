@@ -108,8 +108,10 @@ PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, cons
         for (auto& a : storage) argv.push_back (const_cast<char*> (a.c_str()));
         argv.push_back (nullptr);
 
+        std::vector<char*> envp;
+        const auto envStorage = RemotePlugin::buildHelperEnvironment (envp);
         pid_t pid = -1;
-        const int rc = ::posix_spawn (&pid, storage[0].c_str(), &actions, nullptr, argv.data(), environ);
+        const int rc = ::posix_spawn (&pid, storage[0].c_str(), &actions, nullptr, argv.data(), envp.data());
         ::posix_spawn_file_actions_destroy (&actions);
         ::close (fds[1]);
         if (rc != 0) { ::close (fds[0]); return HelperResult::timedOut; }

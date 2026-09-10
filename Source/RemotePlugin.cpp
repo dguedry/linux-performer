@@ -68,6 +68,60 @@ File RemotePlugin::findHostExecutable()
     return {};
 }
 
+std::vector<std::string> RemotePlugin::buildHelperEnvironment (std::vector<char*>& pointers)
+{
+    std::vector<std::string> env;
+    String path = SystemStats::getEnvironmentVariable ("PATH", "/usr/local/bin:/usr/bin:/bin");
+    String wineLoader = SystemStats::getEnvironmentVariable ("WINELOADER", {});
+
+    const auto home = File::getSpecialLocation (File::userHomeDirectory);
+    const auto localBin = home.getChildFile (".local/bin");
+    if (localBin.getChildFile ("wine").existsAsFile())
+    {
+        auto parts = StringArray::fromTokens (path, ":", {});
+        parts.removeString (localBin.getFullPathName());
+        parts.insert (0, localBin.getFullPathName());
+        path = parts.joinIntoString (":");
+    }
+
+    // systemd environment.d files (KEY=value lines) are applied at login by desktops
+    // that support it; a terminal or launcher that predates them misses out. Apply any
+    // variable from there that this process doesn't already have -- that is where
+    // nilinux puts WINELOADER and WINEFSYNC for DAWs.
+    std::map<String, String> extra;
+    for (const auto& conf : home.getChildFile (".config/environment.d").findChildFiles (File::findFiles, false, "*.conf"))
+        for (auto& raw : StringArray::fromLines (conf.loadFileAsString()))
+        {
+            const auto line = raw.trim();
+            if (line.isEmpty() || line.startsWith ("#") || ! line.contains ("=")) continue;
+            const auto key = line.upToFirstOccurrenceOf ("=", false, false).trim();
+            const auto value = line.fromFirstOccurrenceOf ("=", false, false).trim().unquoted();
+            if (key.isNotEmpty() && SystemStats::getEnvironmentVariable (key, {}).isEmpty())
+                extra[key] = value;
+        }
+    if (wineLoader.isEmpty() && extra.count ("WINELOADER") != 0 && File (extra["WINELOADER"]).existsAsFile())
+        wineLoader = extra["WINELOADER"];
+    extra.erase ("WINELOADER");
+    extra.erase ("PATH");
+
+    for (char** e = environ; *e != nullptr; ++e)
+    {
+        const String entry (*e);
+        if (entry.startsWith ("PATH=") || entry.startsWith ("WINELOADER=")) continue;
+        env.push_back (*e);
+    }
+    env.push_back (("PATH=" + path).toStdString());
+    if (wineLoader.isNotEmpty())
+        env.push_back (("WINELOADER=" + wineLoader).toStdString());
+    for (auto& [k, v] : extra)
+        env.push_back ((k + "=" + v).toStdString());
+
+    pointers.clear();
+    for (auto& e : env) pointers.push_back (const_cast<char*> (e.c_str()));
+    pointers.push_back (nullptr);
+    return env;
+}
+
 String RemotePlugin::getLastError() const
 {
     const std::lock_guard<std::mutex> l (errorMutex);
@@ -106,7 +160,9 @@ bool RemotePlugin::spawn (String& error)
     const auto shmStd  = shmName.toStdString();
     const char* argv[] = { exePath.c_str(), "--serve", shmStd.c_str(), "3", nullptr };
 
-    const int rc = ::posix_spawn (&pid, exePath.c_str(), &actions, nullptr, const_cast<char**> (argv), environ);
+    std::vector<char*> envp;
+    const auto envStorage = buildHelperEnvironment (envp);
+    const int rc = ::posix_spawn (&pid, exePath.c_str(), &actions, nullptr, const_cast<char**> (argv), envp.data());
     ::posix_spawn_file_actions_destroy (&actions);
     ::close (fds[1]);
 

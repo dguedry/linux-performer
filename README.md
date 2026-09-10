@@ -86,6 +86,24 @@ stop answering. Since each plugin has its own process this only stalls that
 plugin; Performer warns when such a plugin is added or opened anyway. Use the
 plugin's non-ARA version instead.
 
+## Windows plugins via yabridge and nilinux
+
+Windows VST3s bridged with yabridge appear as normal plugins. If the Wine prefix
+is managed by [nilinux](https://github.com/dguedry/nilinux) (Native Access on
+Linux), that tool requires DAWs to start yabridge with *its* wine: the host's
+wine would run its own prefix update and corrupt the prefix. Performer follows
+that convention for every helper it starts: `~/.local/bin` is put first on the
+helper's `PATH` when nilinux's `wine` shim is there, and variables from
+`~/.config/environment.d/*.conf` (`WINELOADER`, `WINEFSYNC`) are applied when
+the session lacks them, so it does not matter whether Performer was started
+from a terminal or a desktop launcher.
+
+While Native Access installs or updates a product, its Windows plugin file is
+replaced and the yabridge bundle briefly points at nothing. Performer reports
+that as "yabridge link points to a missing file" instead of a blacklist; when
+nilinux has finished (it runs `yabridgectl sync` after Native Access exits),
+scan again and the plugin comes back.
+
 ## Process model
 
 Every plugin runs in its own `performer-plugin-host` process. Performer talks to

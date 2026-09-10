@@ -8,6 +8,8 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <string>
+#include <vector>
 
 namespace perf
 {
@@ -40,6 +42,13 @@ public:
     /** Finds the helper executable: $PERFORMER_PLUGIN_HOST, next to this executable,
         or in the sibling JUCE artefacts folder of a build tree. */
     static juce::File findHostExecutable();
+
+    /** Environment for helper processes. yabridge starts `wine` from PATH; tools like
+        nilinux install a ~/.local/bin/wine shim (and WINELOADER via environment.d) so
+        that plugins run with the wine that owns their prefix. Desktop launchers may not
+        have either, so the helper's environment gets them applied explicitly. The
+        returned strings are "NAME=value"; `pointers` receives a null-terminated envp. */
+    static std::vector<std::string> buildHelperEnvironment (std::vector<char*>& pointers);
 
     /** Spawns the host process and loads the plugin. Blocks until done or timed out. */
     bool load (const juce::PluginDescription&, double sampleRate, int blockSize, juce::String& error);
