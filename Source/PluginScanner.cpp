@@ -52,6 +52,7 @@ bool PluginScanner::startScan (AudioPluginFormat& format, const FileSearchPath& 
         initiallyBlacklisted = host.getKnownPlugins().getBlacklistedFiles();
     }
 
+    currentFormat = &format;
     scanner = std::make_unique<PluginDirectoryScanner> (host.getKnownPlugins(), format, paths, true,
                                                         host.getDeadMansPedalFile(), false);
     pool = std::make_unique<ThreadPool> (ThreadPoolOptions{}.withNumberOfThreads (numThreads));
@@ -93,6 +94,7 @@ String PluginScanner::getCurrentFile() const     { const ScopedLock sl (stateLoc
 String PluginScanner::getFormatName() const      { const ScopedLock sl (stateLock); return formatName; }
 StringArray PluginScanner::getFailedFiles() const          { const ScopedLock sl (stateLock); return failedFiles; }
 StringArray PluginScanner::getNewlyBlacklistedFiles() const { const ScopedLock sl (stateLock); return newlyBlacklisted; }
+StringArray PluginScanner::getRemovedPlugins() const        { const ScopedLock sl (stateLock); return removedPlugins; }
 
 void PluginScanner::timerCallback()
 {
@@ -111,6 +113,17 @@ void PluginScanner::finish()
         pool.reset();
     }
 
+    // Forget plugins of this format whose files have gone (uninstalled or no longer bridged),
+    // so stale entries don't linger as unloadable slots.
+    StringArray removed;
+    if (currentFormat != nullptr)
+        for (const auto& d : host.getKnownPlugins().getTypes())
+            if (d.pluginFormatName == currentFormat->getName() && ! currentFormat->doesPluginStillExist (d))
+            {
+                removed.add (d.name);
+                host.getKnownPlugins().removeType (d);
+            }
+
     {
         const ScopedLock sl (stateLock);
         failedFiles = scanner != nullptr ? scanner->getFailedFiles() : StringArray();
@@ -118,6 +131,7 @@ void PluginScanner::finish()
         for (auto& f : host.getKnownPlugins().getBlacklistedFiles())
             if (! initiallyBlacklisted.contains (f))
                 newlyBlacklisted.add (f);
+        removedPlugins = removed;
         currentFile.clear();
     }
     scanner.reset();

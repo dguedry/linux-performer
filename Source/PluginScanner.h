@@ -37,6 +37,8 @@ public:
     /** Results of the last finished scan. */
     juce::StringArray getFailedFiles() const;
     juce::StringArray getNewlyBlacklistedFiles() const;
+    /** Plugins dropped from the list because their files were gone (uninstalled, un-bridged). */
+    juce::StringArray getRemovedPlugins() const;
 
     /** Set while the application is shutting down: probes are killed immediately. */
     static std::atomic<bool> hardStop;
@@ -53,7 +55,8 @@ private:
     std::atomic<int> activeJobs { 0 };
     mutable juce::CriticalSection stateLock;
     juce::String currentFile, formatName;
-    juce::StringArray initiallyBlacklisted, newlyBlacklisted, failedFiles;
+    juce::StringArray initiallyBlacklisted, newlyBlacklisted, failedFiles, removedPlugins;
+    juce::AudioPluginFormat* currentFormat = nullptr;
     static constexpr int numThreads = 4;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginScanner)

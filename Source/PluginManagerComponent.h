@@ -162,6 +162,9 @@ private:
                 juce::String msg = "Scan finished: " + juce::String (host.getKnownPlugins().getNumTypes()) + " plugins known.";
                 auto failed = scanner.getFailedFiles();
                 auto blacklisted = scanner.getNewlyBlacklistedFiles();
+                auto removed = scanner.getRemovedPlugins();
+                if (! removed.isEmpty())
+                    msg << "  Removed (files gone): " << removed.joinIntoString (", ") << ".";
                 if (! blacklisted.isEmpty())
                     msg << "  Deactivated (hung while being tested): " << blacklisted.joinIntoString (", ");
                 if (! failed.isEmpty())
