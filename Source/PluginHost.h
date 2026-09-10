@@ -51,6 +51,10 @@ public:
         at a time: several Wine start-ups at once are what makes them hang. */
     static bool isWineBridged (const juce::String& fileOrIdentifier);
 
+    /** For a yabridge bundle whose Windows plugin link is broken (plugin uninstalled or
+        being updated), the missing target path; empty otherwise. */
+    static juce::String brokenBridgeTarget (const juce::String& fileOrIdentifier);
+
     /** Scans a plugin file in a performer-plugin-host process so a crashing plugin
         can't take Performer down. Falls back to in-process if the helper is missing. */
     struct OutOfProcessScanner : public juce::KnownPluginList::CustomScanner

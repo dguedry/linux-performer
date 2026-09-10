@@ -77,6 +77,16 @@ bool PluginHost::isWineBridged (const String& fileOrIdentifier)
     return false;
 }
 
+String PluginHost::brokenBridgeTarget (const String& fileOrIdentifier)
+{
+    File f (fileOrIdentifier);
+    if (! f.isDirectory()) return {};
+    for (const auto& link : f.findChildFiles (File::findFiles, true))
+        if (link.isSymbolicLink() && ! link.getLinkedTarget().exists())
+            return link.getLinkedTarget().getFullPathName();
+    return {};
+}
+
 PluginHost::HelperResult PluginHost::runHelperWithTimeout (const File& exe, const StringArray& args, int timeoutMs,
                                                            int graceAfterStopMs, const std::function<bool()>& shouldStop,
                                                            String& output, const std::function<bool()>& hardStop,
@@ -166,6 +176,14 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
     if (exe == File())
     {
         format.findAllTypesForFile (result, fileOrIdentifier);
+        return true;
+    }
+
+    // A bridge whose Windows plugin has gone missing can't load; don't spend two Wine
+    // start-ups finding that out.
+    if (const auto missing = brokenBridgeTarget (fileOrIdentifier); missing.isNotEmpty())
+    {
+        std::fprintf (stderr, "[scan] %s: bridge target missing: %s\n", fileOrIdentifier.toRawUTF8(), missing.toRawUTF8());
         return true;
     }
 

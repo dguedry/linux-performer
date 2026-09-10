@@ -165,7 +165,16 @@ private:
                 if (! blacklisted.isEmpty())
                     msg << "  Deactivated (hung while being tested): " << blacklisted.joinIntoString (", ");
                 if (! failed.isEmpty())
-                    msg << "  Not loadable: " << failed.joinIntoString (", ");
+                {
+                    juce::StringArray described;
+                    for (auto& f : failed)
+                    {
+                        const auto missing = PluginHost::brokenBridgeTarget (f);
+                        described.add (juce::File (f).getFileName()
+                                       + (missing.isNotEmpty() ? " (yabridge link points to a missing file: " + missing + " -- reinstall the plugin, then run yabridgectl sync)" : juce::String()));
+                    }
+                    msg << "  Not loadable: " << described.joinIntoString (", ");
+                }
                 status (msg);
                 statusLabel.setColour (juce::Label::textColourId, blacklisted.isEmpty() && failed.isEmpty() ? juce::Colours::lightgreen : juce::Colours::orange);
             }
