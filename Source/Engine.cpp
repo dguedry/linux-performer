@@ -120,6 +120,28 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     {
         std::unique_ptr<XmlElement> savedAudio (settings.getXmlValue ("audioDeviceState"));
         deviceManager.initialise (0, 2, savedAudio.get(), true);
+
+        // First run (or a saved setup that still uses the old ALSA-emulation
+        // default): prefer the JACK type (PipeWire's graph, no resampling, small
+        // quantum) at 48 kHz. Any explicit later choice in Audio Settings sticks.
+        const bool oldDefault = savedAudio != nullptr
+                                && savedAudio->getStringAttribute ("deviceType") == "ALSA"
+                                && savedAudio->getStringAttribute ("audioOutputDeviceName").contains ("PipeWire")
+                                && ! settings.getBoolValue ("jackMigrated", false);
+        if (savedAudio == nullptr || oldDefault)
+            for (auto* type : deviceManager.getAvailableDeviceTypes())
+                if (type->getTypeName() == "JACK")
+                {
+                    type->scanForDevices();
+                    if (type->getDeviceNames (false).isEmpty()) break;
+                    deviceManager.setCurrentAudioDeviceType ("JACK", true);
+                    auto setup = deviceManager.getAudioDeviceSetup();
+                    setup.sampleRate = 48000.0;
+                    deviceManager.setAudioDeviceSetup (setup, true);
+                    settings.setValue ("jackMigrated", true);
+                    break;
+                }
+
         deviceManager.addChangeListener (this);
         deviceManager.addAudioCallback (this);
     }
@@ -151,6 +173,15 @@ Engine::~Engine()
     if (loaderThread.joinable()) loaderThread.join();
     for (auto& r : loadResults)
         if (r.plugin != nullptr) r.plugin->shutdown();
+}
+
+void Engine::restartAudioDevice()
+{
+    auto setup = deviceManager.getAudioDeviceSetup();
+    deviceManager.closeAudioDevice();
+    deviceManager.setAudioDeviceSetup (setup, true);
+    if (deviceManager.getCurrentAudioDevice() == nullptr)
+        deviceManager.restartLastAudioDevice();
 }
 
 void Engine::changeListenerCallback (ChangeBroadcaster*)
@@ -1253,12 +1284,26 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const*, int,
 
     // Every plugin process must answer within this block; late ones are silenced for it.
     blockDeadline = ipc::monotonicDeadline (jmax (0.001, 0.85 * numSamples / sampleRate));
+    lastBlockSamples.store (numSamples, std::memory_order_relaxed);
 
     const ScopedLock sl (lock);
-    const bool panicNow = panicRequested.exchange (false);
+    bool panicNow = panicRequested.exchange (false);
 
-    for (auto& in : runtimes)
-        processInput (*in, out, numOut, numSamples, panicNow);
+    // PipeWire's JACK client may deliver a larger block than jack_get_buffer_size
+    // reported at start (another app forcing the graph quantum), so split anything
+    // bigger than what the buffers and plugins were prepared for.
+    const int maxChunk = jmax (1, blockSize);
+    numOut = jmin (numOut, 32);
+    for (int start = 0; start < numSamples; start += maxChunk)
+    {
+        const int n = jmin (maxChunk, numSamples - start);
+        float* chunk[32];
+        for (int c = 0; c < numOut; ++c)
+            chunk[c] = out[c] != nullptr ? out[c] + start : nullptr;
+        for (auto& in : runtimes)
+            processInput (*in, chunk, numOut, n, panicNow);
+        panicNow = false;
+    }
 }
 
 void Engine::processInput (InputRuntime& in, float* const* out, int numOut, int numSamples, bool panicNow)

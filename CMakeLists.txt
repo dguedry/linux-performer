@@ -20,6 +20,7 @@ target_sources(Performer PRIVATE
     Source/MappingSuggestions.cpp
     Source/Ipc/Protocol.cpp
     Source/RemotePlugin.cpp
+    Source/LowLatency.cpp
     Source/Engine.cpp
     Source/MainComponent.cpp)
 
@@ -32,6 +33,7 @@ target_compile_definitions(Performer PRIVATE
     JUCE_USE_CURL=0
     JUCE_ALSA=1
     JUCE_JACK=1
+    JUCE_JACK_CLIENT_NAME="Performer"
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_LV2=1
     JUCE_PLUGINHOST_LADSPA=1
@@ -40,6 +42,7 @@ target_compile_definitions(Performer PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(Performer PRIVATE
+    ${CMAKE_DL_LIBS}
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
@@ -131,7 +134,3 @@ target_link_libraries(EngineTest PRIVATE
 add_dependencies(EngineTest PerformerPluginHost)
 add_test(NAME EngineTest COMMAND EngineTest)
 set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "PERFORMER_PLUGIN_HOST=$<TARGET_FILE:PerformerPluginHost>")
-
-
-
-

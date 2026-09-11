@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
+#include "AudioSettingsComponent.h"
 #include <optional>
 
 using namespace juce;
@@ -1337,8 +1338,8 @@ void MainComponent::resized()
     preloadToggle.setBounds (toolbar.removeFromRight (170));
 
     auto status = r.removeFromBottom (24).reduced (8, 2);
-    cpuLabel.setBounds (status.removeFromRight (230));
-    fileLabel.setBounds (status.removeFromRight (360));
+    cpuLabel.setBounds (status.removeFromRight (470));
+    fileLabel.setBounds (status.removeFromRight (320));
     statusLabel.setBounds (status);
 
     if (keyboardPanel != nullptr && keyboardPanel->isVisible())
@@ -1364,11 +1365,21 @@ void MainComponent::timerCallback()
     {
         String dev;
         if (auto* d = engine.getDeviceManager().getCurrentAudioDevice())
-            dev = String (d->getCurrentSampleRate() / 1000.0, 1) + " kHz / " + String (d->getCurrentBufferSizeSamples()) + " smp";
+        {
+            const int smp = engine.getLastBlockSize() > 0 ? engine.getLastBlockSize() : d->getCurrentBufferSizeSamples();
+            dev = String (d->getCurrentSampleRate() / 1000.0, 1) + " kHz / " + String (smp) + " smp ("
+                  + String (1000.0 * smp / d->getCurrentSampleRate(), 1) + " ms)";
+        }
         else dev = "no audio device";
+        const int wanted = settings.getBoolValue ("pipewireTakeover", true) ? settings.getIntValue ("pipewireQuantum", 128) : 0;
+        const bool clockHeld = wanted > 0 && engine.getLastBlockSize() > wanted
+                               && engine.getDeviceManager().getCurrentAudioDevice() != nullptr
+                               && engine.getDeviceManager().getCurrentAudioDevice()->getTypeName() == "JACK";
         cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
+                          + (clockHeld ? "  |  clock held by another app" : String())
                           + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
-        cpuLabel.setColour (Label::textColourId, engine.getLateBlockCount() > 0 ? Colours::orange : textDim);
+        cpuLabel.setTooltip (clockHeld ? "Performer asked PipeWire for " + String (wanted) + " samples but the graph runs bigger blocks: another application (e.g. Bitwig) is forcing the PipeWire clock. Close it, or set its block size to " + String (wanted) + "." : String());
+        cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange : textDim);
     }
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
     {
@@ -1570,10 +1581,10 @@ void MainComponent::saveOnQuit()
 //==============================================================================
 void MainComponent::showAudioSettings()
 {
-    auto* selector = new AudioDeviceSelectorComponent (engine.getDeviceManager(), 0, 0, 1, 64, false, false, true, false);
-    selector->setSize (520, 480);
+    auto* content = new AudioSettingsComponent (engine, settings, [this] (const String& s) { showStatus (s); });
+    content->setSize (640, 640);
     DialogWindow::LaunchOptions o;
-    o.content.setOwned (selector);
+    o.content.setOwned (content);
     o.dialogTitle = "Audio Settings";
     o.dialogBackgroundColour = bgPanel;
     o.escapeKeyTriggersCloseButton = true;

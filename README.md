@@ -40,8 +40,10 @@ cmake --build build
 
 ## Using it
 
-1. **Audio...** – pick the output device. Under PipeWire both the JACK and
-   ALSA device types work; JACK gives the lowest latency.
+1. **Audio...** – pick the output device and the live block size. Performer
+   defaults to the JACK device type at 48 kHz, which under PipeWire is a
+   native graph client (no resampling, no extra buffering). See *Low latency*
+   below.
 2. **Plugins...** – press **Scan VST3** (or LV2 / LADSPA) to look in the
    standard folders, or **Scan folder...** to add one of your own. Progress is
    shown at the bottom of the window and the scan keeps running if you close
@@ -154,3 +156,34 @@ main bus is mixed. Disabling aux buses makes JUCE pass null channel pointers,
 which crashes plugins that write to them regardless (Kontakt via yabridge).
 
 Settings live in `~/.config/Performer/`.
+
+## Low latency (live use)
+
+Performer is meant to be played live, so it goes for the smallest safe block:
+
+* It loads PipeWire's JACK client library itself (`pipewire-jack`, package
+  `pipewire-jack` on Debian/Ubuntu), so it does not need to be started with
+  `pw-jack`, and it defaults to the **JACK** device type at 48 kHz. That makes
+  Performer a direct node in the PipeWire graph; the ALSA type goes through
+  PipeWire's ALSA emulation with its own buffering and resampling.
+* **Audio...** has a *Live latency* section: the block size (quantum) to ask
+  for (default 128 samples = 2.7 ms at 48 kHz; 64 if the machine is quiet) and
+  *Take over the PipeWire clock while Performer runs*. With the takeover on,
+  Performer forces the PipeWire graph to that quantum at start
+  (`clock.force-quantum`) and restores the previous value when it quits, so
+  the desktop's `min-quantum`/`default.clock.quantum` settings do not get in
+  the way. The status bar shows the block size actually delivered and the
+  resulting latency.
+* **Another application can hold the clock.** Bitwig Studio, for example,
+  forces `clock.force-quantum` to its own block size every few seconds while
+  it runs; Performer then reports *clock held by another app* in the status
+  bar. Close that application or set its block size to Performer's.
+* **Realtime scheduling.** Small blocks only stay glitch-free when the audio
+  thread can run at realtime priority. Check `ulimit -r`: if it prints 0, add
+  yourself to the `pipewire` group (`sudo usermod -aG pipewire $USER`, then
+  log out and back in) or otherwise grant `rtprio`/`memlock` in
+  `/etc/security/limits.d/`. The Audio dialog reports whether realtime
+  scheduling is available.
+* Every plugin runs in its own process; a plugin that does not finish its
+  block in time is silenced for that block and counted as *late* in the
+  status bar, so one slow plugin cannot stall the whole rig.

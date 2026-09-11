@@ -62,6 +62,9 @@ public:
     juce::AudioDeviceManager& getDeviceManager()    { return deviceManager; }
     PluginHost& getPluginHost()                     { return host; }
 
+    /** Closes and reopens the current audio device (picks up a new PIPEWIRE_LATENCY). */
+    void restartAudioDevice();
+
     //==============================================================================
     // Setup document
     const Setup& getSetup() const                   { return setup; }
@@ -151,6 +154,11 @@ public:
     double getCpuUsage() const                      { return deviceManager.getCpuUsage(); }
     /** Blocks in which at least one plugin process missed its deadline. */
     int getLateBlockCount() const                   { return lateBlocks.load(); }
+    /** Samples per block actually delivered by the device (PipeWire's JACK
+        client reports its default 1024 via jack_get_buffer_size even while
+        the graph runs a smaller quantum; this is the real number). 0 until
+        the first callback. */
+    int getLastBlockSize() const                    { return lastBlockSamples.load(); }
 
     void addListener (Listener* l)                  { listeners.add (l); }
     void removeListener (Listener* l)               { listeners.remove (l); }
@@ -259,6 +267,7 @@ private:
     std::atomic<bool> learnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> lateBlocks { 0 };
+    std::atomic<int> lastBlockSamples { 0 };
     timespec blockDeadline {};
     TouchedParam lastTouched;
 

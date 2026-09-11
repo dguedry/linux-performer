@@ -2,6 +2,8 @@
 #include "PluginHost.h"
 #include "Engine.h"
 #include "MainComponent.h"
+#include "LowLatency.h"
+#include <cstdio>
 
 class PerformerApplication : public juce::JUCEApplication
 {
@@ -34,6 +36,20 @@ public:
             if (f.existsAsFile()) { initialSetup = f; break; }
         }
 
+        // Low latency: PipeWire through its JACK API, at the quantum the user chose.
+        const bool pwJack = perf::LowLatency::preloadPipeWireJack();
+        const int quantum = settings->getIntValue ("pipewireQuantum", 128);
+        perf::LowLatency::setRequestedQuantum (quantum, 48000);
+        const bool takeover = settings->getBoolValue ("pipewireTakeover", true);
+        if (takeover)
+        {
+            previousClock = perf::LowLatency::readClock();
+            clockTakenOver = perf::LowLatency::forceClock (quantum, 48000);
+        }
+        std::fprintf (stderr, "[audio] pipewire-jack %s, requested quantum %d @ 48 kHz, clock takeover %s%s\n",
+                      pwJack ? "loaded" : "not found", quantum, takeover ? (clockTakenOver ? "applied" : "FAILED") : "off",
+                      takeover ? (" (was force-quantum '" + previousClock.forceQuantum + "')").toRawUTF8() : "");
+
         host   = std::make_unique<perf::PluginHost> (*settings);
         engine = std::make_unique<perf::Engine> (*host, *settings);
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine, *settings, initialSetup);
@@ -64,6 +80,7 @@ public:
         mainWindow.reset();     // closes plugin editors and autosaves
         engine.reset();
         host.reset();
+        if (clockTakenOver) perf::LowLatency::restoreClock (previousClock);
         if (settings != nullptr) settings->saveIfNeeded();
         settings.reset();
     }
@@ -102,6 +119,8 @@ public:
 
 private:
     std::unique_ptr<juce::PropertiesFile> settings;
+    perf::LowLatency::ClockState previousClock;
+    bool clockTakenOver = false;
     std::unique_ptr<perf::PluginHost> host;
     std::unique_ptr<perf::Engine> engine;
     std::unique_ptr<MainWindow> mainWindow;
