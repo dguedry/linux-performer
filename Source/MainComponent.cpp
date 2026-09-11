@@ -1337,8 +1337,8 @@ void MainComponent::resized()
     preloadToggle.setBounds (toolbar.removeFromRight (170));
 
     auto status = r.removeFromBottom (24).reduced (8, 2);
-    cpuLabel.setBounds (status.removeFromRight (110));
-    fileLabel.setBounds (status.removeFromRight (400));
+    cpuLabel.setBounds (status.removeFromRight (230));
+    fileLabel.setBounds (status.removeFromRight (360));
     statusLabel.setBounds (status);
 
     if (keyboardPanel != nullptr && keyboardPanel->isVisible())
@@ -1361,8 +1361,15 @@ void MainComponent::timerCallback()
 {
     const auto now = Time::getMillisecondCounterHiRes();
     if (keyboardPanel != nullptr && keyboardPanel->isVisible()) keyboardPanel->refreshLabel();   // input name/channel may have been edited
-    cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + String (engine.getSampleRate() / 1000.0, 1) + " kHz"
-                      + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
+    {
+        String dev;
+        if (auto* d = engine.getDeviceManager().getCurrentAudioDevice())
+            dev = String (d->getCurrentSampleRate() / 1000.0, 1) + " kHz / " + String (d->getCurrentBufferSizeSamples()) + " smp";
+        else dev = "no audio device";
+        cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
+                          + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
+        cpuLabel.setColour (Label::textColourId, engine.getLateBlockCount() > 0 ? Colours::orange : textDim);
+    }
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
     {
         statusText.clear();
