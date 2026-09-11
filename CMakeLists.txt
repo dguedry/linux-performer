@@ -133,3 +133,4 @@ add_test(NAME EngineTest COMMAND EngineTest)
 set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "PERFORMER_PLUGIN_HOST=$<TARGET_FILE:PerformerPluginHost>")
 
 
+
