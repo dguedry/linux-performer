@@ -2,6 +2,7 @@
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
 #include "AudioSettingsComponent.h"
+#include "ParamPicker.h"
 #include <optional>
 
 using namespace juce;
@@ -872,6 +873,7 @@ public:
         addAndMakeVisible (paramBox);
         addAndMakeVisible (touchedBtn);
         targetBox.onChange = [this] { fillParams(); };
+        paramBox.onChange  = [this] { updateButtons(); };
         touchedBtn.onClick = [this] { useTouched(); };
         touchedBtn.setTooltip ("Select the parameter you last moved in a plugin GUI");
 
@@ -1196,7 +1198,8 @@ private:
     MainComponent& owner;
     Label header { {}, "MIDI MAPPINGS" };
     TableListBox table;
-    ComboBox targetBox, paramBox;
+    ComboBox targetBox;
+    ParamPicker paramBox;
     std::vector<Target> targets;
     StringArray paramIds;
     Array<int> paramIndices;
