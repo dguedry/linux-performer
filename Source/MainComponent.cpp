@@ -1050,6 +1050,19 @@ public:
     }
 
 private:
+    /** MIDI channel the target plugin receives on: the slot's forced channel if set,
+        else the input's channel (0 = omni / unknown). */
+    int channelInto (const Target& t) const
+    {
+        const auto& inputs = engine.getSetup().inputs;
+        const int in = owner.getSelectedInput();
+        int ch = (in >= 0 && in < (int) inputs.size()) ? inputs[(size_t) in].channel : 0;
+        if (auto* def = currentProgram(); def != nullptr && t.slot >= 0 && t.slot < (int) def->slots.size()
+                                           && def->slots[(size_t) t.slot].outChannel > 0)
+            ch = def->slots[(size_t) t.slot].outChannel;
+        return ch;
+    }
+
     const ProgramDef* currentProgram() const
     {
         const auto& inputs = engine.getSetup().inputs;
@@ -1087,13 +1100,12 @@ private:
             return;
         }
         paramBox.setTextWhenNothingSelected ("Choose parameter...");
+        paramBox.setPreferredChannel (channelInto (*t));
         int id = 1, reselect = 0;
         paramIndices.clear();
         for (auto& p : plugin->getParameters())
         {
-            String name = p.name;
-            if (name.isEmpty()) name = "Param " + String (p.index);
-            paramBox.addItem (name, id);
+            paramBox.addItem (p, id);
             paramIds.add (p.id);
             paramIndices.add (p.index);
             if (paramIds[paramIds.size() - 1] == prev) reselect = id;

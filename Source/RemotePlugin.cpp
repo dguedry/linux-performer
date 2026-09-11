@@ -230,6 +230,8 @@ bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int b
             p.discrete = in.readBool();
             p.boolean = in.readBool();
             p.value = in.readFloat();
+            p.midiChannel = in.readInt();
+            p.midiController = in.readInt();
             params.push_back (std::move (p));
         }
         paramValues.reset (new std::atomic<float>[params.size() + 1]);

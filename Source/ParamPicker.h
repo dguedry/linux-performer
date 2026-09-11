@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ParamInfo.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 
@@ -11,21 +12,39 @@ namespace perf
     Plugins such as Kontakt expose thousands of parameters; a PopupMenu that
     long builds a component per item and never finishes. This shows a field
     that looks like a combo box and opens a searchable list instead: type to
-    filter, arrows to move, Return or click to pick, Escape to cancel. The
-    subset of the ComboBox API the mapping panel uses is kept. */
+    filter, arrows to move, Return or click to pick, Escape to cancel.
+
+    VST3 plugins take no MIDI controllers directly: they publish one parameter
+    per (MIDI channel, controller) and the host converts, so "Channel Volume"
+    appears once per channel. When the plugin told us which copy is which
+    (ParamInfo::midiChannel), those are labelled "(ch N)", listed first for the
+    channel the input plays on, and the other channels are one toggle away.
+    Without that information, long runs of identical names are hidden behind a
+    toggle instead. */
 class ParamPicker : public juce::Component
 {
 public:
     std::function<void()> onChange;
 
-    void addItem (const juce::String& text, int id)          { names.add (text); ids.add (id); repaint(); }
-    int getNumItems() const                                  { return names.size(); }
-    juce::String getItemText (int index) const               { return names[index]; }
+    void addItem (const juce::String& text, int id, int midiChannel = 0, int midiController = -1)
+    {
+        items.add ({ text, id, midiChannel, midiController });
+        repaint();
+    }
+    void addItem (const ParamInfo& p, int id)                { addItem (p.name.isEmpty() ? "Param " + juce::String (p.index) : p.name, id, p.midiChannel, p.midiController); }
+
+    int getNumItems() const                                  { return items.size(); }
+    /** Display label, e.g. "Channel Volume(MSB) (ch 3)"; used for the mapping's name. */
+    juce::String getItemText (int index) const               { return index >= 0 && index < items.size() ? labelFor (items.getReference (index)) : juce::String(); }
     int getSelectedId() const                                { return selected; }
+
+    /** MIDI channel the target plugin is played on (1..16), or 0 when unknown / omni.
+        Controller parameters for this channel are listed first. */
+    void setPreferredChannel (int ch)                        { preferredChannel = juce::jlimit (0, 16, ch); }
 
     void clear (juce::NotificationType n = juce::sendNotificationAsync)
     {
-        names.clear(); ids.clear();
+        items.clear();
         const bool had = selected != 0;
         selected = 0;
         repaint();
@@ -34,7 +53,7 @@ public:
 
     void setSelectedId (int id, juce::NotificationType n = juce::sendNotificationAsync)
     {
-        const int newId = ids.contains (id) ? id : 0;
+        const int newId = indexOfId (id) >= 0 ? id : 0;
         if (newId == selected) return;
         selected = newId;
         repaint();
@@ -48,17 +67,16 @@ public:
         auto r = getLocalBounds().toFloat().reduced (0.5f);
         g.setColour (findColour (juce::ComboBox::backgroundColourId));
         g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (findColour (isEnabled() ? juce::ComboBox::outlineColourId : juce::ComboBox::outlineColourId).withAlpha (isEnabled() ? 1.0f : 0.5f));
+        g.setColour (findColour (juce::ComboBox::outlineColourId).withAlpha (isEnabled() ? 1.0f : 0.5f));
         g.drawRoundedRectangle (r, 4.0f, 1.0f);
 
-        const int idx = ids.indexOf (selected);
+        const int idx = indexOfId (selected);
         const bool has = idx >= 0;
         g.setColour (findColour (juce::ComboBox::textColourId).withAlpha (has && isEnabled() ? 1.0f : 0.5f));
         g.setFont (juce::FontOptions ((float) getHeight() * 0.6f));
-        g.drawText (has ? names[idx] : placeholder, getLocalBounds().withTrimmedLeft (8).withTrimmedRight (24),
+        g.drawText (has ? labelFor (items.getReference (idx)) : placeholder, getLocalBounds().withTrimmedLeft (8).withTrimmedRight (24),
                     juce::Justification::centredLeft, true);
 
-        // arrow, like the default combo box
         juce::Path p;
         const float ax = (float) getWidth() - 14.0f, ay = (float) getHeight() * 0.5f;
         p.addTriangle (ax - 4.0f, ay - 2.0f, ax + 4.0f, ay - 2.0f, ax, ay + 3.0f);
@@ -68,7 +86,7 @@ public:
 
     void mouseDown (const juce::MouseEvent&) override
     {
-        if (isEnabled() && names.size() > 0)
+        if (isEnabled() && items.size() > 0)
             showPopup();
     }
 
@@ -76,13 +94,37 @@ public:
     {
         if (k == juce::KeyPress::returnKey || k == juce::KeyPress::spaceKey || k == juce::KeyPress::downKey)
         {
-            if (isEnabled() && names.size() > 0) showPopup();
+            if (isEnabled() && items.size() > 0) showPopup();
             return true;
         }
         return false;
     }
 
+    /** Human name for a VST3 controller number (0..127 CC, 128 aftertouch, 129 pitch bend, 130 program change). */
+    static juce::String controllerName (int controller)
+    {
+        if (controller < 0) return {};
+        if (controller < 128) return "CC " + juce::String (controller);
+        if (controller == 128) return "Aftertouch";
+        if (controller == 129) return "Pitch bend";
+        if (controller == 130) return "Program change";
+        return {};
+    }
+
 private:
+    struct Item { juce::String name; int id = 0; int channel = 0; int controller = -1; };
+
+    static juce::String labelFor (const Item& it)
+    {
+        return it.channel > 0 ? it.name + " (ch " + juce::String (it.channel) + ")" : it.name;
+    }
+
+    int indexOfId (int id) const
+    {
+        for (int i = 0; i < items.size(); ++i) if (items.getReference (i).id == id) return i;
+        return -1;
+    }
+
     void notify (juce::NotificationType n)
     {
         if (n == juce::dontSendNotification || ! onChange) return;
@@ -108,7 +150,7 @@ private:
         explicit Popup (ParamPicker& o) : owner (o)
         {
             addAndMakeVisible (search);
-            search.setTextToShowWhenEmpty ("Search " + juce::String (owner.names.size()) + " parameters...", juce::Colours::grey);
+            search.setTextToShowWhenEmpty ("Search " + juce::String (owner.items.size()) + " parameters...", juce::Colours::grey);
             search.setEscapeAndReturnKeysConsumed (true);
             search.setSelectAllWhenFocused (true);
             search.addListener (this);
@@ -123,40 +165,79 @@ private:
             count.setColour (juce::Label::textColourId, juce::Colours::grey);
             count.setJustificationType (juce::Justification::centredRight);
 
-            // VST3 plugins have no MIDI CC input; instead they publish one parameter
-            // per controller per MIDI channel (Kontakt: 64 channels x every controller),
-            // which shows up as long runs of identically named parameters. Those are
-            // MIDI plumbing, not controls, so hide them unless asked.
-            const int n = owner.names.size();
+            buildOrder();
+            filter();
+        }
+
+        /** Decide the display order and which items are behind the toggle. */
+        void buildOrder()
+        {
+            const int n = owner.items.size();
+            order.clearQuick();
+            secondary.clear();
+            hasChannels = false;
+            for (int i = 0; i < n; ++i) if (owner.items.getReference (i).channel > 0) { hasChannels = true; break; }
+
+            if (hasChannels)
+            {
+                // Controller parameters for the input's channel first (all channels when omni),
+                // then the plugin's own parameters, then the other channels' copies (toggle).
+                const int pref = owner.preferredChannel;
+                for (int i = 0; i < n; ++i)
+                {
+                    const auto& it = owner.items.getReference (i);
+                    if (it.channel > 0 && (pref == 0 || it.channel == pref)) order.add (i);
+                }
+                for (int i = 0; i < n; ++i) if (owner.items.getReference (i).channel == 0) order.add (i);
+                for (int i = 0; i < n; ++i)
+                {
+                    const auto& it = owner.items.getReference (i);
+                    if (it.channel > 0 && pref != 0 && it.channel != pref) { order.add (i); secondary.setBit (i); }
+                }
+                numSecondary = secondary.countNumberOfSetBits();
+                if (numSecondary > 0)
+                {
+                    addAndMakeVisible (showAll);
+                    showAll.setButtonText ("Show the other MIDI channels too (" + juce::String (numSecondary) + " parameters; this input plays on ch " + juce::String (pref) + ")");
+                    showAll.setTooltip ("Each MIDI controller exists once per channel. Only the channel this input sends on affects what you hear, unless the plugin is set up multi-timbrally.");
+                    showAll.setToggleState (showAllChannels, juce::dontSendNotification);
+                    showAll.onClick = [this] { showAllChannels = showAll.getToggleState(); filter(); };
+                }
+                return;
+            }
+
+            // No channel information: hide long runs of identical names (VST3 controller
+            // proxies from a plugin without IMidiMapping) behind a toggle.
+            for (int i = 0; i < n; ++i) order.add (i);
             for (int i = 0; i < n;)
             {
                 int j = i + 1;
-                while (j < n && owner.names[j] == owner.names[i]) ++j;
+                while (j < n && owner.items.getReference (j).name == owner.items.getReference (i).name) ++j;
                 if (j - i >= kRunLength)
-                    for (int k = i; k < j; ++k) controllerCopy.setBit (k);
+                    for (int k = i; k < j; ++k) secondary.setBit (k);
                 i = j;
             }
-            numHidden = controllerCopy.countNumberOfSetBits();
-            if (numHidden > 0)
+            numSecondary = secondary.countNumberOfSetBits();
+            if (numSecondary > 0)
             {
                 addAndMakeVisible (showAll);
-                showAll.setButtonText ("Show MIDI controller parameters (" + juce::String (numHidden) + " copies of "
-                                       + juce::String (countRuns()) + " names)");
-                showAll.setTooltip ("Runs of identically named parameters are VST3's per-channel MIDI controller proxies. Performer already forwards CCs to the plugin, so these are rarely what you want to map.");
-                showAll.setToggleState (showControllerParams, juce::dontSendNotification);
-                showAll.onClick = [this] { showControllerParams = showAll.getToggleState(); filter(); };
+                showAll.setButtonText ("Show repeated parameters (" + juce::String (numSecondary) + " copies of " + juce::String (countRuns()) + " names)");
+                showAll.setTooltip ("Runs of identically named parameters are usually per-channel MIDI controller proxies. This plugin did not say which channel is which.");
+                showAll.setToggleState (showRepeated, juce::dontSendNotification);
+                showAll.onClick = [this] { showRepeated = showAll.getToggleState(); filter(); };
             }
-            filter();
         }
 
         int countRuns() const
         {
             int runs = 0;
-            for (int i = 0; i < owner.names.size(); ++i)
-                if (controllerCopy[i] && (i == 0 || ! controllerCopy[i - 1] || owner.names[i] != owner.names[i - 1]))
+            for (int i = 0; i < owner.items.size(); ++i)
+                if (secondary[i] && (i == 0 || ! secondary[i - 1] || owner.items.getReference (i).name != owner.items.getReference (i - 1).name))
                     ++runs;
             return runs;
         }
+
+        bool secondaryShown() const { return hasChannels ? showAllChannels : showRepeated; }
 
         void parentHierarchyChanged() override
         {
@@ -171,7 +252,7 @@ private:
             count.setBounds (top.removeFromRight (130));
             search.setBounds (top);
             r.removeFromTop (4);
-            if (numHidden > 0)
+            if (numSecondary > 0)
                 showAll.setBounds (r.removeFromBottom (22));
             list.setBounds (r);
         }
@@ -181,23 +262,24 @@ private:
             rows.clearQuick();
             juce::StringArray words;
             words.addTokens (search.getText().trim().toLowerCase(), true);
-            const int selectedIndex = owner.ids.indexOf (owner.selected);
+            const int selectedIndex = owner.indexOfId (owner.selected);
             int hiddenMatches = 0;
-            for (int i = 0; i < owner.names.size(); ++i)
+            for (int i : order)
             {
-                const auto hay = owner.names[i].toLowerCase() + " #" + juce::String (i);
+                const auto& it = owner.items.getReference (i);
+                const auto hay = owner.labelFor (it).toLowerCase() + " #" + juce::String (i) + " " + controllerName (it.controller).toLowerCase();
                 bool ok = true;
                 for (auto& w : words) if (! hay.contains (w)) { ok = false; break; }
                 if (! ok) continue;
-                if (controllerCopy[i] && ! showControllerParams && i != selectedIndex)
-                    ++hiddenMatches;    // hidden, unless it is the current selection
+                if (secondary[i] && ! secondaryShown() && i != selectedIndex)
+                    ++hiddenMatches;    // behind the toggle, unless it is the current selection
                 else
                     rows.add (i);
             }
             list.updateContent();
-            count.setText (juce::String (rows.size()) + " / " + juce::String (owner.names.size())
+            count.setText (juce::String (rows.size()) + " / " + juce::String (owner.items.size())
                            + (hiddenMatches > 0 ? " (+" + juce::String (hiddenMatches) + " hidden)" : juce::String()), juce::dontSendNotification);
-            const int cur = rows.indexOf (owner.ids.indexOf (owner.selected));
+            const int cur = rows.indexOf (selectedIndex);
             list.selectRow (cur >= 0 ? cur : (rows.isEmpty() ? -1 : 0));
             if (cur >= 0) list.scrollToEnsureRowIsOnscreen (cur);
         }
@@ -218,7 +300,7 @@ private:
         void choose (int row)
         {
             if (row < 0 || row >= rows.size()) return;
-            owner.setSelectedId (owner.ids[rows[row]], juce::sendNotificationSync);
+            owner.setSelectedId (owner.items.getReference (rows[row]).id, juce::sendNotificationSync);
             dismiss();
         }
 
@@ -235,9 +317,15 @@ private:
             if (row < 0 || row >= rows.size()) return;
             if (sel) { g.setColour (owner.findColour (juce::TextEditor::highlightColourId).withAlpha (0.6f)); g.fillRect (0, 0, w, h); }
             const int i = rows[row];
+            const auto& it = owner.items.getReference (i);
             g.setFont (juce::FontOptions ((float) h * 0.6f));
             g.setColour (owner.findColour (juce::ComboBox::textColourId));
-            g.drawText (owner.names[i], 8, 0, w - 70, h, juce::Justification::centredLeft, true);
+            g.drawText (it.name, 8, 0, w - 190, h, juce::Justification::centredLeft, true);
+            if (it.channel > 0)
+            {
+                g.setColour (owner.findColour (juce::ComboBox::textColourId).withAlpha (0.75f));
+                g.drawText (controllerName (it.controller) + "  ch " + juce::String (it.channel), w - 182, 0, 118, h, juce::Justification::centredRight, false);
+            }
             g.setColour (juce::Colours::grey);
             g.drawText ("#" + juce::String (i), w - 62, 0, 56, h, juce::Justification::centredRight, false);
         }
@@ -256,24 +344,27 @@ private:
         juce::ListBox list;
         juce::Label count;
         juce::ToggleButton showAll;
-        juce::BigInteger controllerCopy;   // parameter indices that sit in a run of identical names
-        int numHidden = 0;
-        juce::Array<int> rows;     // indices into owner.names that match the filter
+        bool hasChannels = false;
+        juce::Array<int> order;         // display order (indices into owner.items)
+        juce::BigInteger secondary;     // items behind the toggle
+        int numSecondary = 0;
+        juce::Array<int> rows;          // indices into owner.items that pass the filter
     };
 
     /** Remembered for the session, so the choice sticks between pickers. */
-    static inline bool showControllerParams = false;
+    static inline bool showAllChannels = false;
+    static inline bool showRepeated = false;
 
     void showPopup()
     {
         auto content = std::make_unique<Popup> (*this);
-        content->setSize (juce::jmax (420, getWidth()), 380);
+        content->setSize (juce::jmax (460, getWidth()), 380);
         juce::CallOutBox::launchAsynchronously (std::move (content), getScreenBounds(), nullptr);
     }
 
-    juce::StringArray names;
-    juce::Array<int> ids;
+    juce::Array<Item> items;
     int selected = 0;
+    int preferredChannel = 0;
     juce::String placeholder;
 };
 

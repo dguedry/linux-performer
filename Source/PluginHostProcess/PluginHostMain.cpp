@@ -12,8 +12,14 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "../Ipc/Protocol.h"
+#if JUCE_PLUGINHOST_VST3
+ // Headers only: the IIDs are defined inside JUCE's own VST3 host translation unit.
+ #define JUCE_VST3HEADERS_INCLUDE_HEADERS_ONLY 1
+ #include <juce_audio_processors_headless/format_types/juce_VST3Headers.h>
+#endif
 #include <iostream>
 #include <mutex>
+#include <map>
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -165,6 +171,7 @@ private:
                 if (instance == nullptr) return fail ("no plugin");
                 MemoryOutputStream out;
                 auto& params = instance->getParameters();
+                const auto midi = queryMidiAssignments (*instance);
                 out.writeInt (params.size());
                 for (auto* p : params)
                 {
@@ -175,6 +182,9 @@ private:
                     out.writeBool (p->isDiscrete());
                     out.writeBool (p->isBoolean());
                     out.writeFloat (p->getValue());
+                    const auto& a = midi[(size_t) p->getParameterIndex()];
+                    out.writeInt (a.channel);
+                    out.writeInt (a.controller);
                 }
                 return ok (out);
             }
@@ -264,6 +274,61 @@ private:
         if (auto* hosted = dynamic_cast<const HostedAudioProcessorParameter*> (&p))
             return hosted->getParameterID();
         return String (p.getParameterIndex());
+    }
+
+    /** Which (MIDI channel, controller) a parameter stands for, or 0 / -1. */
+    struct MidiAssignment { int channel = 0; int controller = -1; };
+
+    /** VST3 plugins receive no MIDI controllers; they publish one parameter per
+        (channel, controller) and the host converts, which is why Kontakt shows
+        16 copies of "Channel Volume(MSB)". IMidiMapping tells us which copy is
+        which channel, so the UI can label them. Empty assignments when the
+        plugin does not expose the interface (LV2, LADSPA, some native VST3s
+        whose controller is a separate object). */
+    static std::vector<MidiAssignment> queryMidiAssignments (AudioPluginInstance& inst)
+    {
+        std::vector<MidiAssignment> result ((size_t) inst.getParameters().size());
+       #if JUCE_PLUGINHOST_VST3
+        auto* client = inst.getVST3Client();
+        auto* component = client != nullptr ? client->getIComponentPtr() : nullptr;
+        if (component == nullptr) return result;
+
+        Steinberg::FUnknownPtr<Steinberg::Vst::IMidiMapping> mapping (component);
+        if (mapping == nullptr)
+        {
+            // Single-object plugins answer for the controller through the component.
+            Steinberg::FUnknownPtr<Steinberg::Vst::IEditController> controller (component);
+            if (controller != nullptr)
+                mapping = Steinberg::FUnknownPtr<Steinberg::Vst::IMidiMapping> (controller.get());
+        }
+        if (mapping == nullptr)
+        {
+            std::fprintf (stderr, "[params] plugin exposes no IMidiMapping through its component; controller copies stay unlabelled\n");
+            return result;
+        }
+
+        std::map<String, int> indexById;
+        for (auto* p : inst.getParameters())
+            indexById[parameterId (*p)] = p->getParameterIndex();
+
+        int found = 0;
+        for (int ch = 0; ch < 16; ++ch)
+            for (int cc = 0; cc <= (int) Steinberg::Vst::kCtrlProgramChange; ++cc)
+            {
+                Steinberg::Vst::ParamID id = 0;
+                if (mapping->getMidiControllerAssignment (0, (Steinberg::int16) ch, (Steinberg::Vst::CtrlNumber) cc, id) != Steinberg::kResultTrue)
+                    continue;
+                const auto it = indexById.find (String ((uint32) id));
+                if (it == indexById.end() || it->second < 0 || it->second >= (int) result.size()) continue;
+                auto& a = result[(size_t) it->second];
+                if (a.channel != 0) continue;       // first assignment wins
+                a.channel = ch + 1;
+                a.controller = cc;
+                ++found;
+            }
+        std::fprintf (stderr, "[params] %d parameters are MIDI controller proxies\n", found);
+       #endif
+        return result;
     }
 
     void notify (ipc::Msg type, const MemoryOutputStream& data)

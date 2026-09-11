@@ -52,7 +52,14 @@ int main()
 {
     ScopedJuceInitialiser_GUI init;
 
-    TemporaryFile settingsTmp (".settings");
+    // Own scratch folder: PluginHost keeps its crash list ("dead man's pedal") next to
+    // the settings file, and a plain temp file would share /tmp with every other run,
+    // so an aborted run could blacklist a plugin for the next one.
+    const File scratchDir = File::getSpecialLocation (File::tempDirectory)
+                                .getChildFile ("PerformerEngineTest-" + String (Time::currentTimeMillis()));
+    scratchDir.createDirectory();
+    struct ScratchCleanup { File d; ~ScratchCleanup() { d.deleteRecursively(); } } scratchCleanup { scratchDir };
+    TemporaryFile settingsTmp (scratchDir.getChildFile ("test.settings"));
     PropertiesFile::Options opts;
     opts.applicationName = "PerformerEngineTest";
     opts.filenameSuffix = "settings";
@@ -709,6 +716,30 @@ int main()
                 if (auto* x = engine.getPlugin (0, 20, 0); x != nullptr && x->isAlive())
                 {
                     std::printf ("     loaded in its own process: %s, %d parameters\n", x->getName().toRawUTF8(), (int) x->getParameters().size());
+                    {
+                        // VST3 MIDI controller proxies: the helper asks IMidiMapping which copy is which channel.
+                        int proxies = 0, vol1 = -1, vol2 = -1;
+                        for (auto& p : x->getParameters())
+                        {
+                            if (p.midiChannel > 0) ++proxies;
+                            if (p.midiController == 7 && p.midiChannel == 1) vol1 = p.index;
+                            if (p.midiController == 7 && p.midiChannel == 2) vol2 = p.index;
+                        }
+                        std::printf ("     %d MIDI controller proxies; CC7 ch1 -> #%d, CC7 ch2 -> #%d\n", proxies, vol1, vol2);
+                        if (vol1 >= 0 && vol2 >= 0)
+                        {
+                            // Send CC 7 on channel 1 (the Upper input's channel): the ch1 copy must move, the ch2 copy must not.
+                            float a1 = 0, a2 = 0, b1 = 0, b2 = 0;
+                            CHECK (x->fetchParameterValue (vol1, a1) && x->fetchParameterValue (vol2, a2));
+                            const float target = a1 > 0.5f ? 0.1f : 0.9f;
+                            engine.injectMidi (0, MidiMessage::controllerEvent (1, 7, (int) std::lround (target * 127.0f)));
+                            render (engine, 5);
+                            CHECK (x->fetchParameterValue (vol1, b1) && x->fetchParameterValue (vol2, b2));
+                            std::printf ("     CC7 ch1 -> %d: ch1 copy %.3f -> %.3f, ch2 copy %.3f -> %.3f\n", (int) std::lround (target * 127.0f), a1, b1, a2, b2);
+                            CHECK (std::abs (b1 - target) < 0.02f);
+                            CHECK (std::abs (b2 - a2) < 1e-3f);
+                        }
+                    }
                     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
                     const float r = render (engine, 100);                      // ~1.2 s; would segfault before the fix
                     std::printf ("     rms with extra VST3 (may be 0 if no preset loaded): %f\n", r);

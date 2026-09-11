@@ -16,6 +16,13 @@ struct ParamInfo
     bool discrete = false;
     bool boolean = false;
     float value = 0.0f;       // last known normalised value (0..1)
+    /** VST3 plugins take no MIDI CCs directly: they publish one parameter per
+        (MIDI channel, controller) and the host converts. When the plugin told us
+        which pair this parameter stands for, midiChannel is 1..16 and
+        midiController 0..127 for CCs, 128 aftertouch, 129 pitch bend, 130 program
+        change. Otherwise 0 / -1. */
+    int midiChannel = 0;
+    int midiController = -1;
 };
 
 using ParamInfoList = std::vector<ParamInfo>;

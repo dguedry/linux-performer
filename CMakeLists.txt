@@ -69,7 +69,8 @@ target_sources(PerformerPluginHost PRIVATE
     Source/PluginHostProcess/PluginHostMain.cpp
     Source/Ipc/Protocol.cpp)
 
-target_include_directories(PerformerPluginHost PRIVATE Source)
+target_include_directories(PerformerPluginHost PRIVATE Source
+    external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK)
 
 target_compile_definitions(PerformerPluginHost PRIVATE
     JUCE_WEB_BROWSER=0
