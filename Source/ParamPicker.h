@@ -122,7 +122,40 @@ private:
             count.setFont (juce::FontOptions (11.0f));
             count.setColour (juce::Label::textColourId, juce::Colours::grey);
             count.setJustificationType (juce::Justification::centredRight);
+
+            // VST3 plugins have no MIDI CC input; instead they publish one parameter
+            // per controller per MIDI channel (Kontakt: 64 channels x every controller),
+            // which shows up as long runs of identically named parameters. Those are
+            // MIDI plumbing, not controls, so hide them unless asked.
+            const int n = owner.names.size();
+            for (int i = 0; i < n;)
+            {
+                int j = i + 1;
+                while (j < n && owner.names[j] == owner.names[i]) ++j;
+                if (j - i >= kRunLength)
+                    for (int k = i; k < j; ++k) controllerCopy.setBit (k);
+                i = j;
+            }
+            numHidden = controllerCopy.countNumberOfSetBits();
+            if (numHidden > 0)
+            {
+                addAndMakeVisible (showAll);
+                showAll.setButtonText ("Show MIDI controller parameters (" + juce::String (numHidden) + " copies of "
+                                       + juce::String (countRuns()) + " names)");
+                showAll.setTooltip ("Runs of identically named parameters are VST3's per-channel MIDI controller proxies. Performer already forwards CCs to the plugin, so these are rarely what you want to map.");
+                showAll.setToggleState (showControllerParams, juce::dontSendNotification);
+                showAll.onClick = [this] { showControllerParams = showAll.getToggleState(); filter(); };
+            }
             filter();
+        }
+
+        int countRuns() const
+        {
+            int runs = 0;
+            for (int i = 0; i < owner.names.size(); ++i)
+                if (controllerCopy[i] && (i == 0 || ! controllerCopy[i - 1] || owner.names[i] != owner.names[i - 1]))
+                    ++runs;
+            return runs;
         }
 
         void parentHierarchyChanged() override
@@ -135,9 +168,11 @@ private:
         {
             auto r = getLocalBounds().reduced (6);
             auto top = r.removeFromTop (26);
-            count.setBounds (top.removeFromRight (90));
+            count.setBounds (top.removeFromRight (130));
             search.setBounds (top);
             r.removeFromTop (4);
+            if (numHidden > 0)
+                showAll.setBounds (r.removeFromBottom (22));
             list.setBounds (r);
         }
 
@@ -146,15 +181,22 @@ private:
             rows.clearQuick();
             juce::StringArray words;
             words.addTokens (search.getText().trim().toLowerCase(), true);
+            const int selectedIndex = owner.ids.indexOf (owner.selected);
+            int hiddenMatches = 0;
             for (int i = 0; i < owner.names.size(); ++i)
             {
                 const auto hay = owner.names[i].toLowerCase() + " #" + juce::String (i);
                 bool ok = true;
                 for (auto& w : words) if (! hay.contains (w)) { ok = false; break; }
-                if (ok) rows.add (i);
+                if (! ok) continue;
+                if (controllerCopy[i] && ! showControllerParams && i != selectedIndex)
+                    ++hiddenMatches;    // hidden, unless it is the current selection
+                else
+                    rows.add (i);
             }
             list.updateContent();
-            count.setText (juce::String (rows.size()) + " / " + juce::String (owner.names.size()), juce::dontSendNotification);
+            count.setText (juce::String (rows.size()) + " / " + juce::String (owner.names.size())
+                           + (hiddenMatches > 0 ? " (+" + juce::String (hiddenMatches) + " hidden)" : juce::String()), juce::dontSendNotification);
             const int cur = rows.indexOf (owner.ids.indexOf (owner.selected));
             list.selectRow (cur >= 0 ? cur : (rows.isEmpty() ? -1 : 0));
             if (cur >= 0) list.scrollToEnsureRowIsOnscreen (cur);
@@ -207,17 +249,25 @@ private:
         void textEditorReturnKeyPressed (juce::TextEditor&) override { choose (list.getSelectedRow() >= 0 ? list.getSelectedRow() : 0); }
         void textEditorEscapeKeyPressed (juce::TextEditor&) override { dismiss(); }
 
+        static constexpr int kRunLength = 8;
+
         ParamPicker& owner;
         SearchBox search;
         juce::ListBox list;
         juce::Label count;
+        juce::ToggleButton showAll;
+        juce::BigInteger controllerCopy;   // parameter indices that sit in a run of identical names
+        int numHidden = 0;
         juce::Array<int> rows;     // indices into owner.names that match the filter
     };
+
+    /** Remembered for the session, so the choice sticks between pickers. */
+    static inline bool showControllerParams = false;
 
     void showPopup()
     {
         auto content = std::make_unique<Popup> (*this);
-        content->setSize (juce::jmax (380, getWidth()), 360);
+        content->setSize (juce::jmax (420, getWidth()), 380);
         juce::CallOutBox::launchAsynchronously (std::move (content), getScreenBounds(), nullptr);
     }
 
