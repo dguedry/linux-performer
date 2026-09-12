@@ -521,7 +521,7 @@ private:
 class SlotsPanel : public Component
 {
 public:
-    static constexpr int slotHeaderHeight = 64;
+    static constexpr int slotHeaderHeight = 78;
 
     struct SlotRow : public Component
     {
@@ -532,9 +532,19 @@ public:
             addAndMakeVisible (name);
             addAndMakeVisible (gain);
             addAndMakeVisible (transpose);
-            addAndMakeVisible (lowKey);
-            addAndMakeVisible (highKey);
+            addAndMakeVisible (keyRange);
             addAndMakeVisible (outCh);
+            for (auto* c : { &gainCap, &transposeCap, &keysCap, &chCap })
+            {
+                addAndMakeVisible (c);
+                c->setFont (FontOptions (10.5f, Font::bold));
+                c->setColour (Label::textColourId, textDim);
+                c->setJustificationType (Justification::bottomLeft);
+                c->setBorderSize ({ 0, 3, 0, 0 });
+            }
+            gainCap.setText ("GAIN", dontSendNotification);
+            transposeCap.setText ("TRANSPOSE", dontSendNotification);
+            chCap.setText ("MIDI CHANNEL", dontSendNotification);
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (removeBtn);
             addAndMakeVisible (chain);
@@ -546,37 +556,32 @@ public:
             gain.setSliderStyle (Slider::LinearBar);
             gain.setTextValueSuffix (" dB");
             gain.setDoubleClickReturnValue (true, 0.0);
-            gain.setTooltip ("Gain (after the slot's effects)");
+            gain.setTooltip ("Output level of this plugin, applied after its effects. Drag, or double-click for 0 dB.");
 
             transpose.setRange (-36, 36, 1);
             transpose.setSliderStyle (Slider::LinearBar);
-            transpose.setTextValueSuffix (" st");
+            transpose.textFromValueFunction = [] (double v) { const int st = (int) v; return (st > 0 ? "+" : "") + String (st) + " st"; };
+            transpose.valueFromTextFunction = [] (const String& t) { return (double) t.retainCharacters ("-0123456789").getIntValue(); };
             transpose.setDoubleClickReturnValue (true, 0.0);
-            transpose.setTooltip ("Transpose");
+            transpose.setTooltip ("Shift incoming notes by this many semitones (+12 = one octave up). Double-click for none.");
 
-            for (auto* s : { &lowKey, &highKey })
-            {
-                s->setRange (0, 127, 1);
-                s->setSliderStyle (Slider::LinearBar);
-                s->textFromValueFunction = [] (double v) { return noteName ((int) v); };
-                s->valueFromTextFunction = [] (const String& t) { return (double) t.getIntValue(); };
-            }
-            lowKey.setTooltip ("Lowest key");
-            highKey.setTooltip ("Highest key");
+            keyRange.setRange (0, 127, 1);
+            keyRange.setMinAndMaxValues (0, 127, dontSendNotification);
+            keyRange.textFromValueFunction = [] (double v) { return noteName ((int) v); };
+            keyRange.setPopupDisplayEnabled (true, false, this);
+            keyRange.setTooltip ("Which keys reach this plugin. Drag the two handles to make a split: notes outside the range are ignored by this slot.");
 
-            outCh.addItem ("Ch: keep", 1);
-            for (int c = 1; c <= 16; ++c) outCh.addItem ("Ch " + String (c), c + 1);
-            outCh.setTooltip ("Force output MIDI channel");
+            outCh.addItem ("Keep incoming channel", 1);
+            for (int c = 1; c <= 16; ++c) outCh.addItem ("Channel " + String (c), c + 1);
+            outCh.setTooltip ("MIDI channel the plugin receives on. Keep the input's channel, or force one (multi-timbral plugins like Kontakt play the instrument on that channel).");
 
             auto& e = panel.engine;
             auto& o = panel.owner;
             enabled.onClick   = [this, &e, &o] { e.setSlotEnabled   (o.getSelectedInput(), o.getEditedProgram(), index, enabled.getToggleState()); o.markDirty(); };
             gain.onValueChange      = [this, &e, &o] { e.setSlotGainDb    (o.getSelectedInput(), o.getEditedProgram(), index, (float) gain.getValue()); o.markDirty(); };
             transpose.onValueChange = [this, &e, &o] { e.setSlotTranspose (o.getSelectedInput(), o.getEditedProgram(), index, (int) transpose.getValue()); o.markDirty(); };
-            lowKey.onValueChange    = [this, &e, &o] { if (lowKey.getValue() > highKey.getValue()) highKey.setValue (lowKey.getValue(), dontSendNotification);
-                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); o.markDirty(); };
-            highKey.onValueChange   = [this, &e, &o] { if (highKey.getValue() < lowKey.getValue()) lowKey.setValue (highKey.getValue(), dontSendNotification);
-                                                       e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) lowKey.getValue(), (int) highKey.getValue()); o.markDirty(); };
+            keyRange.onValueChange  = [this, &e, &o] { e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) keyRange.getMinValue(), (int) keyRange.getMaxValue());
+                                                       updateKeyCaption(); o.markDirty(); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
@@ -594,8 +599,8 @@ public:
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
             gain.setValue (def.gainDb, dontSendNotification);
             transpose.setValue (def.transpose, dontSendNotification);
-            lowKey.setValue (def.lowKey, dontSendNotification);
-            highKey.setValue (def.highKey, dontSendNotification);
+            keyRange.setMinAndMaxValues (def.lowKey, def.highKey, dontSendNotification);
+            updateKeyCaption();
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
             guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
             guiBtn.setEnabled (! loading);
@@ -604,6 +609,12 @@ public:
         }
 
         int preferredHeight() const { return slotHeaderHeight + chain.preferredHeight() + 4; }
+
+        void updateKeyCaption()
+        {
+            const int lo = (int) keyRange.getMinValue(), hi = (int) keyRange.getMaxValue();
+            keysCap.setText ("KEY RANGE   " + (lo == 0 && hi == 127 ? String ("all keys") : noteName (lo) + " to " + noteName (hi)), dontSendNotification);
+        }
 
         void paint (Graphics& g) override
         {
@@ -622,13 +633,20 @@ public:
             guiBtn.setBounds (top.removeFromRight (64));
             name.setBounds (top);
 
-            r.removeFromTop (4);
+            r.removeFromTop (2);
+            auto caps = r.removeFromTop (14);
             auto bottom = r.removeFromTop (22);
             const int w = bottom.getWidth();
-            gain.setBounds (bottom.removeFromLeft (w * 28 / 100).reduced (2, 0));
-            transpose.setBounds (bottom.removeFromLeft (w * 18 / 100).reduced (2, 0));
-            lowKey.setBounds (bottom.removeFromLeft (w * 17 / 100).reduced (2, 0));
-            highKey.setBounds (bottom.removeFromLeft (w * 17 / 100).reduced (2, 0));
+            auto column = [&] (int percent, Component& cap, Component& control)
+            {
+                const int cw = w * percent / 100;
+                cap.setBounds (caps.removeFromLeft (cw).reduced (2, 0));
+                control.setBounds (bottom.removeFromLeft (cw).reduced (2, 0));
+            };
+            column (24, gainCap, gain);
+            column (16, transposeCap, transpose);
+            column (36, keysCap, keyRange);
+            chCap.setBounds (caps.reduced (2, 0));
             outCh.setBounds (bottom.reduced (2, 0));
 
             r.removeFromTop (6);
@@ -641,7 +659,8 @@ public:
         ImageComponent icon;
         ToggleButton enabled;
         Label name;
-        Slider gain, transpose, lowKey, highKey;
+        Slider gain, transpose, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
+        Label gainCap, transposeCap, keysCap, chCap;
         ComboBox outCh;
         TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
         EffectChainComponent chain;
