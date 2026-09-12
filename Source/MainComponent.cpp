@@ -341,6 +341,31 @@ private:
 //==============================================================================
 //  EffectChainComponent -- an ordered list of insert effects (per slot or per program)
 //==============================================================================
+/** "Add instrument/effect" menu: grouped by manufacturer like KnownPluginList::addToMenu,
+    but every entry carries the plugin's icon. Item ids are index + 1 into `types`. */
+static void addPluginsToMenu (PopupMenu& menu, const Array<PluginDescription>& types, PluginIcons& icons)
+{
+    StringArray makers;
+    for (auto& d : types) makers.addIfNotAlreadyThere (d.manufacturerName.isNotEmpty() ? d.manufacturerName : "Other");
+    makers.sortNatural();
+    auto addItems = [&] (PopupMenu& target, const String& maker)
+    {
+        Array<int> order;
+        for (int i = 0; i < types.size(); ++i)
+            if ((types[i].manufacturerName.isNotEmpty() ? types[i].manufacturerName : "Other") == maker) order.add (i);
+        std::sort (order.begin(), order.end(), [&] (int a, int b) { return types[a].name.compareNatural (types[b].name) < 0; });
+        for (int i : order)
+            target.addItem (i + 1, types[i].name + "  [" + types[i].pluginFormatName + "]", true, false, icons.get (types[i], 32));
+    };
+    if (makers.size() == 1) { addItems (menu, makers[0]); return; }
+    for (auto& m : makers)
+    {
+        PopupMenu sub;
+        addItems (sub, m);
+        menu.addSubMenu (m, sub);
+    }
+}
+
 class EffectChainComponent : public Component
 {
 public:
@@ -396,6 +421,7 @@ private:
         Row (EffectChainComponent& c, int idx) : chain (c), index (idx)
         {
             addAndMakeVisible (on);
+            addAndMakeVisible (icon);
             addAndMakeVisible (name);
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (upBtn);
@@ -420,6 +446,8 @@ private:
         {
             alive = loaded;
             on.setToggleState (! def.bypassed, dontSendNotification);
+            icon.setImage (chain.engine.getPluginHost().getIcons().get (def.plugin, 40), RectanglePlacement::centred);
+            icon.setAlpha (def.bypassed ? 0.45f : 1.0f);
             name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
             name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (def.bypassed || loading ? textDim : Colours::white));
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
@@ -435,6 +463,7 @@ private:
             auto r = getLocalBounds().reduced (0, 2);
             r.removeFromLeft (18);   // indent under the chain line
             on.setBounds (r.removeFromLeft (24));
+            icon.setBounds (r.removeFromLeft (18).reduced (0, 1)); r.removeFromLeft (6);
             removeBtn.setBounds (r.removeFromRight (28)); r.removeFromRight (4);
             downBtn.setBounds (r.removeFromRight (26));
             upBtn.setBounds (r.removeFromRight (26));     r.removeFromRight (4);
@@ -446,6 +475,7 @@ private:
         int index;
         bool alive = false;
         ToggleButton on;
+        ImageComponent icon;
         Label name;
         TextButton guiBtn { "Edit GUI" }, upBtn { "^" }, downBtn { "v" }, removeBtn { "X" };
     };
@@ -461,11 +491,11 @@ private:
             return;
         }
         PopupMenu menu;
-        KnownPluginList::addToMenu (menu, types, KnownPluginList::sortByManufacturer);
+        addPluginsToMenu (menu, types, engine.getPluginHost().getIcons());
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types] (int result)
         {
-            const int idx = KnownPluginList::getIndexChosenByMenu (types, result);
-            if (idx < 0) return;
+            const int idx = result - 1;
+            if (idx < 0 || idx >= types.size()) return;
             String error;
             if (! engine.addEffect (owner.getSelectedInput(), owner.getEditedProgram(), slot, types[idx], error))
                 owner.showStatus ("Could not load " + types[idx].name + ": " + error);
@@ -498,6 +528,7 @@ public:
         SlotRow (SlotsPanel& p, int idx) : panel (p), index (idx), chain (p.engine, p.owner, idx)
         {
             addAndMakeVisible (enabled);
+            addAndMakeVisible (icon);
             addAndMakeVisible (name);
             addAndMakeVisible (gain);
             addAndMakeVisible (transpose);
@@ -556,6 +587,8 @@ public:
         {
             alive = loaded;
             enabled.setToggleState (def.enabled, dontSendNotification);
+            icon.setImage (panel.engine.getPluginHost().getIcons().get (def.plugin, 48), RectanglePlacement::centred);
+            icon.setAlpha (def.enabled ? 1.0f : 0.45f);
             name.setText (def.plugin.name + "  [" + def.plugin.pluginFormatName + "]" + (loading ? "   loading..." : String()), dontSendNotification);
             name.setColour (Label::textColourId, error.isNotEmpty() ? Colours::orangered : (loading ? textDim : Colours::white));
             name.setTooltip (error.isNotEmpty() ? error : def.plugin.fileOrIdentifier);
@@ -583,6 +616,7 @@ public:
             auto r = getLocalBounds().reduced (6, 4);
             auto top = r.removeFromTop (24);
             enabled.setBounds (top.removeFromLeft (24));
+            icon.setBounds (top.removeFromLeft (24).reduced (0, 1)); top.removeFromLeft (8);
             removeBtn.setBounds (top.removeFromRight (28));
             top.removeFromRight (4);
             guiBtn.setBounds (top.removeFromRight (64));
@@ -604,6 +638,7 @@ public:
         SlotsPanel& panel;
         int index;
         bool alive = false;
+        ImageComponent icon;
         ToggleButton enabled;
         Label name;
         Slider gain, transpose, lowKey, highKey;
@@ -719,11 +754,11 @@ private:
             return;
         }
         PopupMenu menu;
-        KnownPluginList::addToMenu (menu, types, KnownPluginList::sortByManufacturer);
+        addPluginsToMenu (menu, types, engine.getPluginHost().getIcons());
         menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this, types] (int result)
         {
-            const int idx = KnownPluginList::getIndexChosenByMenu (types, result);
-            if (idx < 0) return;
+            const int idx = result - 1;
+            if (idx < 0 || idx >= types.size()) return;
             String error;
             if (! engine.addSlot (owner.getSelectedInput(), owner.getEditedProgram(), types[idx], error))
                 owner.showStatus ("Could not load " + types[idx].name + ": " + error);

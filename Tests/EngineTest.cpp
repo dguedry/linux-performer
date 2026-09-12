@@ -1,6 +1,7 @@
 // Headless integration test: loads a real LV2 instrument, routes MIDI through the
 // engine and checks audio, program changes, mappings and learn.
 #include "Engine.h"
+#include "PluginIcons.h"
 #include "MappingSuggestions.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
@@ -749,6 +750,35 @@ int main()
                 }
             }
         }
+    }
+
+    // --- plugin icons: generated badges always, embedded Windows icons when present ------
+    {
+        PluginDescription d; d.name = "Kontakt 8"; d.manufacturerName = "Native Instruments"; d.pluginFormatName = "VST3";
+        CHECK (PluginIcons::initials ("Kontakt 8") == "K8");
+        CHECK (PluginIcons::initials ("Calf Monosynth") == "CM");
+        CHECK (PluginIcons::initials ("Dirt") == "D");
+        CHECK (PluginIcons::badgeColour ("Native Instruments") == PluginIcons::badgeColour ("native instruments "));
+        auto b = PluginIcons::badge (d, 48);
+        CHECK (b.isValid() && b.getWidth() == 48 && b.getPixelAt (24, 24).getAlpha() > 200);
+        TemporaryFile iconCache;
+        PluginIcons icons (iconCache.getFile());
+        CHECK (icons.get (d, 32).getWidth() == 32);
+        d.fileOrIdentifier = "/home/dguedry/.vst3/yabridge/Kontakt 8.vst3";
+        if (File (d.fileOrIdentifier).isDirectory())
+        {
+            const auto pe = PluginIcons::windowsBinaryFor (d);
+            std::printf ("     Kontakt windows binary: %s\n", pe.getFullPathName().toRawUTF8());
+            CHECK (pe.existsAsFile());
+            const auto t0i = Time::getMillisecondCounterHiRes();
+            const auto img = PluginIcons::fromWindowsBinary (pe);
+            std::printf ("     embedded icon: %dx%d in %.1f ms\n", img.getWidth(), img.getHeight(), Time::getMillisecondCounterHiRes() - t0i);
+            CHECK (img.isValid() && img.getWidth() >= 128);
+            CHECK (icons.native (d).isValid());
+            CHECK (iconCache.getFile().getNumberOfChildFiles (File::findFiles, "*.png") == 1);   // cached
+        }
+        PluginDescription none; none.name = "No Icon"; none.manufacturerName = "X"; none.fileOrIdentifier = "/nonexistent";
+        CHECK (! icons.native (none).isValid() && icons.get (none, 24).isValid());
     }
 
     engine.removeListener (&listener);

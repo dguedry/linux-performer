@@ -4,6 +4,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 #include "MappingSuggestions.h"
 #include "PluginScanner.h"
+#include "PluginIcons.h"
 #include <functional>
 
 namespace perf
@@ -22,6 +23,7 @@ public:
     juce::PropertiesFile& getSettings()                   { return settings; }
     MappingTemplates& getMappingTemplates()               { return *templates; }
     PluginScanner& getScanner()                           { return *scanner; }
+    PluginIcons& getIcons()                               { return *icons; }
 
     /** Folders to scan for a format: its defaults plus folders the user added. */
     juce::FileSearchPath getScanPaths (juce::AudioPluginFormat&) const;
@@ -73,6 +75,7 @@ private:
     std::unique_ptr<ListListener> listListener;
     std::unique_ptr<MappingTemplates> templates;
     std::unique_ptr<PluginScanner> scanner;
+    std::unique_ptr<PluginIcons> icons;
 };
 
 } // namespace perf
