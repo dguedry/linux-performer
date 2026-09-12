@@ -5,12 +5,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_subdirectory(external/JUCE)
+add_subdirectory(external/JUCE EXCLUDE_FROM_ALL)   # keeps JUCE's own install rules out of ours
 
 juce_add_gui_app(Performer
     PRODUCT_NAME "Performer"
     COMPANY_NAME "dguedry"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/performer-512.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/performer-64.png"
     VERSION ${PROJECT_VERSION})
+
+# App icon, embedded so the window (and the helper's editor windows) can set it.
+juce_add_binary_data(PerformerAssets
+    SOURCES Resources/performer-256.png Resources/performer-64.png)
 
 target_sources(Performer PRIVATE
     Source/Main.cpp
@@ -42,6 +48,7 @@ target_compile_definitions(Performer PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(Performer PRIVATE
+    PerformerAssets
     ${CMAKE_DL_LIBS}
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -83,6 +90,7 @@ target_compile_definitions(PerformerPluginHost PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(PerformerPluginHost PRIVATE
+    PerformerAssets
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
@@ -135,3 +143,14 @@ target_link_libraries(EngineTest PRIVATE
 add_dependencies(EngineTest PerformerPluginHost)
 add_test(NAME EngineTest COMMAND EngineTest)
 set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "PERFORMER_PLUGIN_HOST=$<TARGET_FILE:PerformerPluginHost>")
+
+#------------------------------------------------------------------------------
+# Install: `cmake --install build --prefix ~/.local` (or /usr/local) puts the two
+# binaries side by side (Performer finds its helper next to itself), plus the
+# launcher entry and icon.
+install(TARGETS Performer PerformerPluginHost RUNTIME DESTINATION bin)
+install(FILES Resources/performer.desktop DESTINATION share/applications)
+install(FILES Resources/performer.svg DESTINATION share/icons/hicolor/scalable/apps)
+foreach(size 16 24 32 48 64 128 256 512)
+    install(FILES Resources/performer-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME performer.png)
+endforeach()

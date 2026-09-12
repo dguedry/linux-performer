@@ -12,6 +12,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "../Ipc/Protocol.h"
+#include "BinaryData.h"
 #if JUCE_PLUGINHOST_VST3
  // Headers only: the IIDs are defined inside JUCE's own VST3 host translation unit.
  #define JUCE_VST3HEADERS_INCLUDE_HEADERS_ONLY 1
@@ -362,6 +363,7 @@ private:
         EditorWindow (PluginServer& s, const String& title)
             : DocumentWindow (title, Colours::darkgrey, DocumentWindow::closeButton), server (s)
         {
+            setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
             setUsingNativeTitleBar (true);
             AudioProcessorEditor* editor = server.instance->hasEditor() ? server.instance->createEditorIfNeeded() : nullptr;
             if (editor != nullptr && (editor->getWidth() < 10 || editor->getHeight() < 10)) { delete editor; editor = nullptr; }

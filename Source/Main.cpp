@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "MainComponent.h"
 #include "LowLatency.h"
+#include "BinaryData.h"
 #include <cstdio>
 
 class PerformerApplication : public juce::JUCEApplication
@@ -94,6 +95,7 @@ public:
             : DocumentWindow (name, juce::Colour (0xff1e1f24), DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
+            setIcon (juce::ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
             content = new perf::MainComponent (engine, settings, initialSetup);
             setContentOwned (content, true);
             setResizable (true, false);

@@ -36,6 +36,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/Performer_artefacts/Release/Performer            # opens the last setup
 ./build/Performer_artefacts/Release/Performer my.performer.json
+cmake --install build --prefix ~/.local                  # optional: binaries, launcher entry and icon
 ```
 
 ## Using it
