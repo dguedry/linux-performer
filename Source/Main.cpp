@@ -95,13 +95,18 @@ public:
             : DocumentWindow (name, juce::Colour (0xff1e1f24), DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setIcon (juce::ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
             content = new perf::MainComponent (engine, settings, initialSetup);
             setContentOwned (content, true);
             setResizable (true, false);
             setResizeLimits (960, 600, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
+            // DocumentWindow::setIcon only feeds JUCE's own title bar; the X11 window icon
+            // (_NET_WM_ICON, what the task switcher shows) is set on the peer, which exists
+            // once the window is visible.
+            const auto icon = juce::ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize);
+            setIcon (icon);
+            if (auto* peer = getPeer()) peer->setIcon (icon);
         }
 
         ~MainWindow() override

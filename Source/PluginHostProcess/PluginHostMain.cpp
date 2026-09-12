@@ -363,7 +363,6 @@ private:
         EditorWindow (PluginServer& s, const String& title)
             : DocumentWindow (title, Colours::darkgrey, DocumentWindow::closeButton), server (s)
         {
-            setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
             setUsingNativeTitleBar (true);
             AudioProcessorEditor* editor = server.instance->hasEditor() ? server.instance->createEditorIfNeeded() : nullptr;
             if (editor != nullptr && (editor->getWidth() < 10 || editor->getHeight() < 10)) { delete editor; editor = nullptr; }
@@ -378,6 +377,7 @@ private:
             setResizeLimits (200, 100, 8192, 8192);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
+            if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
         }
 
         void closeButtonPressed() override
