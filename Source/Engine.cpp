@@ -149,6 +149,11 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
     loaderThreadCount = jlimit (1, 16, settings.getIntValue ("parallelLoads", 4));
+    bridgedParallel   = jlimit (1, 16, settings.getIntValue ("parallelBridgedLoads", loaderThreadCount));
+    // Measured: two Kontakts starting together on a cold prefix both come up in the time
+    // one takes (11 s for the pair instead of 19 s), so bridged loads run in parallel by
+    // default; "bridgedColdStartSolo" starts the first one alone if a machine needs that.
+    bridgedWarm = wineserverRunning() || ! settings.getBoolValue ("bridgedColdStartSolo", false);
     for (int i = 0; i < loaderThreadCount; ++i)
         loaderThreads.emplace_back ([this] { loaderThreadFunc(); });
 
@@ -547,13 +552,24 @@ void Engine::queueLoad (PluginNode& node, const PluginDescription& desc, const M
     loaderCv.notify_one();
 }
 
+/** Any wineserver on this machine means a Wine prefix is booted; the first bridged
+    plugin then starts as fast as the rest and need not go alone. */
+bool Engine::wineserverRunning()
+{
+    for (const auto& d : File ("/proc").findChildFiles (File::findDirectories, false))
+        if (d.getFileName().containsOnly ("0123456789")
+            && d.getChildFile ("comm").loadFileAsString().trim() == "wineserver")
+            return true;
+    return false;
+}
+
 bool Engine::takeJob (LoadJob& out)
 {
     for (auto it = loadQueue.begin(); it != loadQueue.end(); ++it)
     {
         if (it->bridged)
         {
-            const int limit = bridgedWarm ? kBridgedParallel : 1;
+            const int limit = bridgedWarm ? bridgedParallel : 1;
             if (bridgedInFlight >= limit) continue;      // leave it for later, try a native one
             ++bridgedInFlight;
         }

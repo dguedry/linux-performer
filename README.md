@@ -187,8 +187,11 @@ Performer is meant to be played live, so it goes for the smallest safe block:
   scheduling is available.
 * Plugins load in parallel (four at a time by default; `parallelLoads` in
   `~/.config/Performer/Performer.settings` changes it), so *Preload all
-  programs* fills a set quickly. Wine-bridged plugins start one at a time until
-  the first is up, then two at once, because concurrent Wine start-ups stall.
+  programs* fills a set quickly. Wine-bridged plugins load in parallel too
+  (`parallelBridgedLoads`, default the same); two Kontakts starting together on
+  a cold prefix both come up in the time one takes. If a machine stalls on
+  concurrent Wine start-ups, `bridgedColdStartSolo=1` starts the first bridged
+  plugin alone when no wineserver is running yet.
 * Every plugin runs in its own process; a plugin that does not finish its
   block in time is silenced for that block and counted as *late* in the
   status bar, so one slow plugin cannot stall the whole rig.

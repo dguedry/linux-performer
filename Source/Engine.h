@@ -281,7 +281,7 @@ private:
     // Wine-bridged plugins start one at a time until the first has come up (the
     // prefix's wineserver and services boot on that first start; concurrent Wine
     // start-ups stall), then at most kBridgedParallel at once.
-    static constexpr int kBridgedParallel = 2;
+    int bridgedParallel = 2;                      // settings "parallelBridgedLoads"
     int loaderThreadCount = 4;                    // settings "parallelLoads"
     std::vector<std::thread> loaderThreads;
     std::mutex loaderMutex;
@@ -290,7 +290,8 @@ private:
     std::vector<LoadResult> loadResults;
     std::vector<RemotePlugin*> loadsInProgress;   // guarded by loaderMutex
     int bridgedInFlight = 0;                      // guarded by loaderMutex
-    bool bridgedWarm = false;                     // one bridged plugin has loaded: Wine is up
+    bool bridgedWarm = false;                     // Wine is up: a wineserver was already running, or one bridged plugin has loaded
+    static bool wineserverRunning();
     std::atomic<bool> loaderQuit { false };
     std::atomic<int> pendingLoads { 0 };
     std::atomic<int> loadsInFlight { 0 };
