@@ -120,6 +120,9 @@ public:
     bool isPluginLoading (int inputIndex, int program, int slot, int effect = -1) const;
     /** True while any plugin is still loading. */
     bool hasPendingLoads() const                    { return pendingLoads.load() > 0; }
+    /** Plugins being loaded right now (queued ones not counted). */
+    int getLoadsInFlight() const                    { return loadsInFlight.load(); }
+    int getParallelLoads() const                    { return loaderThreadCount; }
     juce::String getPluginLoadError (int inputIndex, int program, int slot, int effect = -1) const;
     /** Restarts a plugin that failed or crashed, from its saved definition and state. */
     void reloadPlugin (int inputIndex, int program, int slot, int effect = -1);
@@ -187,6 +190,7 @@ private:
         juce::MemoryBlock state;
         double sampleRate;
         int blockSize;
+        bool bridged = false;    // Wine/yabridge plugin: limited concurrency (see takeJob)
     };
     struct LoadResult
     {
@@ -273,15 +277,24 @@ private:
 
     juce::ListenerList<Listener> listeners;
 
-    // background loader
-    std::thread loaderThread;
+    // background loader: a pool of threads, each plugin is its own process anyway.
+    // Wine-bridged plugins start one at a time until the first has come up (the
+    // prefix's wineserver and services boot on that first start; concurrent Wine
+    // start-ups stall), then at most kBridgedParallel at once.
+    static constexpr int kBridgedParallel = 2;
+    int loaderThreadCount = 4;                    // settings "parallelLoads"
+    std::vector<std::thread> loaderThreads;
     std::mutex loaderMutex;
     std::condition_variable loaderCv;
     std::deque<LoadJob> loadQueue;
     std::vector<LoadResult> loadResults;
-    RemotePlugin* loadInProgress = nullptr;      // guarded by loaderMutex
+    std::vector<RemotePlugin*> loadsInProgress;   // guarded by loaderMutex
+    int bridgedInFlight = 0;                      // guarded by loaderMutex
+    bool bridgedWarm = false;                     // one bridged plugin has loaded: Wine is up
     std::atomic<bool> loaderQuit { false };
     std::atomic<int> pendingLoads { 0 };
+    std::atomic<int> loadsInFlight { 0 };
+    bool takeJob (LoadJob&);                      // called with loaderMutex held
     std::map<uint64_t, PluginNode*> nodeRegistry;   // message thread only
 
     friend struct PluginNode;

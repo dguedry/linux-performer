@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include <algorithm>
 
 using namespace juce;
 
@@ -147,7 +148,9 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
-    loaderThread = std::thread ([this] { loaderThreadFunc(); });
+    loaderThreadCount = jlimit (1, 16, settings.getIntValue ("parallelLoads", 4));
+    for (int i = 0; i < loaderThreadCount; ++i)
+        loaderThreads.emplace_back ([this] { loaderThreadFunc(); });
 
     loadSetup (Setup::makeDefault());
     startTimer (750);
@@ -167,10 +170,10 @@ Engine::~Engine()
         std::lock_guard<std::mutex> l (loaderMutex);
         loaderQuit.store (true);
         loadQueue.clear();
-        if (loadInProgress != nullptr) loadInProgress->shutdown();
+        for (auto* p : loadsInProgress) p->shutdown();
     }
     loaderCv.notify_all();
-    if (loaderThread.joinable()) loaderThread.join();
+    for (auto& t : loaderThreads) if (t.joinable()) t.join();
     for (auto& r : loadResults)
         if (r.plugin != nullptr) r.plugin->shutdown();
 }
@@ -536,11 +539,29 @@ void Engine::queueLoad (PluginNode& node, const PluginDescription& desc, const M
     node.loading.store (true);
     node.loadError.clear();
     ++pendingLoads;
+    const bool bridged = PluginHost::isWineBridged (desc.fileOrIdentifier);   // filesystem look-up: outside the lock
     {
         std::lock_guard<std::mutex> l (loaderMutex);
-        loadQueue.push_back ({ node.id, desc, state, sampleRate, blockSize });
+        loadQueue.push_back ({ node.id, desc, state, sampleRate, blockSize, bridged });
     }
     loaderCv.notify_one();
+}
+
+bool Engine::takeJob (LoadJob& out)
+{
+    for (auto it = loadQueue.begin(); it != loadQueue.end(); ++it)
+    {
+        if (it->bridged)
+        {
+            const int limit = bridgedWarm ? kBridgedParallel : 1;
+            if (bridgedInFlight >= limit) continue;      // leave it for later, try a native one
+            ++bridgedInFlight;
+        }
+        out = std::move (*it);
+        loadQueue.erase (it);
+        return true;
+    }
+    return false;
 }
 
 void Engine::loaderThreadFunc()
@@ -550,22 +571,25 @@ void Engine::loaderThreadFunc()
         LoadJob job;
         {
             std::unique_lock<std::mutex> l (loaderMutex);
-            loaderCv.wait (l, [this] { return loaderQuit.load() || ! loadQueue.empty(); });
+            loaderCv.wait (l, [this, &job] { return loaderQuit.load() || takeJob (job); });
             if (loaderQuit.load()) return;
-            job = std::move (loadQueue.front());
-            loadQueue.pop_front();
         }
 
         LoadResult result { job.nodeId, std::make_unique<RemotePlugin>(), {}, job.sampleRate, job.blockSize };
         {
             std::lock_guard<std::mutex> l (loaderMutex);
-            loadInProgress = result.plugin.get();
+            loadsInProgress.push_back (result.plugin.get());
         }
+        ++loadsInFlight;
 
         if (! result.plugin->load (job.desc, job.sampleRate, job.blockSize, result.error))
         {
             if (const auto missing = PluginHost::brokenBridgeTarget (job.desc.fileOrIdentifier); missing.isNotEmpty())
                 result.error << "  (its yabridge link points to a missing file: " << missing << " -- reinstall the plugin, then run yabridgectl sync and rescan)";
+            {
+                std::lock_guard<std::mutex> l (loaderMutex);
+                loadsInProgress.erase (std::remove (loadsInProgress.begin(), loadsInProgress.end(), result.plugin.get()), loadsInProgress.end());
+            }
             result.plugin->shutdown();
             result.plugin.reset();
         }
@@ -574,11 +598,16 @@ void Engine::loaderThreadFunc()
             result.error = job.desc.name + ": could not restore its saved state (" + result.plugin->getLastError() + ")";
         }
 
+        const bool ok = result.plugin != nullptr;
         {
             std::lock_guard<std::mutex> l (loaderMutex);
-            loadInProgress = nullptr;
+            loadsInProgress.erase (std::remove (loadsInProgress.begin(), loadsInProgress.end(),
+                                                ok ? result.plugin.get() : nullptr), loadsInProgress.end());
+            if (job.bridged) { --bridgedInFlight; if (ok) bridgedWarm = true; }
             loadResults.push_back (std::move (result));
         }
+        --loadsInFlight;
+        loaderCv.notify_all();      // a bridged slot may have opened up
         postEvent ({ Event::pluginLoaded, 0, 0, 0, 0, 0 });
     }
 }
@@ -1165,12 +1194,15 @@ void Engine::housekeeping()
 
         if (setup.preloadAllPrograms)
         {
-            // Load one missing program per tick to keep the UI breathing.
-            for (int p = 0; p < InputDef::numPrograms; ++p)
+            // Keep the loader pool fed (about two programs per worker in flight), a few
+            // programs per tick so the message thread stays responsive.
+            int started = 0;
+            for (int p = 0; p < InputDef::numPrograms && started < loaderThreadCount
+                            && pendingLoads.load() < loaderThreadCount * 2; ++p)
                 if (! def.programs[(size_t) p].isEmpty() && getLoaded (i, p) == nullptr)
                 {
                     ensureProgramLoaded (i, p);
-                    break;
+                    ++started;
                 }
         }
         else

@@ -185,6 +185,10 @@ Performer is meant to be played live, so it goes for the smallest safe block:
   log out and back in) or otherwise grant `rtprio`/`memlock` in
   `/etc/security/limits.d/`. The Audio dialog reports whether realtime
   scheduling is available.
+* Plugins load in parallel (four at a time by default; `parallelLoads` in
+  `~/.config/Performer/Performer.settings` changes it), so *Preload all
+  programs* fills a set quickly. Wine-bridged plugins start one at a time until
+  the first is up, then two at once, because concurrent Wine start-ups stall.
 * Every plugin runs in its own process; a plugin that does not finish its
   block in time is silenced for that block and counted as *late* in the
   status bar, so one slow plugin cannot stall the whole rig.

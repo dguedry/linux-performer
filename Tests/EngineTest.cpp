@@ -752,6 +752,28 @@ int main()
         }
     }
 
+    // --- parallel loading: several plugins load at once ---------------------------------
+    {
+        std::printf ("     loader pool: %d threads\n", engine.getParallelLoads());
+        CHECK (engine.getParallelLoads() >= 2);
+        engine.selectProgram (0, 60);
+        settle();
+        int maxInFlight = 0;
+        for (int k = 0; k < 6; ++k) { String e2; engine.addSlot (0, 60, synth, e2); }
+        const auto t0p = Time::getMillisecondCounterHiRes();
+        while (engine.hasPendingLoads() && Time::getMillisecondCounterHiRes() - t0p < 60000.0)
+        {
+            maxInFlight = jmax (maxInFlight, engine.getLoadsInFlight());
+            pump (2);
+        }
+        std::printf ("     6 loads: max %d in flight, %.0f ms total\n", maxInFlight, Time::getMillisecondCounterHiRes() - t0p);
+        CHECK (maxInFlight >= 2);
+        int alive = 0;
+        for (int k = 0; k < 6; ++k) if (engine.isPluginAlive (0, 60, k)) ++alive;
+        CHECK (alive == 6);
+        CHECK (render (engine, 3) < 1e-4f);     // silent until played
+    }
+
     // --- plugin icons: generated badges always, embedded Windows icons when present ------
     {
         PluginDescription d; d.name = "Kontakt 8"; d.manufacturerName = "Native Instruments"; d.pluginFormatName = "VST3";
