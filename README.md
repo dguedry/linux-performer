@@ -1,13 +1,36 @@
 # Performer
 
-A live-performance plugin host for Linux. Point one or more MIDI sources
-(e.g. the upper and lower manuals of a keyboard rig) at programs, and let each
-program load one or more instrument plugins. Program Change messages switch
-programs live; MIDI controllers can be mapped to any plugin parameter.
+**A live-performance plugin host for Linux.** Point your keyboards at it, build
+a program for each sound in your set, and change sounds from the keyboard while
+you play.
 
-Built with [JUCE](https://juce.com) 8. Hosts **VST3**, **LV2** and **LADSPA**
-plugins natively. Windows VST3s bridged with [yabridge](https://github.com/robbert-vdh/yabridge)
-appear as normal VST3s and work too.
+<p align="center">
+  <img src="docs/images/performer.png" alt="The Performer main window" width="900">
+</p>
+
+Performer exists because the live hosts keyboard players rely on -- MainStage,
+Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
+**LV2** and **LADSPA** plugins natively, and Windows VST3s bridged with
+[yabridge](https://github.com/robbert-vdh/yabridge) work like any other plugin.
+
+- **A program per sound, 128 per keyboard**, selected by MIDI Program Change
+  while you play. Upper and Lower manuals change independently.
+- **Splits and layers** with per-slot key range, velocity range, velocity
+  curve, transpose, gain and pan.
+- **Insert effects** per instrument and per program.
+- **MIDI learn** for any plugin parameter, with suggested mappings from
+  parameter names and reusable per-plugin templates.
+- **Every plugin in its own process.** A plugin that crashes or hangs takes
+  only itself down; the rest of the rig plays on.
+- **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
+  by default, parallel plugin loading, and a late-block counter you can watch.
+- **An on-screen keyboard** for building a set without a controller attached.
+
+**[Read the user manual](docs/MANUAL.md)** for everyday use. The rest of this
+file is for building from source and for how the program works inside.
+
+Requires Linux, JUCE 8 (fetched as a submodule) and a C++17 compiler.
+Licensed under the [GPL-3.0](LICENSE).
 
 ## Concepts
 
@@ -31,7 +54,11 @@ libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev
 libxcursor-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk`.
 
 ```sh
-git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git external/JUCE   # if not present
+git clone --recurse-submodules https://github.com/dguedry/linux-performer.git
+cd linux-performer
+# if you cloned without --recurse-submodules:
+git submodule update --init --depth 1 external/JUCE
+
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/Performer_artefacts/Release/Performer            # opens the last setup
@@ -41,53 +68,14 @@ cmake --install build --prefix ~/.local                  # optional: binaries, l
 
 ## Using it
 
-1. **Audio...** – pick the output device and the live block size. Performer
-   defaults to the JACK device type at 48 kHz, which under PipeWire is a
-   native graph client (no resampling, no extra buffering). See *Low latency*
-   below.
-2. **Plugins...** – press **Scan VST3** (or LV2 / LADSPA) to look in the
-   standard folders, or **Scan folder...** to add one of your own. Progress is
-   shown at the bottom of the window and the scan keeps running if you close
-   it. Each plugin file is probed in a separate `performer-plugin-host` process;
-   Wine-bridged plugins are probed one at a time and retried once if they stall,
-   so a crashing or hanging plugin can't take the scan down. A plugin shown in
-   red as "Deactivated" hung twice while being probed; select it and press
-   **Remove selected** to give it another chance, or **Clear list** to start over.
-3. Select an input on the left, give it a **MIDI device** and **channel**.
-4. Click a program in the middle list (this also activates it), name it, and
-   **Add instrument...**. Use **Edit GUI** to open the plugin's own editor.
-   **Add effect...** under a slot inserts an effect after that instrument;
-   the **Program effects** section at the bottom processes the mix of all slots.
-   Toggle an effect off to bypass it, use ^ / v to reorder.
-5. To map a controller: open **MIDI mappings**, pick a target plugin and parameter
-   (or move a knob in the plugin GUI and press **Use touched parameter**),
-   press **Learn MIDI**, move the controller, then **Add**.
-   **Suggest...** proposes a whole set at once: from the plugin's saved template
-   if you made one with **Save template**, otherwise by matching parameter names
-   to the General MIDI Level 2 sound controllers (CC 74 cutoff, 71 resonance,
-   73/75/70/72 attack/decay/sustain/release, 76/77 LFO rate/depth, 7 volume,
-   10 pan, 91 reverb, 93 chorus, 94 detune, 5 portamento, 12 drive, 13 delay mix).
-   Untick what you don't want and press **Add selected**. Templates live in
-   `~/.config/Performer/mapping-templates.json`.
-6. **Keyboard** (toolbar) opens an on-screen keyboard with velocity, sustain,
-   mod wheel, pitch bend and a free CC number/value pair. It plays into the
-   selected input on that input's channel, through the same path as real MIDI,
-   so it works for trying sounds, program key zones and MIDI learn without a
-   controller. Click the keys, or focus the keyboard and use the computer
-   keyboard (A S D F G H J K, W E T Y U for sharps, Z / X to shift octave).
-7. **Save** the setup. It is reloaded automatically next start; the setup is
-   also autosaved on quit.
+See the **[user manual](docs/MANUAL.md)**: inputs and keyboards, programs,
+slots, splits and layers, effects, MIDI mappings, the on-screen keyboard, audio
+settings and latency, live checklist, troubleshooting and the files Performer
+uses.
 
-Plugin state is captured into the setup file whenever a program is unloaded
-or the setup is saved, so tweaks made in the plugin GUI persist. Changes are
-also autosaved about once a minute to `~/.config/Performer/autosave.performer.json`;
-if that file is newer than the setup you open, the status bar says so.
-
-**ARA-only plugins** (e.g. "ACE Bridge ARA") need an ARA host such as Reaper.
-Outside one their editor is empty, and bridged through yabridge the plugin can
-stop answering. Since each plugin has its own process this only stalls that
-plugin; Performer warns when such a plugin is added or opened anyway. Use the
-plugin's non-ARA version instead.
+The short version: **Audio...** to pick an output, **Plugins...** to scan for
+plugins, select an input and give it a MIDI device, click a program, press
+**+ Add instrument...**, then **Save As...**.
 
 ## Windows plugins via yabridge and nilinux
 
@@ -136,12 +124,15 @@ tree, then via `$PERFORMER_PLUGIN_HOST`.
 - `Source/PluginHost.*` – plugin formats, known-plugin list, out-of-process probing, mapping templates.
 - `Source/PluginScanner.*` – app-owned background scan; `Source/PluginManagerComponent.h` – the Plugins window.
 - `Source/MappingSuggestions.*` – per-plugin mapping templates and name-based CC suggestions.
+- `Source/PluginIcons.*` – plugin icons: Windows PE icon resources, VST3 snapshots, generated badges.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
 - `Source/RemotePlugin.*` – host-side proxy for one plugin process (spawn, control channel, real-time block exchange).
 - `Source/Ipc/Protocol.*` – shared-memory layout and framing shared by both executables.
 - `Source/PluginHostProcess/PluginHostMain.cpp` – the `performer-plugin-host` executable.
 - `Source/MainComponent.*` – the UI (inputs, programs, slots, mappings panels).
 - `Source/KeyboardPanel.h` – on-screen keyboard and test controllers.
+- `Source/ParamPicker.h` – searchable parameter picker; `Source/AudioSettingsComponent.h` – the Audio window.
+- `Source/LowLatency.*` – PipeWire JACK preload, quantum control, realtime checks.
 - `Source/Main.cpp` – application entry.
 
 ## Tests
@@ -195,3 +186,25 @@ Performer is meant to be played live, so it goes for the smallest safe block:
 * Every plugin runs in its own process; a plugin that does not finish its
   block in time is silenced for that block and counted as *late* in the
   status bar, so one slow plugin cannot stall the whole rig.
+
+## Contributing
+
+Issues and pull requests are welcome. Please run the tests before opening a PR:
+
+```sh
+cmake --build build && ctest --test-dir build
+```
+
+Two things worth knowing before changing the engine: nothing may block the
+audio thread (plugin calls go through the shared-memory block with a deadline),
+and nothing may block the message thread on a plugin (loading happens on the
+loader pool, and every plugin call from the UI has a timeout). `Tests/EngineTest.cpp`
+runs real plugins through real helper processes and is the place to add
+coverage.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+JUCE is included as a submodule and carries [its own licence](https://github.com/juce-framework/JUCE/blob/master/LICENSE.md);
+building this project under the GPL uses JUCE under the GPL.

@@ -586,7 +586,8 @@ int main()
         // what PluginListComponent does -- four pool threads, and as soon as one runs
         // out of files the pool is torn down with removeAllJobs (true, ...), which asks
         // the still-running probes to exit. Nothing may end up blacklisted.
-        File yabridgeDir ("/home/dguedry/.vst3/yabridge");
+        // Any yabridge bundles this machine has; skipped where there are none.
+        File yabridgeDir (File::getSpecialLocation (File::userHomeDirectory).getChildFile (".vst3/yabridge"));
         if (yabridgeDir.isDirectory())
         {
             AudioPluginFormat* vst3 = nullptr;
@@ -826,7 +827,7 @@ int main()
         TemporaryFile iconCache;
         PluginIcons icons (iconCache.getFile());
         CHECK (icons.get (d, 32).getWidth() == 32);
-        d.fileOrIdentifier = "/home/dguedry/.vst3/yabridge/Kontakt 8.vst3";
+        d.fileOrIdentifier = File::getSpecialLocation (File::userHomeDirectory).getChildFile (".vst3/yabridge/Kontakt 8.vst3").getFullPathName();
         if (File (d.fileOrIdentifier).isDirectory())
         {
             const auto pe = PluginIcons::windowsBinaryFor (d);
