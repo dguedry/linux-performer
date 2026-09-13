@@ -556,6 +556,7 @@ public:
             pan.textFromValueFunction = [] (double v) { const int n = (int) std::lround (std::abs (v) * 100.0); return n == 0 ? String ("centre") : (v < 0 ? "L " : "R ") + String (n); };
             pan.valueFromTextFunction = [] (const String& t) { const double n = t.retainCharacters ("0123456789").getDoubleValue() / 100.0; return t.containsIgnoreCase ("L") ? -n : (t.containsIgnoreCase ("R") ? n : 0.0); };
             pan.setDoubleClickReturnValue (true, 0.0);
+            pan.updateText();     // the bar's text box was filled before the formatter existed
             pan.setTooltip ("Stereo position of this plugin in the mix. Double-click for centre.");
 
             velRange.setRange (1, 127, 1);
@@ -568,6 +569,7 @@ public:
             velCurve.textFromValueFunction = [] (double v) { const int n = (int) std::lround (std::abs (v) * 100.0); return n == 0 ? String ("linear") : (v > 0 ? "+" + String (n) + " % louder" : String (n) + " % softer"); };
             velCurve.valueFromTextFunction = [] (const String& t) { const double n = t.retainCharacters ("0123456789").getDoubleValue() / 100.0; return t.containsIgnoreCase ("soft") || t.startsWith ("-") ? -n : n; };
             velCurve.setDoubleClickReturnValue (true, 0.0);
+            velCurve.updateText();     // the bar's text box was filled before the formatter existed
             velCurve.setTooltip ("Reshapes incoming velocities: louder makes soft playing come out stronger (for a stiff keyboard or a quiet library), softer does the opposite. Double-click for linear.");
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (removeBtn);
@@ -587,6 +589,7 @@ public:
             transpose.textFromValueFunction = [] (double v) { const int st = (int) v; return (st > 0 ? "+" : "") + String (st) + " st"; };
             transpose.valueFromTextFunction = [] (const String& t) { return (double) t.retainCharacters ("-0123456789").getIntValue(); };
             transpose.setDoubleClickReturnValue (true, 0.0);
+            transpose.updateText();     // the bar's text box was filled before the formatter existed
             transpose.setTooltip ("Shift incoming notes by this many semitones (+12 = one octave up). Double-click for none.");
 
             keyRange.setRange (0, 127, 1);
