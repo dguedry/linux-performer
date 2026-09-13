@@ -37,6 +37,9 @@ int main()
     slot.lowKey = 36; slot.highKey = 72;
     slot.outChannel = 3;
     slot.enabled = false;
+    slot.lowVelocity = 40; slot.highVelocity = 100;
+    slot.velocityCurve = 0.5f;
+    slot.pan = -0.3f;
     prog.slots.push_back (slot);
 
     MappingDef m;
@@ -99,6 +102,9 @@ int main()
         CHECK (ls.lowKey == 36 && ls.highKey == 72);
         CHECK (ls.outChannel == 3);
         CHECK (ls.enabled == false);
+        CHECK (ls.lowVelocity == 40 && ls.highVelocity == 100);
+        CHECK (std::abs (ls.velocityCurve - 0.5f) < 1e-6f);
+        CHECK (std::abs (ls.pan - (-0.3f)) < 1e-6f);
     }
     CHECK (p.slots.size() == 1 && p.slots[0].effects.size() == 1);
     if (p.slots.size() == 1 && p.slots[0].effects.size() == 1)

@@ -101,6 +101,13 @@ public:
     void setSlotGainDb    (int inputIndex, int program, int slot, float);
     void setSlotTranspose (int inputIndex, int program, int slot, int);
     void setSlotKeyRange  (int inputIndex, int program, int slot, int low, int high);
+    void setSlotVelocityRange (int inputIndex, int program, int slot, int low, int high);
+    void setSlotVelocityCurve (int inputIndex, int program, int slot, float curve);   // -1..1
+    void setSlotPan       (int inputIndex, int program, int slot, float pan);         // -1..1
+    /** Velocity after a slot's curve: 0 leaves it, >0 lifts soft playing, <0 tames it. 1..127 in and out. */
+    static int curveVelocity (int velocity, float curve);
+    /** Left/right gains for a pan position: a balance law, unity in the centre. */
+    static void panGains (float pan, float& left, float& right);
     void setSlotOutChannel(int inputIndex, int program, int slot, int);
 
     //==============================================================================

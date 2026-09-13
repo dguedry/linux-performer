@@ -156,6 +156,46 @@ int main()
     engine.injectMidi (0, MidiMessage::noteOff (1, 48));
     engine.setSlotKeyRange (0, 0, 0, 0, 127);
 
+    // --- velocity range, velocity curve, pan -----------------------------------------
+    engine.setSlotVelocityRange (0, 0, 0, 90, 127);
+    engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 50));    // too soft for this layer
+    CHECK (render (engine, 20) < 1e-4f);
+    engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+    engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 110));   // inside
+    CHECK (render (engine, 20) > 0.01f);
+    engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+    render (engine, 100);
+    engine.setSlotVelocityRange (0, 0, 0, 1, 127);
+
+    CHECK (Engine::curveVelocity (127, 0.7f) == 127 && Engine::curveVelocity (1, -0.7f) >= 1);
+    CHECK (Engine::curveVelocity (64, 0.0f) == 64);
+    CHECK (Engine::curveVelocity (64, 1.0f) > 100 && Engine::curveVelocity (64, -1.0f) < 20);
+    for (int v = 2; v <= 127; ++v) CHECK (Engine::curveVelocity (v, 0.5f) >= Engine::curveVelocity (v - 1, 0.5f));   // monotonic
+
+    {
+        float l = 0, r = 0;
+        Engine::panGains (0.0f, l, r);  CHECK (l == 1.0f && r == 1.0f);
+        Engine::panGains (-1.0f, l, r); CHECK (l == 1.0f && r == 0.0f);
+        Engine::panGains (0.5f, l, r);  CHECK (std::abs (l - 0.5f) < 1e-6f && r == 1.0f);
+        // Hard left: the right channel of the mix must be silent while the left sounds.
+        engine.setSlotPan (0, 0, 0, -1.0f);
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+        AudioBuffer<float> buf (2, 512);
+        double sl = 0, sr = 0;
+        for (int b = 0; b < 20; ++b)
+        {
+            buf.clear();
+            float* outs[2] = { buf.getWritePointer (0), buf.getWritePointer (1) };
+            engine.renderBlockForTesting (outs, 2, 512);
+            sl += buf.getRMSLevel (0, 0, 512); sr += buf.getRMSLevel (1, 0, 512);
+        }
+        std::printf ("     pan hard left: L %.4f  R %.4f\n", sl / 20, sr / 20);
+        CHECK (sl / 20 > 0.005 && sr / 20 < 1e-5);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+        engine.setSlotPan (0, 0, 0, 0.0f);
+        render (engine, 100);
+    }
+
     // --- slot disabled -> silent ------------------------------------------------------
     engine.setSlotEnabled (0, 0, 0, false);
     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));

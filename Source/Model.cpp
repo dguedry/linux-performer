@@ -75,6 +75,10 @@ var SlotDef::toVar() const
     o->setProperty ("transpose", transpose);
     o->setProperty ("lowKey", lowKey);
     o->setProperty ("highKey", highKey);
+    o->setProperty ("lowVelocity", lowVelocity);
+    o->setProperty ("highVelocity", highVelocity);
+    o->setProperty ("velocityCurve", velocityCurve);
+    o->setProperty ("pan", pan);
     o->setProperty ("outChannel", outChannel);
     o->setProperty ("effects", effectsToVar (effects));
     return var (o);
@@ -91,6 +95,10 @@ SlotDef SlotDef::fromVar (const var& v)
     s.transpose  = prop<int>   (v, "transpose", 0);
     s.lowKey     = prop<int>   (v, "lowKey", 0);
     s.highKey    = prop<int>   (v, "highKey", 127);
+    s.lowVelocity   = juce::jlimit (1, 127, prop<int> (v, "lowVelocity", 1));
+    s.highVelocity  = juce::jlimit (s.lowVelocity, 127, prop<int> (v, "highVelocity", 127));
+    s.velocityCurve = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "velocityCurve", 0.0f));
+    s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
     s.effects    = effectsFromVar (v);
     return s;

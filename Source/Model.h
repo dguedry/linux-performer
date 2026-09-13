@@ -29,6 +29,9 @@ struct SlotDef
     float gainDb = 0.0f;
     int transpose = 0;                // semitones
     int lowKey = 0, highKey = 127;    // key zone
+    int lowVelocity = 1, highVelocity = 127;   // note-ons outside are dropped (velocity layers)
+    float velocityCurve = 0.0f;       // -1..1: <0 softer, 0 linear, >0 louder for the same touch
+    float pan = 0.0f;                 // -1 (left) .. 1 (right); a balance on the stereo output, unity at centre
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
     std::vector<EffectDef> effects;   // processed in order after the instrument
 

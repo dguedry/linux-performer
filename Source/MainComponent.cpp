@@ -521,7 +521,7 @@ private:
 class SlotsPanel : public Component
 {
 public:
-    static constexpr int slotHeaderHeight = 78;
+    static constexpr int slotHeaderHeight = 118;
 
     struct SlotRow : public Component
     {
@@ -534,7 +534,10 @@ public:
             addAndMakeVisible (transpose);
             addAndMakeVisible (keyRange);
             addAndMakeVisible (outCh);
-            for (auto* c : { &gainCap, &transposeCap, &keysCap, &chCap })
+            addAndMakeVisible (pan);
+            addAndMakeVisible (velRange);
+            addAndMakeVisible (velCurve);
+            for (auto* c : { &gainCap, &transposeCap, &keysCap, &chCap, &panCap, &velCap, &curveCap })
             {
                 addAndMakeVisible (c);
                 c->setFont (FontOptions (10.5f, Font::bold));
@@ -545,6 +548,27 @@ public:
             gainCap.setText ("GAIN", dontSendNotification);
             transposeCap.setText ("TRANSPOSE", dontSendNotification);
             chCap.setText ("MIDI CHANNEL", dontSendNotification);
+            panCap.setText ("PAN", dontSendNotification);
+            curveCap.setText ("VELOCITY CURVE", dontSendNotification);
+
+            pan.setRange (-1.0, 1.0, 0.01);
+            pan.setSliderStyle (Slider::LinearBar);
+            pan.textFromValueFunction = [] (double v) { const int n = (int) std::lround (std::abs (v) * 100.0); return n == 0 ? String ("centre") : (v < 0 ? "L " : "R ") + String (n); };
+            pan.valueFromTextFunction = [] (const String& t) { const double n = t.retainCharacters ("0123456789").getDoubleValue() / 100.0; return t.containsIgnoreCase ("L") ? -n : (t.containsIgnoreCase ("R") ? n : 0.0); };
+            pan.setDoubleClickReturnValue (true, 0.0);
+            pan.setTooltip ("Stereo position of this plugin in the mix. Double-click for centre.");
+
+            velRange.setRange (1, 127, 1);
+            velRange.setMinAndMaxValues (1, 127, dontSendNotification);
+            velRange.setPopupDisplayEnabled (true, false, this);
+            velRange.setTooltip ("Velocity layer: only notes played within this velocity range reach the plugin. Two slots with complementary ranges switch sounds by touch.");
+
+            velCurve.setRange (-1.0, 1.0, 0.05);
+            velCurve.setSliderStyle (Slider::LinearBar);
+            velCurve.textFromValueFunction = [] (double v) { const int n = (int) std::lround (std::abs (v) * 100.0); return n == 0 ? String ("linear") : (v > 0 ? "+" + String (n) + " % louder" : String (n) + " % softer"); };
+            velCurve.valueFromTextFunction = [] (const String& t) { const double n = t.retainCharacters ("0123456789").getDoubleValue() / 100.0; return t.containsIgnoreCase ("soft") || t.startsWith ("-") ? -n : n; };
+            velCurve.setDoubleClickReturnValue (true, 0.0);
+            velCurve.setTooltip ("Reshapes incoming velocities: louder makes soft playing come out stronger (for a stiff keyboard or a quiet library), softer does the opposite. Double-click for linear.");
             addAndMakeVisible (guiBtn);
             addAndMakeVisible (removeBtn);
             addAndMakeVisible (chain);
@@ -582,6 +606,10 @@ public:
             transpose.onValueChange = [this, &e, &o] { e.setSlotTranspose (o.getSelectedInput(), o.getEditedProgram(), index, (int) transpose.getValue()); o.markDirty(); };
             keyRange.onValueChange  = [this, &e, &o] { e.setSlotKeyRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) keyRange.getMinValue(), (int) keyRange.getMaxValue());
                                                        updateKeyCaption(); o.markDirty(); };
+            pan.onValueChange       = [this, &e, &o] { e.setSlotPan (o.getSelectedInput(), o.getEditedProgram(), index, (float) pan.getValue()); o.markDirty(); };
+            velCurve.onValueChange  = [this, &e, &o] { e.setSlotVelocityCurve (o.getSelectedInput(), o.getEditedProgram(), index, (float) velCurve.getValue()); o.markDirty(); };
+            velRange.onValueChange  = [this, &e, &o] { e.setSlotVelocityRange (o.getSelectedInput(), o.getEditedProgram(), index, (int) velRange.getMinValue(), (int) velRange.getMaxValue());
+                                                       updateVelCaption(); o.markDirty(); };
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
@@ -601,6 +629,10 @@ public:
             transpose.setValue (def.transpose, dontSendNotification);
             keyRange.setMinAndMaxValues (def.lowKey, def.highKey, dontSendNotification);
             updateKeyCaption();
+            pan.setValue (def.pan, dontSendNotification);
+            velCurve.setValue (def.velocityCurve, dontSendNotification);
+            velRange.setMinAndMaxValues (def.lowVelocity, def.highVelocity, dontSendNotification);
+            updateVelCaption();
             outCh.setSelectedId (def.outChannel + 1, dontSendNotification);
             guiBtn.setButtonText (loading ? "Loading" : loaded ? "Edit GUI" : "Reload");
             guiBtn.setEnabled (! loading);
@@ -609,6 +641,12 @@ public:
         }
 
         int preferredHeight() const { return slotHeaderHeight + chain.preferredHeight() + 4; }
+
+        void updateVelCaption()
+        {
+            const int lo = (int) velRange.getMinValue(), hi = (int) velRange.getMaxValue();
+            velCap.setText ("VELOCITY   " + (lo <= 1 && hi >= 127 ? String ("all") : String (lo) + " to " + String (hi)), dontSendNotification);
+        }
 
         void updateKeyCaption()
         {
@@ -644,10 +682,18 @@ public:
                 control.setBounds (bottom.removeFromLeft (cw).reduced (2, 0));
             };
             column (24, gainCap, gain);
-            column (16, transposeCap, transpose);
-            column (36, keysCap, keyRange);
+            column (14, panCap, pan);
+            column (18, transposeCap, transpose);
             chCap.setBounds (caps.reduced (2, 0));
             outCh.setBounds (bottom.reduced (2, 0));
+
+            r.removeFromTop (4);
+            caps = r.removeFromTop (14);
+            bottom = r.removeFromTop (22);
+            column (38, keysCap, keyRange);
+            column (36, velCap, velRange);
+            curveCap.setBounds (caps.reduced (2, 0));
+            velCurve.setBounds (bottom.reduced (2, 0));
 
             r.removeFromTop (6);
             chain.setBounds (r.withTrimmedLeft (24));
@@ -659,8 +705,8 @@ public:
         ImageComponent icon;
         ToggleButton enabled;
         Label name;
-        Slider gain, transpose, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
-        Label gainCap, transposeCap, keysCap, chCap;
+        Slider gain, transpose, pan, velCurve, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox }, velRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
+        Label gainCap, transposeCap, keysCap, chCap, panCap, velCap, curveCap;
         ComboBox outCh;
         TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
         EffectChainComponent chain;

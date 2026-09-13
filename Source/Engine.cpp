@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include <cmath>
 #include <algorithm>
 
 using namespace juce;
@@ -64,12 +65,16 @@ struct Engine::SlotRuntime : public PluginNode
         transpose.store (d.transpose);
         lowKey.store (d.lowKey);
         highKey.store (d.highKey);
+        lowVelocity.store (d.lowVelocity);
+        highVelocity.store (d.highVelocity);
+        velocityCurve.store (d.velocityCurve);
+        pan.store (d.pan);
         outChannel.store (d.outChannel);
     }
 
     std::atomic<bool> enabled { true };
-    std::atomic<float> gain { 1.0f };
-    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, outChannel { 0 };
+    std::atomic<float> gain { 1.0f }, velocityCurve { 0.0f }, pan { 0.0f };
+    std::atomic<int> transpose { 0 }, lowKey { 0 }, highKey { 127 }, lowVelocity { 1 }, highVelocity { 127 }, outChannel { 0 };
     std::vector<std::unique_ptr<EffectRuntime>> effects;
     AudioBuffer<float> stereo;     // the slot's signal as it travels down the chain
 };
@@ -820,7 +825,41 @@ PERF_SLOT_SETTER (setSlotEnabled,    enabled,    enabled.store (v))
 PERF_SLOT_SETTER (setSlotGainDb,     gainDb,     gain.store (Decibels::decibelsToGain (v, -60.0f)))
 PERF_SLOT_SETTER (setSlotTranspose,  transpose,  transpose.store (v))
 PERF_SLOT_SETTER (setSlotOutChannel, outChannel, outChannel.store (v))
+PERF_SLOT_SETTER (setSlotVelocityCurve, velocityCurve, velocityCurve.store (jlimit (-1.0f, 1.0f, v)))
+PERF_SLOT_SETTER (setSlotPan,        pan,        pan.store (jlimit (-1.0f, 1.0f, v)))
 #undef PERF_SLOT_SETTER
+
+void Engine::setSlotVelocityRange (int inputIndex, int program, int slotIndex, int low, int high)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    if (slotIndex < 0 || slotIndex >= (int) def.slots.size()) return;
+    low = jlimit (1, 127, low); high = jlimit (low, 127, high);
+    def.slots[(size_t) slotIndex].lowVelocity = low;
+    def.slots[(size_t) slotIndex].highVelocity = high;
+    if (auto* rt = getLoaded (inputIndex, program))
+        if (slotIndex < (int) rt->slots.size())
+        {
+            rt->slots[(size_t) slotIndex]->lowVelocity.store (low);
+            rt->slots[(size_t) slotIndex]->highVelocity.store (high);
+        }
+}
+
+int Engine::curveVelocity (int velocity, float curve)
+{
+    // A gamma curve through (0,0) and (127,127): curve +1 -> exponent 1/4 (soft playing
+    // comes out loud), -1 -> exponent 4 (it takes a hard hit to get loud).
+    const float x = jlimit (0.0f, 1.0f, (float) velocity / 127.0f);
+    const float gamma = std::pow (4.0f, -jlimit (-1.0f, 1.0f, curve));
+    return jlimit (1, 127, (int) std::lround (127.0f * std::pow (x, gamma)));
+}
+
+void Engine::panGains (float pan, float& left, float& right)
+{
+    pan = jlimit (-1.0f, 1.0f, pan);
+    left  = jmin (1.0f, 1.0f - pan);
+    right = jmin (1.0f, 1.0f + pan);
+}
 
 void Engine::setSlotKeyRange (int inputIndex, int program, int slotIndex, int low, int high)
 {
@@ -1467,6 +1506,15 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
                 note += slot->transpose.load();
                 if (note < 0 || note > 127) continue;
                 mm.setNoteNumber (note);
+                if (mm.isNoteOn())
+                {
+                    // Velocity layer: note-ons outside the range never reach this slot.
+                    // Note-offs always pass, so nothing can hang.
+                    const int v = mm.getVelocity();
+                    if (v < slot->lowVelocity.load() || v > slot->highVelocity.load()) continue;
+                    const float curve = slot->velocityCurve.load();
+                    if (curve != 0.0f) mm.setVelocity ((float) curveVelocity (v, curve) / 127.0f);
+                }
             }
             const int oc = slot->outChannel.load();
             if (oc > 0) mm.setChannel (oc);
@@ -1502,8 +1550,10 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
 
         const float g = slot->enabled.load() ? slot->gain.load() : 0.0f;
         if (g <= 0.0f) continue;
-        for (int c = 0; c < 2; ++c)
-            mix.addFrom (c, 0, stereo, c, 0, numSamples, g);
+        float pl = 1.0f, pr = 1.0f;
+        panGains (slot->pan.load(), pl, pr);
+        mix.addFrom (0, 0, stereo, 0, 0, numSamples, g * pl);
+        mix.addFrom (1, 0, stereo, 1, 0, numSamples, g * pr);
     }
 
     runChain (prog.effects, prog.programMidi, mix, numSamples);

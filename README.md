@@ -15,7 +15,7 @@ appear as normal VST3s and work too.
 |------|---------|
 | **Input** | A MIDI source: a MIDI device plus an optional channel filter. Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
 | **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds plugin slots and MIDI mappings. |
-| **Slot** | One instrument inside a program, with enable, gain, transpose, key range and output-channel settings, plus its own insert-effect chain. |
+| **Slot** | One instrument inside a program, with enable, gain, pan, transpose, key range, velocity range, velocity curve and MIDI-channel settings, plus its own insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
 | **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Setup** | The whole document (inputs, programs, plugin states). Saved as `*.performer.json`. |
