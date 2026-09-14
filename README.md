@@ -4,6 +4,10 @@
 a program for each sound in your set, and change sounds from the keyboard while
 you play.
 
+<p align="center">
+  <img src="docs/images/performer.png" alt="Performer: two inputs, a program list, two instrument slots with key and velocity ranges, and MIDI mappings" width="900">
+</p>
+
 Performer exists because the live hosts keyboard players rely on -- MainStage,
 Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 **LV2** and **LADSPA** plugins natively, and Windows VST3s bridged with
