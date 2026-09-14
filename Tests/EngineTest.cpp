@@ -782,6 +782,17 @@ int main()
                             CHECK (std::abs (b2 - a2) < 1e-3f);
                         }
                     }
+                    // PERFORMER_TEST_EDITOR_SECONDS=N keeps the plugin's editor open for N seconds so a
+                    // script can drive and screenshot it (GUI/mouse investigations).
+                    if (const int hold = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_EDITOR_SECONDS", "0").getIntValue(); hold > 0)
+                    {
+                        std::printf ("     opening editor 'PERFTEST %s' for %d s\n", desc.name.toRawUTF8(), hold); std::fflush (stdout);
+                        CHECK (x->showEditor ("PERFTEST " + desc.name));
+                        const auto tEd = Time::getMillisecondCounterHiRes();
+                        while (Time::getMillisecondCounterHiRes() - tEd < hold * 1000.0) { pump (20); render (engine, 1); }
+                        x->hideEditor();
+                        pump (200);
+                    }
                     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
                     const float r = render (engine, 100);                      // ~1.2 s; would segfault before the fix
                     std::printf ("     rms with extra VST3 (may be 0 if no preset loaded): %f\n", r);
