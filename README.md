@@ -49,16 +49,24 @@ every used program stays loaded and changes are instant (at the cost of RAM).
 
 ## Install
 
-Packages for Debian/Ubuntu (`.deb`) and Fedora (`.rpm`) are attached to each
-[release](https://github.com/dguedry/linux-performer/releases). They install
-`Performer` and `performer-plugin-host` into `/usr/bin`, a launcher entry and
-the icon. Every push also builds both packages as workflow artifacts under
-[Actions](https://github.com/dguedry/linux-performer/actions).
+**[Download the latest release](https://github.com/dguedry/linux-performer/releases/latest)**
+— a `.deb` for Debian/Ubuntu and an `.rpm` for Fedora, both x86-64. They install
+`Performer` and `performer-plugin-host` into `/usr/bin`, plus a launcher entry
+and the icon.
 
 ```sh
-sudo apt install ./performer_*_amd64.deb      # Debian/Ubuntu
-sudo dnf install ./performer-*.x86_64.rpm     # Fedora
+# Debian / Ubuntu
+wget https://github.com/dguedry/linux-performer/releases/latest/download/performer_0.1.0_amd64.deb
+sudo apt install ./performer_0.1.0_amd64.deb
+
+# Fedora
+wget https://github.com/dguedry/linux-performer/releases/latest/download/performer-0.1.0-1.x86_64.rpm
+sudo dnf install ./performer-0.1.0-1.x86_64.rpm
 ```
+
+Every push also builds both packages as workflow artifacts under
+[Actions](https://github.com/dguedry/linux-performer/actions), if you want a
+build from `main` rather than the last release.
 
 For plugins you will also want `calf-plugins` (or any LV2/VST3 instruments),
 `pipewire-jack` for the low-latency audio path, and
