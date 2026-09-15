@@ -95,7 +95,7 @@ int main()
         for (auto& d : host.getKnownPlugins().getTypes())
             if (d.isInstrument) { synth = d; haveSynth = true; break; }
     CHECK (haveSynth);
-    if (! haveSynth) { std::printf ("No LV2 instrument available (install calf-plugins)\n"); return 1; }
+    if (! haveSynth) { std::printf ("No LV2 instrument available (install calf-plugins on Debian/Ubuntu, lv2-calf-plugins on Fedora)\n"); return 1; }
     std::printf ("     using instrument: %s (%s)\n", synth.name.toRawUTF8(), synth.fileOrIdentifier.toRawUTF8());
 
     // --- engine ------------------------------------------------------------------

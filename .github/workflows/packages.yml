@@ -51,7 +51,7 @@ jobs:
           dnf install -y git cmake ninja-build gcc-c++ rpm-build \
             alsa-lib-devel pipewire-jack-audio-connection-kit-devel libX11-devel libXrandr-devel \
             libXinerama-devel libXcursor-devel libXext-devel freetype-devel fontconfig-devel \
-            mesa-libGL-devel ladspa-devel calf xorg-x11-server-Xvfb
+            mesa-libGL-devel ladspa-devel lv2-calf-plugins xorg-x11-server-Xvfb
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - name: Version from tag
@@ -63,8 +63,8 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        # Fedora keeps LV2 plugins in /usr/lib64/lv2, which JUCE does not search by default
-        run: LV2_PATH=/usr/lib64/lv2:/usr/lib/lv2 xvfb-run -a ctest --test-dir build --output-on-failure
+        # the engine test plays Calf Monosynth: on Fedora that is lv2-calf-plugins (calf alone is the JACK host)
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
       - name: Package
         run: cd build && cpack -G RPM && ls -la *.rpm && rpm -qip *.rpm && rpm -qlp *.rpm
       - uses: actions/upload-artifact@v4
