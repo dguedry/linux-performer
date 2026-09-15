@@ -379,19 +379,34 @@ private:
             setVisible (true);
             if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
 
-            // yabridge (Wine-bridged plugins) learns where our window is on screen from the
-            // ConfigureNotify that a resize of this window produces after the editor has
-            // attached. Hosts that size their window after attaching get one for free; we
-            // show the window at its final size, so a plugin whose editor reports its size
-            // right away (IK Multimedia B-3X) would never trigger it, and every click in
-            // its GUI would land offset by the window's screen position. One resize by a
-            // pixel and back, after the window is up, gives yabridge what it needs.
+            // yabridge (Wine-bridged plugins) only learns where the embedded window is on
+            // screen when the window the plugin's editor was attached to -- our content
+            // component's X11 window -- is resized after the attach. A plugin whose editor
+            // reports its final size straight away (IK Multimedia B-3X) never causes one,
+            // so Wine keeps the window at (0,0) and clicks land offset by the window's
+            // position until the user drags it. Resizing the *frame* is not enough: with a
+            // native title bar the window manager reparents us, so those events reach the
+            // frame rather than the editor's parent and yabridge reads a zero size from
+            // them. Resize the editor component itself, which is that parent.
             MessageManager::callAsync ([sp = Component::SafePointer<EditorWindow> (this)]
             {
                 if (sp == nullptr) return;
-                const auto b = sp->getBounds();
-                sp->setBounds (b.withHeight (b.getHeight() + 1));
-                sp->setBounds (b);
+                auto* content = sp->getContentComponent();
+                if (content == nullptr) return;
+                const auto b = content->getBounds();
+                content->setBounds (b.withHeight (b.getHeight() + 1));
+                content->setBounds (b);
+
+                // Report where the editor ended up, so a mouse-offset report can be
+                // checked against the log instead of guessed at.
+                if (auto* peer = sp->getPeer())
+                {
+                    const auto screen = peer->getBounds();
+                    MemoryOutputStream log;
+                    log.writeString ("editor mapped at " + screen.toString()
+                                     + " (content " + b.toString() + ")");
+                    sp->server.notify (ipc::Msg::notifyLog, log);
+                }
             });
         }
 
