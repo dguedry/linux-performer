@@ -66,11 +66,15 @@ jobs:
         # the engine test plays Calf Monosynth: on Fedora that is lv2-calf-plugins (calf alone is the JACK host)
         run: xvfb-run -a ctest --test-dir build --output-on-failure
       - name: Package
-        run: cd build && cpack -G RPM && ls -la *.rpm && rpm -qip *.rpm && rpm -qlp *.rpm
+        # CPack also writes a source RPM; only the binary one is for users.
+        run: |
+          cd build && cpack -G RPM
+          rm -f *.src.rpm
+          ls -la *.rpm && rpm -qip *.rpm && rpm -qlp *.rpm
       - uses: actions/upload-artifact@v4
         with:
           name: performer-rpm
-          path: build/*.rpm
+          path: build/*.x86_64.rpm
 
   release:
     name: Attach packages to the release
