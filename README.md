@@ -47,6 +47,23 @@ Program switching keeps the outgoing program rendering for a configurable
 release tail so held notes fade naturally. With **Preload all programs** on,
 every used program stays loaded and changes are instant (at the cost of RAM).
 
+## Install
+
+Packages for Debian/Ubuntu (`.deb`) and Fedora (`.rpm`) are attached to each
+[release](https://github.com/dguedry/linux-performer/releases). They install
+`Performer` and `performer-plugin-host` into `/usr/bin`, a launcher entry and
+the icon. Every push also builds both packages as workflow artifacts under
+[Actions](https://github.com/dguedry/linux-performer/actions).
+
+```sh
+sudo apt install ./performer_*_amd64.deb      # Debian/Ubuntu
+sudo dnf install ./performer-*.x86_64.rpm     # Fedora
+```
+
+For plugins you will also want `calf-plugins` (or any LV2/VST3 instruments),
+`pipewire-jack` for the low-latency audio path, and
+[yabridge](https://github.com/robbert-vdh/yabridge) for Windows plugins.
+
 ## Build
 
 Requirements (Ubuntu 24.04 names): `build-essential cmake ninja-build
@@ -186,6 +203,19 @@ Performer is meant to be played live, so it goes for the smallest safe block:
 * Every plugin runs in its own process; a plugin that does not finish its
   block in time is silenced for that block and counted as *late* in the
   status bar, so one slow plugin cannot stall the whole rig.
+
+## Releasing
+
+Tag a version and push it; the *Packages* workflow builds the `.deb` and
+`.rpm` with that version, runs the tests, creates the GitHub release with
+generated notes and attaches both packages:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Local packages: `cmake --build build && (cd build && cpack -G DEB)` or `-G RPM`
+on a machine with `rpm-build`.
 
 ## Contributing
 

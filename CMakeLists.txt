@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
-project(Performer VERSION 0.1.0 LANGUAGES C CXX)
+# Version: CI passes the tag (v1.2.3 -> 1.2.3); local builds use the default.
+set(PERFORMER_VERSION "0.1.0" CACHE STRING "Performer version")
+project(Performer VERSION ${PERFORMER_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,3 +157,44 @@ install(FILES Resources/performer.svg DESTINATION share/icons/hicolor/scalable/a
 foreach(size 16 24 32 48 64 128 256 512)
     install(FILES Resources/performer-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME performer.png)
 endforeach()
+
+#------------------------------------------------------------------------------
+# Packages: `cpack -G DEB` / `cpack -G RPM` in the build dir (the GitHub workflow
+# does both and attaches them to releases). Linked libraries are picked up
+# automatically; the X11/GL libraries JUCE opens at runtime with dlopen are listed
+# by hand.
+set(CPACK_PACKAGE_NAME "performer")
+set(CPACK_PACKAGE_VENDOR "dguedry")
+set(CPACK_PACKAGE_CONTACT "Donnie Guedry <dguedry@gmail.com>")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/dguedry/linux-performer")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Live-performance plugin host for Linux")
+set(CPACK_PACKAGE_DESCRIPTION "Performer is a live-performance MIDI-to-plugin host: 128 programs per keyboard selected by MIDI Program Change, VST3/LV2/LADSPA instruments and effects with splits and velocity layers, MIDI learn, every plugin in its own process, low-latency PipeWire/JACK audio.")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_STRIP_FILES ON)
+set(CPACK_PACKAGE_FILE_NAME "performer-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1, libgl1")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "pipewire-jack | libjack0 | libjack-jackd2-0, pipewire-alsa | pulseaudio-utils")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "calf-plugins, yabridge")
+
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
+set(CPACK_RPM_PACKAGE_REQUIRES "libX11, libXext, libXrandr, libXinerama, libXcursor, mesa-libGL")
+set(CPACK_RPM_PACKAGE_SUGGESTS "pipewire-jack-audio-connection-kit, calf")
+# the icon and applications dirs belong to the filesystem/hicolor packages
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    "/usr/share/applications" "/usr/share/icons" "/usr/share/icons/hicolor"
+    "/usr/share/icons/hicolor/scalable" "/usr/share/icons/hicolor/scalable/apps")
+foreach(size 16 24 32 48 64 128 256 512)
+    list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+         "/usr/share/icons/hicolor/${size}x${size}" "/usr/share/icons/hicolor/${size}x${size}/apps")
+endforeach()
+
+include(CPack)

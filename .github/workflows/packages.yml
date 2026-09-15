@@ -1,0 +1,89 @@
+name: Packages
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    name: Debian/Ubuntu package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+            libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk \
+            calf-plugins xvfb dpkg-dev file
+      - name: Version from tag
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "v=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "v=0.1.0" >> "$GITHUB_OUTPUT"; fi
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
+      - name: Package
+        run: cd build && cpack -G DEB && ls -la *.deb && dpkg-deb -I *.deb && dpkg-deb -c *.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performer-deb
+          path: build/*.deb
+
+  rpm:
+    name: Fedora package
+    runs-on: ubuntu-latest
+    container: fedora:41
+    steps:
+      - name: Build dependencies
+        run: |
+          dnf install -y git cmake ninja-build gcc-c++ rpm-build \
+            alsa-lib-devel pipewire-jack-audio-connection-kit-devel libX11-devel libXrandr-devel \
+            libXinerama-devel libXcursor-devel libXext-devel freetype-devel fontconfig-devel \
+            mesa-libGL-devel ladspa-devel calf xorg-x11-server-Xvfb
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Version from tag
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "v=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "v=0.1.0" >> "$GITHUB_OUTPUT"; fi
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        # Fedora keeps LV2 plugins in /usr/lib64/lv2, which JUCE does not search by default
+        run: LV2_PATH=/usr/lib64/lv2:/usr/lib/lv2 xvfb-run -a ctest --test-dir build --output-on-failure
+      - name: Package
+        run: cd build && cpack -G RPM && ls -la *.rpm && rpm -qip *.rpm && rpm -qlp *.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performer-rpm
+          path: build/*.rpm
+
+  release:
+    name: Attach packages to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: pkgs, merge-multiple: true }
+      - name: Create or update the release
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          ls -la pkgs
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Performer $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
