@@ -378,6 +378,21 @@ private:
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
             if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
+
+            // yabridge (Wine-bridged plugins) learns where our window is on screen from the
+            // ConfigureNotify that a resize of this window produces after the editor has
+            // attached. Hosts that size their window after attaching get one for free; we
+            // show the window at its final size, so a plugin whose editor reports its size
+            // right away (IK Multimedia B-3X) would never trigger it, and every click in
+            // its GUI would land offset by the window's screen position. One resize by a
+            // pixel and back, after the window is up, gives yabridge what it needs.
+            MessageManager::callAsync ([sp = Component::SafePointer<EditorWindow> (this)]
+            {
+                if (sp == nullptr) return;
+                const auto b = sp->getBounds();
+                sp->setBounds (b.withHeight (b.getHeight() + 1));
+                sp->setBounds (b);
+            });
         }
 
         void closeButtonPressed() override
