@@ -2,6 +2,7 @@
 
 #include "Engine.h"
 #include "KeyboardPanel.h"
+#include "StagePanel.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -62,6 +63,7 @@ private:
     juce::File getAutosaveFile() const;
 
     void showAudioSettings();
+    void printProgramMap();
     void showPluginManager();
 
     Engine& engine;
@@ -75,7 +77,10 @@ private:
                      panicBtn { "PANIC" };
     juce::ToggleButton preloadToggle { "Preload all programs" };
     juce::TextButton keyboardBtn { "Keyboard" };
+    juce::TextButton stageBtn { "Stage" };
+    juce::TextButton printBtn { "Print map" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;
+    std::unique_ptr<StagePanel> stagePanel;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
     juce::Label statusLabel, cpuLabel, fileLabel;

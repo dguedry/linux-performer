@@ -61,7 +61,7 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -211,6 +211,23 @@ parameters, and puts the other channels behind a toggle. To map a knob to a
 Kontakt instrument's own control, assign a host-automation slot in Kontakt
 (Automation → Host Automation, drag a slot onto the knob) and map to that
 `#NNN` parameter, or use *Use touched parameter*.
+
+## Reading the stage display
+
+**Stage** in the toolbar puts a large readout at the top of the window: for each
+input, the program number and the program's name, big enough to read from a
+stand while you play. When you pick programs by number on the keyboard, this is
+your confirmation that the right sound loaded. A program still loading is marked
+*...loading*, which explains a keyboard that is briefly silent, and an empty
+program is greyed.
+
+## Printing a program map
+
+**Print map** writes a sheet of which program number plays which sound, and
+opens it in your browser; print it from there. Only programs you have filled in
+are listed, with each program's number, its name and the instruments in it,
+grouped by input with the MIDI device and channel. Tape it to the keyboard and
+you never have to remember that the Rhodes is 001.
 
 ## The on-screen keyboard
 

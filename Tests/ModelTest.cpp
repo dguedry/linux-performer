@@ -1,5 +1,6 @@
 // Round-trip test for the Performer setup file format.
 #include "Model.h"
+#include "ProgramMap.h"
 #include "MappingSuggestions.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
@@ -167,6 +168,46 @@ int main()
         CHECK (! t2.has (d));
         MappingTemplates t3 (tf.getFile());
         CHECK (! t3.has (d) && t3.size() == 0);
+    }
+
+    // --- printable program map -------------------------------------------------------
+    {
+        Setup pm = Setup::makeDefault();
+        pm.inputs[0].name = "Upper"; pm.inputs[0].midiDeviceName = "Keystation"; pm.inputs[0].channel = 1;
+        auto& p7 = pm.inputs[0].programs[7];
+        p7.name = "Rhodes & Strings";
+        SlotDef a; a.plugin.name = "Kontakt 8"; p7.slots.push_back (a);
+        SlotDef b; b.plugin.name = "Calf Monosynth"; p7.slots.push_back (b);
+        auto& p9 = pm.inputs[0].programs[9];
+        p9.name = "Organ <loud & proud>";                       // must be HTML-escaped
+        SlotDef c; c.plugin.name = "Hammond B-3X"; p9.slots.push_back (c);
+
+        const auto html = ProgramMap::toHtml (pm, "My Rig");
+        CHECK (html.startsWith ("<!DOCTYPE html>"));
+        CHECK (html.contains ("007") && html.contains ("Rhodes &amp; Strings"));
+        CHECK (html.contains ("Kontakt 8 + Calf Monosynth"));
+        CHECK (html.contains ("Organ &lt;loud &amp; proud&gt;"));      // escaped, not raw
+        CHECK (! html.contains ("Organ <loud"));
+        CHECK (html.contains ("Keystation") && html.contains ("channel 1"));
+        CHECK (html.contains ("009"));
+        CHECK (! html.contains ("<td class=\"n\">001</td>"));        // empty programs are omitted
+        CHECK (html.contains ("No programs yet."));                    // the second, empty input
+        std::printf ("     program map: %d bytes\n", html.length());
+
+        // PERFORMER_MAP_FROM=setup.json PERFORMER_MAP_TO=out.html renders a real setup,
+        // for eyeballing the printed sheet.
+        const auto from = juce::SystemStats::getEnvironmentVariable ("PERFORMER_MAP_FROM", {});
+        const auto to   = juce::SystemStats::getEnvironmentVariable ("PERFORMER_MAP_TO", {});
+        if (from.isNotEmpty() && to.isNotEmpty())
+        {
+            Setup real;
+            if (Setup::loadFromFile (juce::File (from), real).wasOk())
+            {
+                juce::File (to).replaceWithText (ProgramMap::toHtml (real, juce::File (from).getFileNameWithoutExtension()));
+                std::printf ("     rendered %s -> %s\n", from.toRawUTF8(), to.toRawUTF8());
+            }
+            else std::printf ("     could not load %s\n", from.toRawUTF8());
+        }
     }
 
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);

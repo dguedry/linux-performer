@@ -2,6 +2,7 @@
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
 #include "AudioSettingsComponent.h"
+#include "ProgramMap.h"
 #include "ParamPicker.h"
 #include <optional>
 
@@ -1380,6 +1381,27 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     keyboardBtn.setToggleState (settings.getBoolValue ("showKeyboard", false), dontSendNotification);
     keyboardPanel->setVisible (keyboardBtn.getToggleState());
 
+    // Stage display: the active program per input, big enough to read from a stand.
+    stagePanel = std::make_unique<StagePanel> (engine);
+    addChildComponent (stagePanel.get());
+    addAndMakeVisible (stageBtn);
+    stageBtn.setClickingTogglesState (true);
+    stageBtn.setColour (TextButton::buttonOnColourId, accentDim);
+    stageBtn.setTooltip ("Show the current program of each input in large type, for reading while you play");
+    stageBtn.onClick = [this]
+    {
+        const bool show = stageBtn.getToggleState();
+        stagePanel->setVisible (show);
+        settings.setValue ("showStage", show);
+        resized();
+    };
+    stageBtn.setToggleState (settings.getBoolValue ("showStage", false), dontSendNotification);
+    stagePanel->setVisible (stageBtn.getToggleState());
+
+    addAndMakeVisible (printBtn);
+    printBtn.setTooltip ("Write a printable list of which program number plays which sound, and open it in your browser");
+    printBtn.onClick = [this] { printProgramMap(); };
+
     addAndMakeVisible (tailLabel);
     tailLabel.setColour (Label::textColourId, textDim);
     addAndMakeVisible (tailSlider);
@@ -1446,11 +1468,13 @@ void MainComponent::resized()
         toolbar.removeFromLeft (4);
     }
     toolbar.removeFromLeft (12);
+    printBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (12);
     audioBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
     pluginsBtn.setBounds (toolbar.removeFromLeft (80));     toolbar.removeFromLeft (4);
     midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (12);
     panicBtn.setBounds (toolbar.removeFromRight (90));      toolbar.removeFromRight (12);
-    keyboardBtn.setBounds (toolbar.removeFromRight (90));   toolbar.removeFromRight (12);
+    keyboardBtn.setBounds (toolbar.removeFromRight (90));   toolbar.removeFromRight (4);
+    stageBtn.setBounds (toolbar.removeFromRight (80));      toolbar.removeFromRight (12);
     tailSlider.setBounds (toolbar.removeFromRight (70));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (34));     toolbar.removeFromRight (8);
     preloadToggle.setBounds (toolbar.removeFromRight (170));
@@ -1464,6 +1488,11 @@ void MainComponent::resized()
     {
         keyboardPanel->setBounds (r.removeFromBottom (KeyboardPanel::preferredHeight).reduced (8, 0));
         r.removeFromBottom (8);
+    }
+    if (stagePanel != nullptr && stagePanel->isVisible())
+    {
+        stagePanel->setBounds (r.removeFromTop (StagePanel::preferredHeight).reduced (8, 0));
+        r.removeFromTop (8);
     }
 
     r.reduce (8, 0);
@@ -1709,6 +1738,22 @@ void MainComponent::showAudioSettings()
     o.useNativeTitleBar = true;
     o.resizable = true;
     o.launchAsync();
+}
+
+void MainComponent::printProgramMap()
+{
+    const auto setup = engine.captureSetup();
+    const auto title = currentFile.existsAsFile() ? currentFile.getFileNameWithoutExtension() : String ("Performer");
+    // JUCE cannot print on Linux; write HTML styled for paper and let the browser print it.
+    auto out = File::getSpecialLocation (File::tempDirectory)
+                   .getChildFile ("performer-program-map-" + String (Time::currentTimeMillis()) + ".html");
+    if (! out.replaceWithText (ProgramMap::toHtml (setup, title)))
+    {
+        showStatus ("Could not write the program map to " + out.getFullPathName());
+        return;
+    }
+    out.startAsProcess();
+    showStatus ("Program map opened in your browser — print it from there (Ctrl+P).");
 }
 
 void MainComponent::showPluginManager()
