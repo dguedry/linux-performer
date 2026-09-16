@@ -156,6 +156,51 @@ int main()
     engine.injectMidi (0, MidiMessage::noteOff (1, 48));
     engine.setSlotKeyRange (0, 0, 0, 0, 127);
 
+    // --- Program Change channel ---------------------------------------------------------
+    // Input 0 plays on channel 1. A keyboard may send Program Change somewhere else
+    // entirely (a Jupiter-50 sends registrations on 16 while playing on 1/3/4).
+    {
+        engine.selectProgram (0, 0); settle();
+        const int start = engine.getSetup().inputs[0].currentProgram;
+        CHECK (start == 0);
+
+        // default (same as notes): a change on the note channel selects, one elsewhere does not
+        engine.injectMidi (0, MidiMessage::programChange (1, 5)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 5);
+        engine.injectMidi (0, MidiMessage::programChange (16, 9)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 5);      // ignored: wrong channel
+
+        // a specific channel: only that one is accepted
+        engine.setInputProgramChangeChannel (0, 16);
+        engine.injectMidi (0, MidiMessage::programChange (1, 7)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 5);      // the note channel no longer selects
+        engine.injectMidi (0, MidiMessage::programChange (16, 9)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 9);
+        std::printf ("     program change on ch16 while playing ch1: program %d\n", engine.getSetup().inputs[0].currentProgram);
+
+        // any channel
+        engine.setInputProgramChangeChannel (0, InputDef::pcChannelAny);
+        engine.injectMidi (0, MidiMessage::programChange (4, 3)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 3);
+
+        // notes still obey the note channel, whatever the PC channel is
+        engine.setInputProgramChangeChannel (0, 16);
+        engine.selectProgram (0, 0); settle();
+        engine.injectMidi (0, MidiMessage::noteOn (16, 60, (uint8) 100));   // wrong channel for notes
+        CHECK (render (engine, 20) < 1e-4f);
+        engine.injectMidi (0, MidiMessage::noteOff (16, 60));
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));    // the note channel
+        CHECK (render (engine, 20) > 0.01f);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60)); render (engine, 60);
+
+        // respondToProgramChange still wins over any of this
+        engine.setInputRespondToProgramChange (0, false);
+        engine.injectMidi (0, MidiMessage::programChange (16, 11)); pump (40);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 0);
+        engine.setInputRespondToProgramChange (0, true);
+        engine.setInputProgramChangeChannel (0, InputDef::pcChannelSameAsNotes);
+    }
+
     // --- velocity range, velocity curve, pan -----------------------------------------
     engine.setSlotVelocityRange (0, 0, 0, 90, 127);
     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 50));    // too soft for this layer

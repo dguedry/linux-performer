@@ -80,6 +80,7 @@ public:
     void removeInput (int inputIndex);
     void setInputName (int inputIndex, const juce::String&);
     void setInputMidiDevice (int inputIndex, const juce::MidiDeviceInfo&);
+    void setInputProgramChangeChannel (int inputIndex, int channel);
     void setInputChannel (int inputIndex, int channel);
     void setInputRespondToProgramChange (int inputIndex, bool);
     /** Re-scans MIDI devices and re-opens the ones the setup refers to (hot-plug). */
@@ -216,6 +217,7 @@ private:
 
     // MidiInputCallback
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+    static bool acceptsProgramChangeOn (const InputRuntime&, int channel);
     void routeMidi (InputRuntime&, int inputIndex, const juce::MidiMessage&);   // caller holds lock
 
     // AsyncUpdater / Timer / ChangeListener

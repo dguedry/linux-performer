@@ -92,6 +92,16 @@ struct InputDef
     juce::String midiDeviceName;      // used to re-find a device if identifiers change
     int channel = 0;                  // 0 = omni
     bool respondToProgramChange = true;
+    /** Which channel carries Program Change for this input. Keyboards differ: most
+        send it on the channel they play on, but a workstation may use a global
+        channel (a Roland Jupiter-50 sends registrations on 16 while playing on
+        1/3/4), and some send it on a channel you cannot change. -1 = the same
+        channel as the notes (the default, and what every keyboard that does the
+        usual thing wants), 0 = any channel on this input's MIDI port, 1..16 = that
+        channel only. */
+    static constexpr int pcChannelSameAsNotes = -1;
+    static constexpr int pcChannelAny = 0;
+    int programChangeChannel = pcChannelSameAsNotes;
     int currentProgram = 0;
     std::vector<ProgramDef> programs { (size_t) numPrograms };
 

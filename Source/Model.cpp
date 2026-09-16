@@ -184,6 +184,7 @@ var InputDef::toVar() const
     o->setProperty ("midiDeviceName", midiDeviceName);
     o->setProperty ("channel", channel);
     o->setProperty ("respondToProgramChange", respondToProgramChange);
+    o->setProperty ("programChangeChannel", programChangeChannel);
     o->setProperty ("currentProgram", currentProgram);
 
     // Only store non-empty programs to keep files small.
@@ -208,6 +209,7 @@ InputDef InputDef::fromVar (const var& v)
     in.midiDeviceName         = propStr (v, "midiDeviceName");
     in.channel                = prop<int>  (v, "channel", 0);
     in.respondToProgramChange = prop<bool> (v, "respondToProgramChange", true);
+    in.programChangeChannel   = juce::jlimit (-1, 16, prop<int> (v, "programChangeChannel", InputDef::pcChannelSameAsNotes));
     in.currentProgram         = jlimit (0, numPrograms - 1, prop<int> (v, "currentProgram", 0));
 
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("programs").getArray() : nullptr)

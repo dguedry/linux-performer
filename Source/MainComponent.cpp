@@ -90,6 +90,27 @@ public:
             list.repaintRow (sel);
         };
 
+        addAndMakeVisible (pcChannelLabel);
+        pcChannelLabel.setColour (Label::textColourId, textDim);
+        pcChannelLabel.setFont (FontOptions (11.0f));
+        addAndMakeVisible (pcChannelBox);
+        // Ids: 1 = same as notes, 2 = any, 3.. = channel 1..16
+        pcChannelBox.addItem ("Same as notes", 1);
+        pcChannelBox.addItem ("Any channel", 2);
+        for (int c = 1; c <= 16; ++c) pcChannelBox.addItem ("Ch " + String (c), c + 2);
+        pcChannelBox.setTooltip ("Which channel this input's Program Change messages arrive on. Most keyboards use the channel they play on (Same as notes). "
+                                 "Some workstations send them on a fixed channel instead: a Roland Jupiter-50 sends registrations on channel 16 while playing on 1, 3 and 4. "
+                                 "Any channel accepts them from anywhere on this MIDI port, which is the setting to try if program changes are not getting through.");
+        pcChannelBox.onChange = [this]
+        {
+            int sel = list.getSelectedRow();
+            if (sel < 0) return;
+            const int id = pcChannelBox.getSelectedId();
+            engine.setInputProgramChangeChannel (sel, id == 1 ? InputDef::pcChannelSameAsNotes
+                                                             : (id == 2 ? InputDef::pcChannelAny : id - 2));
+            owner.markDirty();
+        };
+
         addAndMakeVisible (channelBox);
         channelBox.addItem ("Omni", 1);
         for (int c = 1; c <= 16; ++c) channelBox.addItem ("Ch " + String (c), c + 1);
@@ -104,6 +125,7 @@ public:
         {
             int sel = list.getSelectedRow();
             if (sel >= 0) engine.setInputRespondToProgramChange (sel, pcToggle.getToggleState());
+            pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
         for (auto* l : { &deviceLabel, &channelLabel })
@@ -156,6 +178,10 @@ public:
         deviceBox.setSelectedId (selectedId, dontSendNotification);
         channelBox.setSelectedId (def.channel + 1, dontSendNotification);
         pcToggle.setToggleState (def.respondToProgramChange, dontSendNotification);
+        pcChannelBox.setSelectedId (def.programChangeChannel == InputDef::pcChannelSameAsNotes ? 1
+                                    : (def.programChangeChannel == InputDef::pcChannelAny ? 2 : def.programChangeChannel + 2),
+                                    dontSendNotification);
+        pcChannelBox.setEnabled (def.respondToProgramChange);
     }
 
     void resized() override
@@ -181,6 +207,10 @@ public:
         channelBox.setBounds (chRow.removeFromLeft (90));
         editor.removeFromTop (6);
         pcToggle.setBounds (editor.removeFromTop (22));
+        editor.removeFromTop (4);
+        auto pcRow = editor.removeFromTop (22);
+        pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
+        pcChannelBox.setBounds (pcRow.removeFromLeft (130));
     }
 
     // ListBoxModel
@@ -228,6 +258,8 @@ private:
     Label deviceLabel { {}, "MIDI device" }, channelLabel { {}, "Channel" };
     ComboBox deviceBox, channelBox;
     ToggleButton pcToggle { "Respond to Program Change" };
+    Label pcChannelLabel { {}, "PC on" };
+    ComboBox pcChannelBox;
     Array<MidiDeviceInfo> devices;
     int lastNotified = -1;
 };

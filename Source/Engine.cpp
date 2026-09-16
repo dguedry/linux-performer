@@ -103,6 +103,7 @@ struct Engine::InputRuntime
     String deviceIdentifier;                  // guarded by Engine::lock
     std::atomic<int> channel { 0 };
     std::atomic<bool> respondToProgramChange { true };
+    std::atomic<int> programChangeChannel { InputDef::pcChannelSameAsNotes };
     MidiMessageCollector collector;
     MidiBuffer block;
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
@@ -241,6 +242,7 @@ void Engine::rebuildRuntimes()
         rt->collector.reset (sampleRate);
         rt->channel.store (setup.inputs[(size_t) i].channel);
         rt->respondToProgramChange.store (setup.inputs[(size_t) i].respondToProgramChange);
+        rt->programChangeChannel.store (setup.inputs[(size_t) i].programChangeChannel);
         runtimes.push_back (std::move (rt));
     }
 
@@ -353,6 +355,14 @@ void Engine::setInputChannel (int inputIndex, int channel)
     if (! validInput (inputIndex)) return;
     setup.inputs[(size_t) inputIndex].channel = jlimit (0, 16, channel);
     runtimes[(size_t) inputIndex]->channel.store (channel);
+}
+
+void Engine::setInputProgramChangeChannel (int inputIndex, int channel)
+{
+    if (! validInput (inputIndex)) return;
+    channel = jlimit (-1, 16, channel);
+    setup.inputs[(size_t) inputIndex].programChangeChannel = channel;
+    runtimes[(size_t) inputIndex]->programChangeChannel.store (channel);
 }
 
 void Engine::setInputRespondToProgramChange (int inputIndex, bool b)
@@ -1304,18 +1314,36 @@ void Engine::injectMidi (int inputIndex, const MidiMessage& m)
         routeMidi (*runtimes[(size_t) inputIndex], inputIndex, stamped);
 }
 
+/** Does a Program Change on `ch` belong to this input?  Same-as-notes follows the
+    note channel (and omni accepts everything, as it already does for notes); Any
+    accepts the whole port; otherwise it must match exactly. */
+bool Engine::acceptsProgramChangeOn (const InputRuntime& in, int ch)
+{
+    const int pc = in.programChangeChannel.load();
+    if (pc == InputDef::pcChannelAny) return true;
+    if (pc == InputDef::pcChannelSameAsNotes)
+    {
+        const int want = in.channel.load();
+        return want == 0 || ch == want;
+    }
+    return ch == pc;
+}
+
 void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
 {
     const int ch = m.getChannel();
     const int want = in.channel.load();
-    if (want != 0 && ch != want) return;
 
+    // Program Change is filtered on its own channel, which is not always the one the
+    // keyboard plays on, so this is tested before the note filter would drop it.
     if (m.isProgramChange())
     {
-        if (in.respondToProgramChange.load())
+        if (in.respondToProgramChange.load() && acceptsProgramChangeOn (in, ch))
             postEvent ({ Event::programChange, i, m.getProgramChangeNumber(), 0, 0, 0 });
         return;
     }
+
+    if (want != 0 && ch != want) return;
 
     if (learnArmed.load())
     {

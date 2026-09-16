@@ -24,6 +24,7 @@ int main()
     upper.channel = 1;
     upper.currentProgram = 5;
 
+    upper.programChangeChannel = 16;          // a workstation's global channel
     auto& prog = upper.programs[5];
     prog.name = "Rhodes + Pad";
 
@@ -77,6 +78,8 @@ int main()
     CHECK (loaded.inputs.size() == 2);
     CHECK (loaded.inputs[1].name == "Lower");
     CHECK (loaded.inputs[1].channel == 2);
+    CHECK (loaded.inputs[0].programChangeChannel == 16);                       // a workstation's global channel
+    CHECK (loaded.inputs[1].programChangeChannel == InputDef::pcChannelSameAsNotes);   // the default
 
     auto& u = loaded.inputs[0];
     CHECK (u.name == "Upper");

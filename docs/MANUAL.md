@@ -83,6 +83,16 @@ Each input has:
   controller drives both a left-hand and a right-hand part.
 - **Respond to Program Change** — untick for an input whose sounds you want to
   change only by hand.
+- **PC on** — which channel this input's Program Change messages arrive on.
+  *Same as notes* is the default and is right for most keyboards. Some
+  workstations send program changes on a fixed channel instead of the one they
+  play on: a Roland Jupiter-50, for example, sends its registration changes on
+  channel 16 while its keyboard parts play on 1, 3 and 4, so setting **PC on**
+  to *Ch 16* makes the front-panel registration buttons select Performer
+  programs while the notes still arrive on their own channel. *Any channel*
+  accepts program changes from anywhere on that MIDI port, which is the setting
+  to try when program changes are not getting through and you do not know what
+  the keyboard sends.
 
 **+ Add** and **- Remove** manage the list. There is no fixed limit of two; add
 an input for a pedalboard, a second tier, or a drum pad.
