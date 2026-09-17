@@ -447,7 +447,21 @@ private:
         if (audioThread == nullptr) return;
         audioThread->signalThreadShouldExit();
         ::sem_post (&shm->request);
-        audioThread->stopThread (2000);
+
+        // Never let JUCE kill this thread. stopThread() force-kills after its timeout,
+        // and killing a thread inside a plugin's process() unwinds through C++ frames,
+        // which glibc turns into an abort: the whole helper dies, taking a working
+        // plugin with it (seen as SIGABRT in unwind_cleanup while a second Kontakt was
+        // loading). A plugin that is slow to finish a block is normal, so wait for it
+        // as long as it takes; the watchdog in main() is what handles a genuinely
+        // wedged plugin, by killing the *process* rather than a thread inside it.
+        for (int waited = 0; audioThread->isThreadRunning(); waited += 50)
+        {
+            ::sem_post (&shm->request);              // in case it is between waits
+            audioThread->waitForThreadToExit (50);
+            if (waited > 0 && waited % 5000 == 0)
+                std::fprintf (stderr, "performer-plugin-host: waiting for the plugin to finish its block (%ds)\n", waited / 1000);
+        }
         audioThread.reset();
     }
 

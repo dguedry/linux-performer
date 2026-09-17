@@ -827,6 +827,30 @@ int main()
                             CHECK (std::abs (b2 - a2) < 1e-3f);
                         }
                     }
+                    // PERFORMER_TEST_TWO_INPUTS=1 loads the same plugin into a second input as
+                    // well: two instances of one bridged plugin, which is what a two-manual rig does.
+                    if (SystemStats::getEnvironmentVariable ("PERFORMER_TEST_TWO_INPUTS", "0").getIntValue() > 0)
+                    {
+                        std::printf ("     loading a SECOND instance of %s on input 1\n", desc.name.toRawUTF8()); std::fflush (stdout);
+                        const auto t0b = Time::getMillisecondCounterHiRes();
+                        engine.selectProgram (1, 20);
+                        settle();
+                        String err2;
+                        const bool added = engine.addSlot (1, 20, desc, err2);
+                        settle();
+                        std::printf ("     second instance: added=%d err='%s' after %.0f ms\n",
+                                     (int) added, err2.toRawUTF8(), Time::getMillisecondCounterHiRes() - t0b);
+                        auto* second = engine.getPlugin (1, 20, 0);
+                        std::printf ("     second alive=%d  first alive=%d\n",
+                                     (int) (second != nullptr && second->isAlive()),
+                                     (int) (x != nullptr && x->isAlive()));
+                        CHECK (added && second != nullptr && second->isAlive());
+                        CHECK (x != nullptr && x->isAlive());      // the first must survive the second
+                        engine.injectMidi (1, MidiMessage::noteOn (2, 60, (uint8) 100));
+                        std::printf ("     rms with both loaded: %f\n", render (engine, 60));
+                        engine.injectMidi (1, MidiMessage::noteOff (2, 60));
+                    }
+
                     // PERFORMER_TEST_EDITOR_SECONDS=N keeps the plugin's editor open for N seconds so a
                     // script can drive and screenshot it (GUI/mouse investigations).
                     if (const int hold = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_EDITOR_SECONDS", "0").getIntValue(); hold > 0)
