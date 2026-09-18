@@ -5,6 +5,7 @@
 #include "StagePanel.h"
 #include "RemoteServer.h"
 #include "Hotspot.h"
+#include "HelpWindow.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -90,6 +91,7 @@ private:
     juce::TextButton stageBtn { "Stage" };
     juce::TextButton printBtn { "Print map" };
     juce::TextButton remoteBtn { "Phone" };
+    juce::TextButton helpBtn { "Help" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;
     std::unique_ptr<RemoteServer> remote;

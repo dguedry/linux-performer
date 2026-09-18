@@ -29,7 +29,8 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
   tablet. Scan the code or type a short one; it is installable to the home
   screen, and Performer can serve its own wifi network when the venue has none.
 
-**[Read the user manual](docs/MANUAL.md)** for everyday use. The rest of this
+**[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
+in the toolbar to read the same manual inside the app. The rest of this
 file is for building from source and for how the program works inside.
 
 Requires Linux, JUCE 8 (fetched as a submodule) and a C++17 compiler.

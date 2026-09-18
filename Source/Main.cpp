@@ -2,6 +2,7 @@
 #include "PluginHost.h"
 #include "Engine.h"
 #include "MainComponent.h"
+#include "HelpWindow.h"
 #include "LowLatency.h"
 #include "BinaryData.h"
 #include <cstdio>
@@ -78,6 +79,7 @@ public:
 
     void shutdown() override
     {
+        perf::HelpWindow::close();   // a help window must not outlive the app
         mainWindow.reset();     // closes plugin editors and autosaves
         engine.reset();
         host.reset();

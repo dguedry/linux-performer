@@ -16,9 +16,11 @@ juce_add_gui_app(Performer
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/performer-64.png"
     VERSION ${PROJECT_VERSION})
 
-# App icon, embedded so the window (and the helper's editor windows) can set it.
+# App icon, plus the user manual: embedding docs/MANUAL.md rather than copying it
+# means the in-app help cannot drift from the file in the repository.
 juce_add_binary_data(PerformerAssets
-    SOURCES Resources/performer-512.png Resources/performer-256.png Resources/performer-64.png)
+    SOURCES Resources/performer-512.png Resources/performer-256.png Resources/performer-64.png
+            docs/MANUAL.md)
 
 target_sources(Performer PRIVATE
     Source/Main.cpp
@@ -30,6 +32,7 @@ target_sources(Performer PRIVATE
     Source/Ipc/Protocol.cpp
     Source/RemotePlugin.cpp
     Source/LowLatency.cpp
+    Source/HelpWindow.cpp
     Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp
     Source/Engine.cpp
     Source/MainComponent.cpp)

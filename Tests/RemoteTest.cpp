@@ -10,6 +10,7 @@
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "QrCode.h"
+#include "BinaryData.h"
 #include "Engine.h"
 #include "PluginHost.h"
 
@@ -255,6 +256,27 @@ int main()
             check (! pf.getBoolValue ("remoteOn", true), "turning it off is remembered too");
         }
         tmp.deleteFile();
+    }
+
+    // ---- the manual is embedded and complete ---------------------------------
+    /* The in-app help renders docs/MANUAL.md from the binary. If the embedding
+       breaks, the Help button opens an empty window -- which is worse than no
+       help at all, because it looks like the app is broken. */
+    {
+        const auto manual = String::createStringFromData (BinaryData::MANUAL_md, BinaryData::MANUAL_mdSize);
+        check (manual.isNotEmpty(), "the manual is embedded in the binary");
+        check (manual.length() > 10000, "the whole manual is embedded, not a fragment");
+        check (manual.contains ("# Performer user manual"), "the manual starts with its title");
+
+        // The sections someone needs when something is wrong at a venue.
+        check (manual.contains ("If the phone cannot connect"), "the firewall section is present");
+        check (manual.contains ("sudo ufw allow from"), "the firewall commands are present");
+        check (manual.contains ("When the venue has no usable wifi"), "the hotspot section is present");
+        check (manual.contains ("## When something goes wrong"), "the troubleshooting section is present");
+
+        // UTF-8 must survive the round trip through BinaryData: the manual uses
+        // typographic punctuation, and mojibake here would be very visible.
+        check (! manual.contains ("â€"), "the manual is not mojibake");
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");

@@ -1435,6 +1435,10 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     printBtn.setTooltip ("Write a printable list of which program number plays which sound, and open it in your browser");
     printBtn.onClick = [this] { printProgramMap(); };
 
+    addAndMakeVisible (helpBtn);
+    helpBtn.setTooltip ("The user manual, without leaving the app");
+    helpBtn.onClick = [] { HelpWindow::show(); };
+
     addAndMakeVisible (remoteBtn);
     remoteBtn.setClickingTogglesState (true);
     remoteBtn.setColour (TextButton::buttonOnColourId, accentDim);
@@ -1520,6 +1524,7 @@ void MainComponent::resized()
     toolbar.removeFromLeft (12);
     printBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
     remoteBtn.setBounds (toolbar.removeFromLeft (70));      toolbar.removeFromLeft (12);
+    helpBtn.setBounds (toolbar.removeFromLeft (56));        toolbar.removeFromLeft (12);
     audioBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
     pluginsBtn.setBounds (toolbar.removeFromLeft (80));     toolbar.removeFromLeft (4);
     midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (12);

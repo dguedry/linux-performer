@@ -57,6 +57,11 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
    **+ Add instrument...**.
 6. Play. Press **Save As...** when the set is worth keeping.
 
+**Help** in the toolbar opens this manual inside Performer, so the answer to
+"why won't the phone connect" is reachable from the stage without finding a
+browser. The list on the left jumps to a section, and the search box narrows to
+whichever section answers what you typed.
+
 ## The main window
 
 | Area | What it does |
