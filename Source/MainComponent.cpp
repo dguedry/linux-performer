@@ -1974,9 +1974,20 @@ void MainComponent::showRemote()
     {
         auto* hotspotBtn = new TextButton (hs.active ? "Stop the wifi network" : "Create a wifi network");
         hotspotBtn->setBounds (18, 300, 484, 30);
-        hotspotBtn->onClick = [this, wasActive = hs.active]
+
+        /* Close the dialog by searching up from the BUTTON, not from `this`:
+           MainComponent lives in the main window, so searching from there walks a
+           different hierarchy entirely and never finds this dialog -- which left
+           the window sitting open after the network had already been torn down.
+
+           Closing before the nmcli call also keeps things honest: stopping takes
+           a moment, and a visible window that cannot repaint reads as a freeze. */
+        hotspotBtn->onClick = [this, wasActive = hs.active, btn = Component::SafePointer<TextButton> (hotspotBtn)]
         {
-            if (auto* dw = findParentComponentOfClass<DialogWindow>()) dw->exitModalState (0);
+            if (btn != nullptr)
+                if (auto* dw = btn->findParentComponentOfClass<DialogWindow>())
+                    dw->exitModalState (0);
+
             if (wasActive)
             {
                 if (const auto err = Hotspot::stop(); err.isNotEmpty())
