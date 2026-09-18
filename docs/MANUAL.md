@@ -243,6 +243,15 @@ input with its current program in large type and every program you have set up;
 tap one to switch to it. There is a PANIC button too. Nothing is installed on
 the phone: it is a web page.
 
+![The web app on a phone](images/phone-app.png)
+
+The current program for each input is highlighted, and the big number at the top
+of each block is what a keyboard would send as a Program Change. Tapping a
+program switches to it immediately, and the page follows along if you change
+programs at the laptop instead.
+
+Performer shows the address and code to get here:
+
 ![The Phone control dialog](images/phone-control.png)
 
 There are two ways in, and the fast one is the square code. Point the phone's
@@ -254,6 +263,8 @@ To type it instead, enter the address once, then the six-character code. The
 phone remembers the code, and it does not change when Performer restarts, so a
 home-screen shortcut keeps working. It is case-insensitive and avoids characters
 that misread, so `0`/`O` and `1`/`I` never appear.
+
+![Entering the code on the phone](images/phone-code.png)
 
 Phone control stays on across restarts. If it was on when you quit, Performer
 starts the web app again at launch, so a phone on a stand keeps working without

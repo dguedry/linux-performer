@@ -111,6 +111,8 @@ plugins, select an input and give it a MIDI device, click a program, press
 **Phone** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
+![The web app on a phone](docs/images/phone-app.png)
+
 ![The Phone control dialog](docs/images/phone-control.png)
 
 Scan the square code with the phone's camera, or type the address and the
