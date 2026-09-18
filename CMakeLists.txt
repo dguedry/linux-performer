@@ -30,6 +30,7 @@ target_sources(Performer PRIVATE
     Source/Ipc/Protocol.cpp
     Source/RemotePlugin.cpp
     Source/LowLatency.cpp
+    Source/RemoteServer.cpp
     Source/Engine.cpp
     Source/MainComponent.cpp)
 

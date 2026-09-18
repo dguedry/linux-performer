@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "KeyboardPanel.h"
 #include "StagePanel.h"
+#include "RemoteServer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -64,6 +65,7 @@ private:
 
     void showAudioSettings();
     void printProgramMap();
+    void showRemote();
     void showPluginManager();
 
     Engine& engine;
@@ -79,8 +81,10 @@ private:
     juce::TextButton keyboardBtn { "Keyboard" };
     juce::TextButton stageBtn { "Stage" };
     juce::TextButton printBtn { "Print map" };
+    juce::TextButton remoteBtn { "Phone" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;
+    std::unique_ptr<RemoteServer> remote;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
     juce::Label statusLabel, cpuLabel, fileLabel;

@@ -25,6 +25,8 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **An on-screen keyboard** for building a set without a controller attached.
+- **Phone control**: a built-in web app for selecting programs from a phone or
+  tablet on the same network, installable to the home screen.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use. The rest of this
 file is for building from source and for how the program works inside.

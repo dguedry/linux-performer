@@ -1434,6 +1434,12 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     printBtn.setTooltip ("Write a printable list of which program number plays which sound, and open it in your browser");
     printBtn.onClick = [this] { printProgramMap(); };
 
+    addAndMakeVisible (remoteBtn);
+    remoteBtn.setClickingTogglesState (true);
+    remoteBtn.setColour (TextButton::buttonOnColourId, accentDim);
+    remoteBtn.setTooltip ("Select programs from a phone or tablet on the same network");
+    remoteBtn.onClick = [this] { showRemote(); };
+
     addAndMakeVisible (tailLabel);
     tailLabel.setColour (Label::textColourId, textDim);
     addAndMakeVisible (tailSlider);
@@ -1500,7 +1506,8 @@ void MainComponent::resized()
         toolbar.removeFromLeft (4);
     }
     toolbar.removeFromLeft (12);
-    printBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (12);
+    printBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
+    remoteBtn.setBounds (toolbar.removeFromLeft (70));      toolbar.removeFromLeft (12);
     audioBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
     pluginsBtn.setBounds (toolbar.removeFromLeft (80));     toolbar.removeFromLeft (4);
     midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (12);
@@ -1770,6 +1777,62 @@ void MainComponent::showAudioSettings()
     o.useNativeTitleBar = true;
     o.resizable = true;
     o.launchAsync();
+}
+
+void MainComponent::showRemote()
+{
+    if (! remoteBtn.getToggleState())
+    {
+        if (remote != nullptr) remote->stop();
+        showStatus ("Phone control off.");
+        return;
+    }
+    if (remote == nullptr) remote = std::make_unique<RemoteServer> (engine, settings);
+    const int port = settings.getIntValue ("remotePort", 7777);
+    if (! remote->start (port))
+    {
+        remoteBtn.setToggleState (false, dontSendNotification);
+        showStatus ("Could not listen on port " + String (port) + " — is another copy of Performer running?");
+        return;
+    }
+    const auto url = remote->getUrl();
+    settings.setValue ("remotePort", port);
+
+    // The address is long and has a token in it, so show a QR code: on stage you
+    // point a camera at the screen rather than typing.
+    auto* content = new Component();
+    content->setSize (420, 470);
+    struct QrPanel : public Component
+    {
+        QrPanel (String u) : url (std::move (u)) {}
+        void paint (Graphics& g) override
+        {
+            g.fillAll (Colour (0xff1e1f24));
+            g.setColour (Colours::white);
+            g.setFont (FontOptions (15.0f, Font::bold));
+            g.drawFittedText ("Open this on your phone", getLocalBounds().removeFromTop (30), Justification::centred, 1);
+            g.setFont (FontOptions (13.0f));
+            g.setColour (Colour (0xff9aa0ab));
+            g.drawFittedText (url, getLocalBounds().withTrimmedTop (34).removeFromTop (44).reduced (10, 0), Justification::centred, 2);
+            g.setFont (FontOptions (12.0f));
+            g.drawFittedText ("Same wifi as this computer. Add it to your home screen and it opens like an app.\n"
+                              "The link contains a one-time key: anyone with it can change your sounds.",
+                              getLocalBounds().removeFromBottom (54).reduced (12, 4), Justification::centred, 3);
+        }
+        String url;
+    };
+    auto* qr = new QrPanel (url);
+    qr->setBounds (0, 0, 420, 470);
+    content->addAndMakeVisible (qr);
+
+    DialogWindow::LaunchOptions o;
+    o.content.setOwned (content);
+    o.dialogTitle = "Phone control";
+    o.dialogBackgroundColour = bgPanel;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.launchAsync();
+    showStatus ("Phone control on: " + url);
 }
 
 void MainComponent::printProgramMap()

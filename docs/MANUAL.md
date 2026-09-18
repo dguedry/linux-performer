@@ -61,7 +61,7 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Phone**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -230,6 +230,21 @@ stand while you play. When you pick programs by number on the keyboard, this is
 your confirmation that the right sound loaded. A program still loading is marked
 *...loading*, which explains a keyboard that is briefly silent, and an empty
 program is greyed.
+
+## Selecting programs from a phone or tablet
+
+**Phone** in the toolbar starts a small web app on your network and shows the
+address, which you open on a phone or tablet on the same wifi. It lists each
+input with its current program in large type and every program you have set up;
+tap one to switch to it. There is a PANIC button too. Nothing is installed:
+it is a progressive web app, so "Add to Home Screen" gives it an icon and it
+opens fullscreen like an app.
+
+The address contains a key that is new every time you start it, and the phone
+remembers it, so bookmarking works but a link from a previous session stops
+working. Anyone with the link who is on your network can change your sounds,
+which is the right level of care for a stage tool and no more: do not expect it
+to be safe on an untrusted network.
 
 ## Printing a program map
 
