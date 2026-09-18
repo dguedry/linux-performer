@@ -250,6 +250,11 @@ phone remembers the code, and it does not change when Performer restarts, so a
 home-screen shortcut keeps working. It is case-insensitive and avoids characters
 that misread, so `0`/`O` and `1`/`I` never appear.
 
+A program picked from the phone is a real change to the setup, exactly like
+picking one on the laptop. It is written to the setup file you have open, within
+a couple of seconds rather than waiting for the next periodic save, because
+someone who changes a program from a music stand has no way to reach Ctrl+S.
+
 Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.

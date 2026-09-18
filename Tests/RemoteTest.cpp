@@ -10,6 +10,8 @@
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "QrCode.h"
+#include "Engine.h"
+#include "PluginHost.h"
 
 using namespace juce;
 
@@ -179,6 +181,48 @@ int main()
         check (svg.startsWith ("<svg") && svg.endsWith ("</svg>"), "SVG output is a complete element");
         check (svg.contains ("28mm"), "SVG is sized for paper");
         check (! perf::QrCode::encode ("").isValid() || true, "empty text does not crash");
+    }
+
+    // ---- a program picked from the phone reaches the setup ---------------------
+    /* The phone is often the only thing in reach mid-set, so a choice made there
+       has to be as real as one made on the laptop: it must change the engine AND
+       survive being written out and read back. */
+    {
+        auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-remote-persist");
+        dir.deleteRecursively();
+        dir.createDirectory();
+
+        PropertiesFile::Options po;
+        po.applicationName = "performer-remote-persist";
+        PropertiesFile props (dir.getChildFile ("p.settings"), po);
+
+        perf::PluginHost host (props);
+        perf::Engine engine (host, props, false);
+        engine.setProgramName (0, 1, "Second");
+
+        perf::RemoteServer rs (engine, props);
+        if (rs.start (0) || rs.start (7791))
+        {
+            const auto before = engine.getSetup().inputs[0].currentProgram;
+            engine.selectProgram (0, 1);
+            const auto after = engine.getSetup().inputs[0].currentProgram;
+            check (before != after && after == 1, "selecting a program changes the live setup");
+
+            const auto file = dir.getChildFile ("setup.performer.json");
+            check (engine.captureSetup().saveToFile (file).wasOk(), "the setup writes to disk");
+
+            perf::Setup reloaded;
+            const auto r = perf::Setup::loadFromFile (file, reloaded);
+            check (r.wasOk(), "the setup reads back");
+            check (r.wasOk() && reloaded.inputs[0].currentProgram == 1,
+                   "the chosen program survives a save and reload");
+            rs.stop();
+        }
+        else
+        {
+            std::cout << "skip persistence check (could not bind a port)" << std::endl;
+        }
+        dir.deleteRecursively();
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");

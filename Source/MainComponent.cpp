@@ -1574,12 +1574,26 @@ void MainComponent::timerCallback()
         statusLabel.setText ({}, dontSendNotification);
     }
 
-    // Periodic autosave, so a crash or a frozen plugin doesn't cost the session.
+    /* Periodic autosave, so a crash or a frozen plugin doesn't cost the session.
+
+       This also writes the open setup file, not just the recovery copy. Picking
+       a program is a real change to the setup, and someone who picks one from a
+       phone mid-set has no way to reach Ctrl+S -- if the machine is then killed
+       rather than quit, saveOnQuit() never runs and the choice is silently gone.
+       Writing the file the user actually opened is what they expect "it saved"
+       to mean. */
     if (dirty && now - lastAutosaveTime > autosaveIntervalMs)
     {
         lastAutosaveTime = now;
         dirty = false;
-        if (engine.captureSetup().saveToFile (getAutosaveFile()).wasOk())
+
+        const auto captured = engine.captureSetup();
+        const bool ok = captured.saveToFile (getAutosaveFile()).wasOk();
+
+        if (currentFile != File() && currentFile.existsAsFile())
+            captured.saveToFile (currentFile);
+
+        if (ok)
             fileLabel.setText ((currentFile == File() ? String ("(unsaved setup)") : currentFile.getFullPathName())
                                    + "   autosaved " + Time::getCurrentTime().toString (false, true, false), dontSendNotification);
     }
@@ -1626,6 +1640,12 @@ void MainComponent::setupChanged() { markDirty(); refreshAll(); }
 void MainComponent::programChanged (int inputIndex, int)
 {
     markDirty();
+    /* Picking a program is the one change someone makes constantly on stage and
+       never thinks to save -- and from a phone, the laptop may be across the
+       room with no chance to. Bring the next autosave forward instead of making
+       them wait out the full interval. */
+    lastAutosaveTime = jmin (lastAutosaveTime,
+                             Time::getMillisecondCounterHiRes() - autosaveIntervalMs + 2000.0);
     if (keyboardPanel != nullptr) keyboardPanel->refreshLabel();
     inputsPanel->repaint();
     if (inputIndex == selectedInput) refreshProgramView();
