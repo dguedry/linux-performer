@@ -1801,29 +1801,47 @@ void MainComponent::showRemote()
     // The address is long and has a token in it, so show a QR code: on stage you
     // point a camera at the screen rather than typing.
     auto* content = new Component();
-    content->setSize (420, 470);
-    struct QrPanel : public Component
+    content->setSize (420, 320);
+    struct RemotePanel : public Component
     {
-        QrPanel (String u) : url (std::move (u)) {}
+        RemotePanel (String u, String c) : url (std::move (u)), code (std::move (c)) {}
         void paint (Graphics& g) override
         {
+            auto r = getLocalBounds().reduced (18);
             g.fillAll (Colour (0xff1e1f24));
-            g.setColour (Colours::white);
-            g.setFont (FontOptions (15.0f, Font::bold));
-            g.drawFittedText ("Open this on your phone", getLocalBounds().removeFromTop (30), Justification::centred, 1);
-            g.setFont (FontOptions (13.0f));
+
             g.setColour (Colour (0xff9aa0ab));
-            g.drawFittedText (url, getLocalBounds().withTrimmedTop (34).removeFromTop (44).reduced (10, 0), Justification::centred, 2);
-            g.setFont (FontOptions (12.0f));
-            g.drawFittedText ("Same wifi as this computer. Add it to your home screen and it opens like an app.\n"
-                              "The link contains a one-time key: anyone with it can change your sounds.",
-                              getLocalBounds().removeFromBottom (54).reduced (12, 4), Justification::centred, 3);
+            g.setFont (FontOptions (13.0f, Font::bold));
+            g.drawFittedText ("1.  OPEN THIS ON YOUR PHONE", r.removeFromTop (20), Justification::centredLeft, 1);
+            g.setColour (Colours::white);
+            g.setFont (FontOptions (24.0f, Font::bold));
+            g.drawFittedText (url, r.removeFromTop (40), Justification::centredLeft, 1);
+
+            r.removeFromTop (18);
+            g.setColour (Colour (0xff9aa0ab));
+            g.setFont (FontOptions (13.0f, Font::bold));
+            g.drawFittedText ("2.  ENTER THIS CODE", r.removeFromTop (20), Justification::centredLeft, 1);
+            auto codeBox = r.removeFromTop (74);
+            g.setColour (Colour (0xff15161c));
+            g.fillRoundedRectangle (codeBox.toFloat(), 8.0f);
+            g.setColour (Colour (0xff5aa9ff));
+            g.setFont (FontOptions (48.0f, Font::bold));
+            g.drawFittedText (code, codeBox, Justification::centred, 1);
+
+            r.removeFromTop (14);
+            g.setColour (Colour (0xff9aa0ab));
+            g.setFont (FontOptions (12.5f));
+            g.drawFittedText ("The phone must be on the same wifi as this computer. It remembers the code, "
+                              "and the code does not change when Performer restarts, so \"Add to Home Screen\" "
+                              "gives you a one-tap program selector.\n\n"
+                              "Anyone on your network who has the code can change your sounds.",
+                              r, Justification::topLeft, 6);
         }
-        String url;
+        String url, code;
     };
-    auto* qr = new QrPanel (url);
-    qr->setBounds (0, 0, 420, 470);
-    content->addAndMakeVisible (qr);
+    auto* panel = new RemotePanel (url, remote->getToken());
+    panel->setBounds (0, 0, 420, 320);
+    content->addAndMakeVisible (panel);
 
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
@@ -1832,7 +1850,7 @@ void MainComponent::showRemote()
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;
     o.launchAsync();
-    showStatus ("Phone control on: " + url);
+    showStatus ("Phone control on: " + url + "  code " + remote->getToken());
 }
 
 void MainComponent::printProgramMap()

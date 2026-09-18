@@ -240,11 +240,15 @@ tap one to switch to it. There is a PANIC button too. Nothing is installed:
 it is a progressive web app, so "Add to Home Screen" gives it an icon and it
 opens fullscreen like an app.
 
-The address contains a key that is new every time you start it, and the phone
-remembers it, so bookmarking works but a link from a previous session stops
-working. Anyone with the link who is on your network can change your sounds,
-which is the right level of care for a stage tool and no more: do not expect it
-to be safe on an untrusted network.
+Performer shows a plain address and a six-character code. Type the address once
+on the phone, then enter the code; the phone remembers it, and the code does not
+change when Performer restarts, so a home-screen shortcut keeps working. The
+code is case-insensitive and avoids characters that misread, so `0`/`O` and
+`1`/`I` never appear.
+
+Anyone on your network who has the code can change your sounds, which is the
+right level of care for a stage tool and no more: do not expect it to be safe on
+an untrusted network.
 
 ## Printing a program map
 

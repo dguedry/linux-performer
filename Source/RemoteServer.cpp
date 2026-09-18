@@ -42,19 +42,57 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   button.p.on { background:var(--accent); color:#06121f; }
   button.p.on .n { color:#06121f; }
   #err { display:none; background:#a3282d; padding:10px 16px; font-size:14px; }
+  #gate { display:none; align-items:center; justify-content:center; min-height:70vh; padding:20px; }
+  #gate form { text-align:center; max-width:320px; width:100%; }
+  #gate p { color:var(--dim); font-size:15px; margin:0 0 14px; }
+  #gate .hint { font-size:13px; color:#d8a657; margin-top:14px; min-height:18px; }
+  #code { width:100%; font-size:34px; text-align:center; letter-spacing:.25em; text-transform:uppercase;
+          padding:14px; border-radius:12px; border:2px solid #3a3d47; background:var(--panel); color:#fff; }
+  #code:focus { outline:none; border-color:var(--accent); }
+  #gate button { margin-top:14px; width:100%; background:var(--accent); color:#06121f; border:0;
+                 border-radius:12px; padding:16px; font-size:17px; font-weight:700; }
 </style></head>
 <body>
 <header><h1>PERFORMER</h1><button id="panic">PANIC</button></header>
 <div id="err"></div>
+<div id="gate">
+  <form id="codeform">
+    <p>Enter the code shown in Performer</p>
+    <input id="code" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="6" placeholder="ABC123">
+    <button type="submit">Connect</button>
+    <p class="hint" id="gatemsg"></p>
+  </form>
+</div>
 <div id="inputs"></div>
 <script>
-const token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
+let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
 if (token) localStorage.setItem("t", token);
 let rev = -1;
 
+// Asking for the code beats putting it in the URL: you can add this page to the home
+// screen once and type the six characters shown by Performer, rather than re-scanning
+// a link every time the app restarts.
+function askForCode(message) {
+  document.getElementById("gate").style.display = "flex";
+  document.getElementById("gatemsg").textContent = message || "";
+  document.getElementById("inputs").style.display = "none";
+  const f = document.getElementById("codeform");
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const v = document.getElementById("code").value.trim().toUpperCase();
+    if (!v) return;
+    token = v; localStorage.setItem("t", v);
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("inputs").style.display = "";
+    refresh(true);
+  };
+  document.getElementById("code").focus();
+}
+
 async function api(path, opts) {
   const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token), opts);
-  if (!r.ok) throw new Error(r.status === 403 ? "Wrong or missing token — reopen the link from Performer" : "HTTP " + r.status);
+  if (r.status === 403) { localStorage.removeItem("t"); const e = new Error("gate"); e.gate = true; throw e; }
+  if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
 function show(msg) { const e = document.getElementById("err"); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
@@ -93,14 +131,17 @@ async function refresh(force) {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); }
     show("");
-  } catch (e) { show(e.message); }
+  } catch (e) {
+    if (e.gate) askForCode("That code was not accepted — check Performer and try again.");
+    else show(e.message);
+  }
 }
 document.getElementById("panic").onclick = async () => {
   try { await api("/api/panic", { method: "POST" }); show("All notes off sent"); setTimeout(() => show(""), 1500); }
   catch (e) { show(e.message); }
 };
-refresh(true);
-setInterval(refresh, 1000);
+if (token) refresh(true); else askForCode("");
+setInterval(() => { if (token) refresh(false); }, 1000);
 </script></body></html>)HTML";
 
 static const char* kManifest = R"JSON({
@@ -126,8 +167,20 @@ RemoteServer::~RemoteServer()
 bool RemoteServer::start (int p)
 {
     stop();
-    // A token per run: a stale bookmark from a previous gig cannot drive this one.
-    token = String::toHexString (Random::getSystemRandom().nextInt64()).removeCharacters ("-");
+    // A short code you can read off the screen and type on a phone, kept across
+    // restarts so a home-screen shortcut keeps working: a token regenerated every
+    // run would break the bookmark exactly when you least want to re-pair, on stage.
+    // Letters that misread (O/0, I/1/l) are excluded.
+    token = settings.getValue ("remoteCode");
+    if (token.length() != 6)
+    {
+        static const char* alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+        auto& rng = Random::getSystemRandom();
+        token.clear();
+        for (int i = 0; i < 6; ++i) token << alphabet[rng.nextInt (31)];
+        settings.setValue ("remoteCode", token);
+        settings.saveIfNeeded();
+    }
     listener = std::make_unique<StreamingSocket>();
     if (! listener->createListener (p))
     {
@@ -156,13 +209,15 @@ String RemoteServer::getUrl() const
     for (auto& ip : IPAddress::getAllAddresses())
         if (! ip.isNull() && ! ip.toString().startsWith ("127.") && ip.toString().containsChar ('.'))
             { host = ip.toString(); break; }
-    return "http://" + host + ":" + String (port) + "/?t=" + token;
+    return "http://" + host + ":" + String (port) + "/";
 }
 
 //==============================================================================
 bool RemoteServer::authorised (const String& request) const
 {
-    return token.isNotEmpty() && request.contains ("t=" + token);
+    // Matched case-insensitively: the code is shown in capitals but a phone keyboard
+    // will happily offer lower case, and being fussy about that on stage is unkind.
+    return token.isNotEmpty() && request.containsIgnoreCase ("t=" + token);
 }
 
 String RemoteServer::stateJson() const
@@ -201,6 +256,23 @@ String RemoteServer::stateJson() const
 }
 
 //==============================================================================
+/** Writes raw bytes: the body is already UTF-8, and Content-Length counts bytes,
+    not characters. Going through juce::String here once mangled an em-dash in the
+    page, because the literal was reinterpreted rather than passed through. */
+static void sendBytes (StreamingSocket& s, const String& status, const String& type,
+                       const void* body, int len)
+{
+    String head;
+    head << "HTTP/1.1 " << status << "\r\n"
+         << "Content-Type: " << type << "\r\n"
+         << "Content-Length: " << len << "\r\n"
+         << "Cache-Control: no-store\r\n"
+         << "Connection: close\r\n\r\n";
+    const auto h = head.toRawUTF8();
+    s.write (h, (int) strlen (h));
+    if (len > 0) s.write (body, len);
+}
+
 static void sendResponse (StreamingSocket& s, const String& status, const String& type, const String& body)
 {
     const auto utf8 = body.toRawUTF8();
@@ -224,7 +296,7 @@ void RemoteServer::handle (StreamingSocket& sock)
     const String line = request.upToFirstOccurrenceOf ("\r\n", false, false);
     const String path = line.fromFirstOccurrenceOf (" ", false, false).upToFirstOccurrenceOf (" ", false, false);
 
-    if (path.startsWith ("/manifest.webmanifest")) { sendResponse (sock, "200 OK", "application/manifest+json", kManifest); return; }
+    if (path.startsWith ("/manifest.webmanifest")) { sendBytes (sock, "200 OK", "application/manifest+json", kManifest, (int) strlen (kManifest)); return; }
     if (path.startsWith ("/icon.png"))
     {
         // the app icon, so an installed PWA has one
@@ -268,7 +340,7 @@ void RemoteServer::handle (StreamingSocket& sock)
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }
-    sendResponse (sock, "200 OK", "text/html; charset=utf-8", kIndexHtml);
+    sendBytes (sock, "200 OK", "text/html; charset=utf-8", kIndexHtml, (int) strlen (kIndexHtml));
 }
 
 void RemoteServer::run()
