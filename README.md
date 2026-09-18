@@ -26,7 +26,8 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **An on-screen keyboard** for building a set without a controller attached.
 - **Phone control**: a built-in web app for selecting programs from a phone or
-  tablet on the same network, installable to the home screen.
+  tablet. Scan the code or type a short one; it is installable to the home
+  screen, and Performer can serve its own wifi network when the venue has none.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use. The rest of this
 file is for building from source and for how the program works inside.
@@ -103,6 +104,34 @@ uses.
 The short version: **Audio...** to pick an output, **Plugins...** to scan for
 plugins, select an input and give it a MIDI device, click a program, press
 **+ Add instrument...**, then **Save As...**.
+
+## Phone and tablet control
+
+**Phone** in the toolbar starts a small web app on your network, for picking
+programs from a music stand instead of the laptop.
+
+![The Phone control dialog](docs/images/phone-control.png)
+
+Scan the square code with the phone's camera, or type the address and the
+six-character code. The code survives a restart, so a home-screen shortcut keeps
+working, and **Print map** puts the same scannable code on the printed program
+sheet.
+
+If the phone cannot connect, the usual cause is a firewall on the computer
+rather than anything else; the desktop can still open the address itself, which
+makes it look like the phone is at fault. Open the port for private networks
+only:
+
+```
+sudo ufw allow from 192.168.0.0/16 to any port 7777 proto tcp
+sudo ufw allow from 10.0.0.0/8 to any port 7777 proto tcp
+sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
+```
+
+No wifi at the venue? **Create a wifi network** makes the computer serve its
+own, which the phone joins directly. Performer asks once which wifi adapter to
+use and remembers it; a spare USB adapter lets the machine stay on its normal
+network at the same time. See the [manual](docs/MANUAL.md) for the details.
 
 ## Windows plugins via yabridge and nilinux
 

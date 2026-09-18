@@ -66,6 +66,15 @@ public:
     static Config load (juce::PropertiesFile&);
     static void save (juce::PropertiesFile&, const Config&);
 
+    /** Empty when nothing is obviously blocking `port`, otherwise a sentence
+        naming the firewall and how to open it.
+
+        Worth checking because the failure is silent and misleading: the server
+        binds fine, the address is right, the desktop can even load the page
+        because local traffic bypasses the rules -- and the phone just times out
+        with nothing anywhere to say why. */
+    static juce::String firewallWarning (int port);
+
     /** A password we can offer as a default. Readable at arm's length on a
         stage, and long enough for WPA. */
     static juce::String suggestPassword();

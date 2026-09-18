@@ -233,26 +233,63 @@ program is greyed.
 
 ## Selecting programs from a phone or tablet
 
-**Phone** in the toolbar starts a small web app on your network and shows the
-address, which you open on a phone or tablet on the same wifi. It lists each
+**Phone** in the toolbar starts a small web app on your network. It lists each
 input with its current program in large type and every program you have set up;
-tap one to switch to it. There is a PANIC button too. Nothing is installed:
-it is a progressive web app, so "Add to Home Screen" gives it an icon and it
-opens fullscreen like an app.
+tap one to switch to it. There is a PANIC button too. Nothing is installed on
+the phone: it is a web page.
 
-Performer shows a plain address, a six-character code, and a square code you can
-scan. Point the phone's camera at the square and it opens Performer directly,
-which saves reading an address off a screen; **Print map** puts the same code on
-the printed sheet, so one taped to the keyboard is also the way in.
+![The Phone control dialog](images/phone-control.png)
 
-To type it instead, enter the address once on the phone, then the code; the phone remembers it, and the code does not
-change when Performer restarts, so a home-screen shortcut keeps working. The
-code is case-insensitive and avoids characters that misread, so `0`/`O` and
-`1`/`I` never appear.
+There are two ways in, and the fast one is the square code. Point the phone's
+camera at it and it opens Performer directly, with no address to read off a
+screen. **Print map** puts the same code on the printed sheet, so a page taped
+to the keyboard is also the way in.
+
+To type it instead, enter the address once, then the six-character code. The
+phone remembers the code, and it does not change when Performer restarts, so a
+home-screen shortcut keeps working. It is case-insensitive and avoids characters
+that misread, so `0`/`O` and `1`/`I` never appear.
 
 Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
+
+### If the phone cannot connect
+
+The most common cause is a firewall on the computer, not anything wrong with
+Performer or the phone. The symptom is confusing, because the desktop can open
+the address itself perfectly well while the phone just times out: traffic from
+the same machine never passes the firewall, so only the phone is blocked.
+
+Performer warns about this when it can detect it. To allow the port from your
+own networks only, and not from the internet:
+
+```
+sudo ufw allow from 192.168.0.0/16 to any port 7777 proto tcp
+sudo ufw allow from 10.0.0.0/8 to any port 7777 proto tcp
+sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
+```
+
+Those three ranges are the private address blocks, so the rule covers your home
+wifi, a venue's network and Performer's own hotspot, while refusing anything
+from outside. If you use a different firewall the principle is the same: open
+TCP 7777 for private networks.
+
+### Adding it to the home screen
+
+On Android, Chrome offers to install the page once it has loaded, and you can
+also use **Add to Home Screen** from its menu. It then opens fullscreen with its
+own icon, like an app.
+
+On an iPhone or iPad, use **Share** then **Add to Home Screen** in Safari. iOS
+does not offer an automatic prompt for this.
+
+If no automatic prompt appears on Android, the menu item still works. Browsers
+only volunteer the prompt on an address they consider secure, which in practice
+means `https`, and Performer serves plain `http` on your own network. That is a
+deliberate trade: a certificate for a private address is not something a stage
+tool should be demanding of you. The manual route works regardless, and the
+installed shortcut behaves identically.
 
 ### When the venue has no usable wifi
 
@@ -260,6 +297,8 @@ Guest networks often stop devices from seeing each other, and plenty of stages
 have no wifi at all. **Create a wifi network** in the Phone dialog makes this
 computer serve its own network instead, so the phone joins the laptop directly
 and needs nothing from the venue.
+
+![Serving our own wifi network](images/phone-control-hotspot.png)
 
 The first time, Performer asks which wifi adapter to use and remembers the
 answer, along with the network name and password. There is nothing to set up on
@@ -285,6 +324,12 @@ opens it in your browser; print it from there. Only programs you have filled in
 are listed, with each program's number, its name and the instruments in it,
 grouped by input with the MIDI device and channel. Tape it to the keyboard and
 you never have to remember that the Rhodes is 001.
+
+If phone control is running when you print, the sheet also carries the square
+code from the Phone dialog, so the page on the keyboard doubles as the way onto
+the phone selector.
+
+![The code as printed](images/qr-example.png)
 
 ## The on-screen keyboard
 

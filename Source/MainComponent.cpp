@@ -2013,6 +2013,13 @@ void MainComponent::showRemote()
     o.useNativeTitleBar = true;
     o.launchAsync();
     showStatus ("Phone control on: " + url + "  code " + remote->getToken());
+
+    /* A blocked port looks exactly like a broken app from the phone's side: the
+       address is right, the server is listening, and the desktop can load the
+       page because local traffic never passes the firewall. Say so here rather
+       than leaving someone to discover it at a gig. */
+    if (const auto warn = Hotspot::firewallWarning (port); warn.isNotEmpty())
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Phone control", warn, "OK");
 }
 
 void MainComponent::printProgramMap()

@@ -149,13 +149,23 @@ document.getElementById("panic").onclick = async () => {
 };
 if (token) refresh(true); else askForCode("");
 setInterval(() => { if (token) refresh(false); }, 1000);
+
+// Registering this is what makes a browser offer "install" / "Add to Home
+// Screen" as a prompt rather than something buried in a menu.
+if ('serviceWorker' in navigator)
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 </script></body></html>)HTML";
 
 static const char* kManifest = R"JSON({
   "name": "Performer", "short_name": "Performer",
   "start_url": ".", "display": "standalone",
   "background_color": "#15161c", "theme_color": "#15161c",
-  "icons": [{ "src": "/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any maskable" }]
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
 })JSON";
 
 //==============================================================================
@@ -360,6 +370,42 @@ static void sendResponse (StreamingSocket& s, const String& status, const String
     if (len > 0) s.write (utf8, len);
 }
 
+/* Chrome refuses to offer "install" unless the page registers a service worker
+   with a fetch handler, so there has to be one -- but caching a stage tool's
+   pages would be actively harmful: a phone showing a stale program list is worse
+   than one showing none. This worker therefore always goes to the network and
+   only falls back to a cached shell when the network is gone, which is the
+   honest behaviour for something whose whole job is to reflect live state. */
+static const char* kServiceWorker = R"JS(
+const SHELL = 'performer-shell-v1';
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(SHELL).then(c => c.addAll(['./'])).then(() => self.skipWaiting()));
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys()
+    .then(ks => Promise.all(ks.filter(k => k !== SHELL).map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  // Never serve state or commands from a cache: stale is worse than absent.
+  if (url.pathname.startsWith('/api/')) return;
+
+  e.respondWith(
+    fetch(e.request)
+      .then(r => {
+        if (r && r.ok && e.request.method === 'GET' && url.pathname === '/')
+          caches.open(SHELL).then(c => c.put('./', r.clone()));
+        return r;
+      })
+      .catch(() => caches.match(e.request).then(hit => hit || caches.match('./')))
+  );
+});
+)JS";
+
 void RemoteServer::handle (StreamingSocket& sock)
 {
     char buf[4096] = {};
@@ -370,12 +416,41 @@ void RemoteServer::handle (StreamingSocket& sock)
     const String path = line.fromFirstOccurrenceOf (" ", false, false).upToFirstOccurrenceOf (" ", false, false);
 
     if (path.startsWith ("/manifest.webmanifest")) { sendBytes (sock, "200 OK", "application/manifest+json", kManifest, (int) strlen (kManifest)); return; }
-    if (path.startsWith ("/icon.png"))
+    if (path.startsWith ("/sw.js"))
     {
-        // the app icon, so an installed PWA has one
+        sendBytes (sock, "200 OK", "text/javascript; charset=utf-8",
+                   kServiceWorker, (int) strlen (kServiceWorker));
+        return;
+    }
+
+    // The app icon, so an installed web app has one. Chrome wants at least 192
+    // before it will offer to install, and 512 for the splash screen.
+    if (path.startsWith ("/icon"))
+    {
+        const void* src = BinaryData::performer256_png;
+        int srcSize = BinaryData::performer256_pngSize;
+        int resize = 0;
+
+        if (path.startsWith ("/icon-512"))
+        {
+            src = BinaryData::performer512_png;
+            srcSize = BinaryData::performer512_pngSize;
+        }
+        else if (path.startsWith ("/icon-192"))
+        {
+            // No 192 asset: scale the 512 down, which is sharper than scaling up.
+            src = BinaryData::performer512_png;
+            srcSize = BinaryData::performer512_pngSize;
+            resize = 192;
+        }
+
         MemoryOutputStream png;
-        if (auto img = ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize); img.isValid())
+        if (auto img = ImageCache::getFromMemory (src, srcSize); img.isValid())
+        {
+            if (resize > 0)
+                img = img.rescaled (resize, resize, Graphics::highResamplingQuality);
             PNGImageFormat().writeImageToStream (img, png);
+        }
         String head;
         head << "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: " << (int) png.getDataSize()
              << "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";

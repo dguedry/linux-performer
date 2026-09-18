@@ -18,7 +18,7 @@ juce_add_gui_app(Performer
 
 # App icon, embedded so the window (and the helper's editor windows) can set it.
 juce_add_binary_data(PerformerAssets
-    SOURCES Resources/performer-256.png Resources/performer-64.png)
+    SOURCES Resources/performer-512.png Resources/performer-256.png Resources/performer-64.png)
 
 target_sources(Performer PRIVATE
     Source/Main.cpp

@@ -235,4 +235,28 @@ String Hotspot::suggestPassword()
     return s;
 }
 
+//==============================================================================
+String Hotspot::firewallWarning (int port)
+{
+    // ufw is the common case on Debian and Ubuntu. Reading its status needs
+    // root, but the numeric rule list does not distinguish "no rule" from
+    // "cannot read", so treat an unreadable firewall as "nothing to say"
+    // rather than crying wolf.
+    const File ufw ("/usr/sbin/ufw");
+    if (! ufw.existsAsFile()) return {};
+
+    int code = 0;
+    const auto status = run ({ "ufw", "status" }, 8000, &code);
+    if (code != 0 || ! status.containsIgnoreCase ("Status: active")) return {};
+
+    // An explicit rule for our port, however scoped, means someone has already
+    // thought about this.
+    if (status.contains (String (port))) return {};
+
+    return "Your firewall (ufw) is on and does not list port " + String (port) + ", so a phone will "
+           "not be able to connect. To allow it from your own networks only:\n\n"
+           "    sudo ufw allow from 192.168.0.0/16 to any port " + String (port) + " proto tcp\n"
+           "    sudo ufw allow from 10.0.0.0/8 to any port " + String (port) + " proto tcp";
+}
+
 } // namespace perf
