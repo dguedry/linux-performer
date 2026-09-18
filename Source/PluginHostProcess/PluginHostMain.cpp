@@ -22,6 +22,7 @@
 #include <mutex>
 #include <map>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -34,6 +35,15 @@
 
 using namespace juce;
 using namespace perf;
+
+/** Loading a plugin is the slowest thing this process does, so the timings that
+    went into tuning it are worth keeping -- but not on every load. Set
+    PERFORMER_TIME_PARAMS=1 to see them. */
+static bool timeParams()
+{
+    static const bool on = [] { auto* v = std::getenv ("PERFORMER_TIME_PARAMS"); return v != nullptr && *v != '0'; }();
+    return on;
+}
 
 //==============================================================================
 class PluginServer : private AudioProcessorListener
@@ -172,7 +182,9 @@ private:
                 if (instance == nullptr) return fail ("no plugin");
                 MemoryOutputStream out;
                 auto& params = instance->getParameters();
+                const auto tAll = Time::getMillisecondCounterHiRes();
                 const auto midi = queryMidiAssignments (*instance);
+                const auto tVals = Time::getMillisecondCounterHiRes();
                 out.writeInt (params.size());
                 for (auto* p : params)
                 {
@@ -187,6 +199,9 @@ private:
                     out.writeInt (a.channel);
                     out.writeInt (a.controller);
                 }
+                if (timeParams())
+                    std::fprintf (stderr, "[params] %d parameters: midi probe %.0f ms, values+names %.0f ms\n",
+                                  params.size(), tVals - tAll, Time::getMillisecondCounterHiRes() - tVals);
                 return ok (out);
             }
 
@@ -308,6 +323,7 @@ private:
             return result;
         }
 
+        const auto tMap0 = Time::getMillisecondCounterHiRes();
         std::map<String, int> indexById;
         for (auto* p : inst.getParameters())
             indexById[parameterId (*p)] = p->getParameterIndex();
@@ -327,7 +343,8 @@ private:
                 a.controller = cc;
                 ++found;
             }
-        std::fprintf (stderr, "[params] %d parameters are MIDI controller proxies\n", found);
+        if (timeParams())
+            std::fprintf (stderr, "[params] %d parameters are MIDI controller proxies (probe took %.0f ms)\n", found, Time::getMillisecondCounterHiRes() - tMap0);
        #endif
         return result;
     }
