@@ -279,6 +279,29 @@ Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
 
+### Controls on the phone
+
+Under each input's programs, the phone shows the slots of the program you are
+on, labelled the way the desktop labels them, and a slider for each control you
+have chosen from that plugin. Press **Choose** on a slot to pick them: search by
+name, tap to add or remove, press **Done**.
+
+Choices are remembered per plugin, not per program. Pick the drawbars on a
+Hammond B-3X once and they are there in every program that loads it, and in
+every setup. They are stored by the plugin's own parameter ID, so an updated
+plugin that renumbers things drops the control rather than quietly moving the
+wrong one.
+
+The picker hides the same things the desktop's parameter picker hides. Plugins
+publish far more than anyone wants to scroll -- Kontakt reports 4145 parameters,
+most of them empty automation slots and per-channel copies of the same MIDI
+controller -- so the controls for the channel your input plays on come first,
+then the plugin's own named parameters, and the rest sit behind **Show more**.
+
+A control can only be chosen while its plugin is loaded, which means the program
+you are on. Turn on **Preload all programs** in the toolbar if you want to set
+up controls for programs you are not currently playing.
+
 ### If the phone cannot connect
 
 The most common cause is a firewall on the computer, not anything wrong with

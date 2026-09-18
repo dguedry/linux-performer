@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "Favourites.h"
 #include <juce_core/juce_core.h>
 
 namespace perf
@@ -39,10 +40,16 @@ public:
     static juce::String getHostAddress();
     juce::String getToken() const          { return token; }
 
+    /** The per-plugin chosen parameters, shared with the desktop so both views
+        agree about what is worth a slider. */
+    Favourites& getFavourites()            { return favourites; }
+
 private:
     void run() override;
     void handle (juce::StreamingSocket&);
     juce::String stateJson() const;
+    juce::String slotsJson (int inputIndex) const;
+    juce::String paramsJson (int inputIndex, int slot, int effect, const juce::String& search, bool allChannels) const;
     bool authorised (const juce::String& request) const;
 
     void programChanged (int, int) override   { ++revision; }
@@ -51,6 +58,7 @@ private:
 
     Engine& engine;
     juce::PropertiesFile& settings;
+    Favourites favourites;
     std::unique_ptr<juce::StreamingSocket> listener;
     juce::String token;
     int port = 0;

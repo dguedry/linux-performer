@@ -11,6 +11,7 @@
 #include "Hotspot.h"
 #include "QrCode.h"
 #include "BinaryData.h"
+#include "Favourites.h"
 #include "Engine.h"
 #include "PluginHost.h"
 
@@ -277,6 +278,60 @@ int main()
         // UTF-8 must survive the round trip through BinaryData: the manual uses
         // typographic punctuation, and mojibake here would be very visible.
         check (! manual.contains ("â€"), "the manual is not mojibake");
+    }
+
+    // ---- favourites are remembered per plugin ---------------------------------
+    /* Chosen controls are keyed by plugin, not by program, so picking the
+       drawbars on a B-3X once makes them appear wherever it is loaded. They are
+       stored by parameter ID rather than index: a plugin update can renumber
+       its parameters, and a slider labelled "Leslie Speed" that silently moves
+       reverb is worse than one that disappears. */
+    {
+        auto f = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-favourites-test.json");
+        f.deleteFile();
+
+        PluginDescription organ;  organ.name = "Hammond B-3X"; organ.pluginFormatName = "VST3"; organ.fileOrIdentifier = "/x/b3x.vst3";
+        PluginDescription sampler; sampler.name = "Kontakt 8"; sampler.pluginFormatName = "VST3"; sampler.fileOrIdentifier = "/x/kontakt.vst3";
+
+        {
+            perf::Favourites fav (f);
+            check (! fav.hasAny (organ), "a plugin starts with nothing chosen");
+
+            fav.add (organ, "1662");
+            fav.add (organ, "1664");
+            fav.add (organ, "1662");                      // already there
+            check (fav.get (organ).size() == 2, "the same parameter is not added twice");
+            check (fav.contains (organ, "1662"), "a chosen parameter is remembered");
+            check (! fav.contains (sampler, "1662"), "choices do not leak between plugins");
+
+            fav.add (sampler, "7");
+            check (fav.get (sampler).size() == 1, "a second plugin keeps its own list");
+        }
+        {
+            perf::Favourites fav (f);                      // reload from disk
+            check (fav.get (organ).size() == 2, "choices survive a restart");
+            check (fav.get (organ)[0] == "1662", "the chosen order is kept");
+            check (fav.get (sampler).size() == 1, "each plugin reloads its own list");
+
+            fav.remove (organ, "1662");
+            check (fav.get (organ).size() == 1, "a parameter can be removed");
+            check (fav.contains (organ, "1664"), "removing one leaves the rest");
+
+            fav.remove (organ, "1664");
+            check (! fav.hasAny (organ), "removing the last one empties the plugin");
+        }
+        {
+            perf::Favourites fav (f);
+            check (! fav.hasAny (organ), "an emptied plugin stays empty across a restart");
+            check (fav.hasAny (sampler), "emptying one plugin does not touch another");
+        }
+        f.deleteFile();
+
+        // A missing file is the normal first-run state, not an error.
+        auto missing = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-favourites-none.json");
+        missing.deleteFile();
+        perf::Favourites fresh (missing);
+        check (! fresh.hasAny (organ), "a missing favourites file is not an error");
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");

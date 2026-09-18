@@ -1,4 +1,5 @@
 #include "RemoteServer.h"
+#include "MappingSuggestions.h"
 #include "BinaryData.h"
 #include <juce_graphics/juce_graphics.h>
 
@@ -48,6 +49,51 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   button.p .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700; font-size:13px; }
   button.p.on { background:var(--accent); color:#06121f; }
   button.p.on .n { color:#06121f; }
+  /* Controls. Tall rows and a fat thumb: this is aimed at by a finger, on a
+     stand, in bad light -- not clicked with a mouse. */
+  .slots { margin-top:14px; }
+  .slot { background:var(--panel); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .slot h2 { font-size:13px; color:var(--dim); letter-spacing:.06em; margin:0 0 10px; text-transform:uppercase;
+             display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .slot h2 button { background:none; border:1px solid #3a3d47; color:var(--dim); border-radius:8px;
+                    padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:.04em; }
+  .ctl { margin:14px 0; }
+  .ctl .lab { display:flex; justify-content:space-between; font-size:15px; margin-bottom:8px; gap:10px; }
+  .ctl .lab .v { color:var(--dim); font-variant-numeric:tabular-nums; }
+  .ctl input[type=range] { width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; }
+  .ctl input[type=range]::-webkit-slider-runnable-track { height:10px; border-radius:5px; background:var(--row); }
+  .ctl input[type=range]::-moz-range-track { height:10px; border-radius:5px; background:var(--row); }
+  .ctl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:34px; height:34px; margin-top:-12px;
+      border-radius:50%; background:var(--accent); border:0; }
+  .ctl input[type=range]::-moz-range-thumb { width:34px; height:34px; border-radius:50%; background:var(--accent); border:0; }
+  .sw { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .sw button { border:0; border-radius:10px; padding:12px 20px; font-size:15px; font-weight:700;
+               background:var(--row); color:#fff; min-width:92px; }
+  .sw button.on { background:var(--accent); color:#06121f; }
+  .empty { color:var(--dim); font-size:14px; margin:6px 0 2px; }
+
+  /* Picking what deserves a slider. Behind a button so the playing view stays
+     big controls and nothing else. */
+  #pick { display:none; position:fixed; inset:0; background:var(--bg); z-index:10; overflow-y:auto; padding:14px; }
+  /* The title, the search box and Done stack rather than compete for one row:
+     a plugin name like "1: Hammond B-3X" squeezed beside a search field wraps to
+     three lines and looks broken. */
+  #pick header { position:sticky; top:0; background:var(--bg); padding:0 0 10px; display:block; }
+  #pick h3 { margin:0 0 10px; font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #pick input[type=search] { width:100%; font-size:17px; padding:12px; border-radius:10px;
+      border:2px solid #3a3d47; background:var(--panel); color:#fff; }
+  #pick input[type=search]:focus { outline:none; border-color:var(--accent); }
+  #pick .done { width:100%; margin-top:10px; background:var(--accent); color:#06121f; border:0;
+                border-radius:12px; padding:14px; font-size:16px; font-weight:700; }
+  .prow { display:flex; align-items:center; gap:12px; padding:13px 10px; border-bottom:1px solid #2b2d35; font-size:15px; }
+  .prow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .prow .tick { width:30px; height:30px; border-radius:8px; border:2px solid #3a3d47; flex:none; }
+  .prow.on .tick { background:var(--accent); border-color:var(--accent); }
+  .note { color:var(--dim); font-size:13px; padding:10px 2px; }
+  .prow .det { color:var(--dim); font-size:12px; margin-left:8px; }
+  .more { width:100%; margin:14px 0 30px; background:var(--panel); color:var(--dim); border:1px solid #3a3d47;
+          border-radius:10px; padding:13px; font-size:14px; }
+
   #err { display:none; background:#a3282d; padding:10px 16px; font-size:14px; }
   #gate { display:none; align-items:center; justify-content:center; min-height:70vh; padding:20px; }
   #gate form { text-align:center; max-width:320px; width:100%; }
@@ -71,7 +117,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   </form>
 </div>
 <div id="inputs"></div>
+<div id="pick">
+  <header>
+    <h3 id="picktitle">Choose controls</h3>
+    <input id="picksearch" type="search" inputmode="search" autocomplete="off" placeholder="Search parameters">
+    <button class="done" id="pickdone">Done</button>
+  </header>
+  <div id="picklist"></div>
+</div>
 <script>
+let picking = null;          // the slot whose controls are being chosen, if any
+let showAll = false;         // include the per-channel copies in the picker
 let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
 if (token) localStorage.setItem("t", token);
 let rev = -1;
@@ -129,11 +185,194 @@ function render(s) {
       };
       grid.appendChild(b);
     });
-    wrap.appendChild(grid); root.appendChild(wrap);
+    wrap.appendChild(grid);
+
+    const slots = document.createElement("div");
+    slots.className = "slots"; slots.id = "slots" + i;
+    wrap.appendChild(slots);
+
+    root.appendChild(wrap);
+    loadSlots(i);
   });
 }
 
+// ---- controls ---------------------------------------------------------------
+// Fetched separately from the program list: the programs change rarely, the
+// parameter values change while you are touching them.
+async function loadSlots(i) {
+  const host = document.getElementById("slots" + i);
+  if (!host) return;
+  let data;
+  try { data = await api("/api/slots?input=" + i); }
+  catch (e) { if (e.gate) throw e; return; }
+
+  host.innerHTML = "";
+  data.slots.forEach(sl => {
+    const box = document.createElement("div"); box.className = "slot";
+
+    const h = document.createElement("h2");
+    const nm = document.createElement("span"); nm.textContent = sl.name;
+    const ed = document.createElement("button"); ed.textContent = "Choose";
+    ed.onclick = () => openPicker(i, sl);
+    h.appendChild(nm); h.appendChild(ed);
+    box.appendChild(h);
+
+    if (!sl.live) {
+      const e = document.createElement("div"); e.className = "empty";
+      e.textContent = "This plugin is still loading.";
+      box.appendChild(e);
+    } else if (!sl.params.length) {
+      const e = document.createElement("div"); e.className = "empty";
+      e.textContent = "No controls chosen yet. Press Choose to pick the ones you reach for.";
+      box.appendChild(e);
+    }
+
+    sl.params.forEach(pr => box.appendChild(control(i, sl, pr)));
+    host.appendChild(box);
+  });
+}
+
+/* One control. A switch gets a button rather than a slider, because a two-value
+   parameter on a fader is fiddly to hit and reads as broken. */
+function control(i, sl, pr) {
+  const wrap = document.createElement("div"); wrap.className = "ctl";
+
+  if (pr.boolean) {
+    const row = document.createElement("div"); row.className = "sw";
+    const lab = document.createElement("span"); lab.textContent = pr.name;
+    const b = document.createElement("button");
+    const paint = v => { b.textContent = v >= 0.5 ? "On" : "Off"; b.className = v >= 0.5 ? "on" : ""; };
+    paint(pr.value);
+    b.onclick = async () => {
+      const next = (b.className === "on") ? 0 : 1;
+      paint(next);
+      try { await setParam(i, sl, pr.id, next); } catch (e) { show(e.message); }
+    };
+    row.appendChild(lab); row.appendChild(b);
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  const lab = document.createElement("div"); lab.className = "lab";
+  const nm = document.createElement("span"); nm.textContent = pr.name;
+  const vv = document.createElement("span"); vv.className = "v";
+  lab.appendChild(nm); lab.appendChild(vv);
+
+  const r = document.createElement("input");
+  r.type = "range"; r.min = 0; r.max = 1000; r.step = 1;
+  r.value = Math.round(pr.value * 1000);
+  vv.textContent = Math.round(pr.value * 100) + "%";
+
+  /* Send while dragging so it feels live, but no faster than the plugin can
+     keep up with: a finger drag fires far more events than are useful, and
+     flooding the control channel makes the sound lag behind the finger. */
+  let pendingTimer = null, lastSent = 0;
+  const send = async () => {
+    pendingTimer = null;
+    lastSent = Date.now();
+    try { await setParam(i, sl, pr.id, r.value / 1000); } catch (e) { show(e.message); }
+  };
+  r.oninput = () => {
+    vv.textContent = Math.round(r.value / 10) + "%";
+    if (pendingTimer) return;
+    const wait = Math.max(0, 40 - (Date.now() - lastSent));
+    pendingTimer = setTimeout(send, wait);
+  };
+  r.onchange = send;      // always send the value the finger settled on
+
+  wrap.appendChild(lab); wrap.appendChild(r);
+  return wrap;
+}
+
+async function setParam(i, sl, id, value) {
+  await api("/api/setparam?input=" + i + "&slot=" + sl.slot + "&effect=" + sl.effect
+            + "&id=" + encodeURIComponent(id) + "&value=" + value, { method: "POST" });
+}
+
+// ---- choosing which parameters get a control --------------------------------
+
+function openPicker(i, sl) {
+  picking = { input: i, slot: sl };
+  document.getElementById("picktitle").textContent = sl.name;
+  document.getElementById("picksearch").value = "";
+  document.getElementById("pick").style.display = "block";
+  fillPicker("");
+}
+
+async function fillPicker(q) {
+  if (!picking) return;
+  const list = document.getElementById("picklist");
+  let data;
+  try {
+    data = await api("/api/params?input=" + picking.input + "&slot=" + picking.slot.slot
+                     + "&effect=" + picking.slot.effect + "&q=" + encodeURIComponent(q)
+                     + (showAll ? "&all=1" : ""));
+  } catch (e) { if (!e.gate) show(e.message); return; }
+
+  list.innerHTML = "";
+  if (data.shown === 0) {
+    const n = document.createElement("div"); n.className = "note";
+    n.textContent = q
+      ? "Nothing here matches \u201c" + q + "\u201d. This plugin has " + data.total + " parameters."
+      : "This plugin reports no parameters that can be given a control.";
+    list.appendChild(n);
+  } else if (data.shown < data.total) {
+    const n = document.createElement("div"); n.className = "note";
+    n.textContent = q
+      ? data.shown + " of " + data.total + " parameters match."
+      : "Showing " + data.shown + " of " + data.total + " parameters. Type to narrow the list.";
+    list.appendChild(n);
+  }
+
+  /* Same bargain the desktop picker offers: the per-channel copies and repeated
+     names are folded away, and you can ask for them. */
+  if (data.hidden > 0 || showAll) {
+    const t = document.createElement("button"); t.className = "more";
+    t.textContent = showAll ? "Hide repeated and other-channel copies"
+                            : "Show " + data.hidden + " more (other MIDI channels and repeats)";
+    t.onclick = () => { showAll = !showAll; fillPicker(document.getElementById("picksearch").value.trim()); };
+    list.appendChild(t);
+  }
+  data.params.forEach(pr => {
+    const row = document.createElement("div");
+    row.className = "prow" + (pr.chosen ? " on" : "");
+    const nm = document.createElement("div"); nm.className = "nm";
+    nm.textContent = pr.name;
+    if (pr.detail) {
+      const d = document.createElement("span"); d.className = "det"; d.textContent = pr.detail;
+      nm.appendChild(d);
+    }
+    const tick = document.createElement("div"); tick.className = "tick";
+    row.appendChild(nm); row.appendChild(tick);
+    row.onclick = async () => {
+      const on = !row.classList.contains("on");
+      row.classList.toggle("on", on);
+      try {
+        await api("/api/favourite?input=" + picking.input + "&slot=" + picking.slot.slot
+                  + "&id=" + encodeURIComponent(pr.id) + "&on=" + (on ? 1 : 0), { method: "POST" });
+      } catch (e) { show(e.message); row.classList.toggle("on", !on); }
+    };
+    list.appendChild(row);
+  });
+}
+
+let pickTimer = null;
+document.getElementById("picksearch").oninput = e => {
+  clearTimeout(pickTimer);
+  pickTimer = setTimeout(() => fillPicker(e.target.value.trim()), 180);
+};
+document.getElementById("pickdone").onclick = () => {
+  document.getElementById("pick").style.display = "none";
+  const i = picking ? picking.input : 0;
+  picking = null;
+  loadSlots(i);
+};
+
 async function refresh(force) {
+  /* Never rebuild the page while the picker is open: choosing a control bumps
+     the revision, and re-rendering underneath would shut the picker on the
+     first tap. */
+  if (picking) return;
   try {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); }
@@ -170,7 +409,8 @@ static const char* kManifest = R"JSON({
 
 //==============================================================================
 RemoteServer::RemoteServer (Engine& e, PropertiesFile& s)
-    : Thread ("performer-remote"), engine (e), settings (s)
+    : Thread ("performer-remote"), engine (e), settings (s),
+      favourites (s.getFile().getSiblingFile ("favourites.json"))
 {
     engine.addListener (this);
 }
@@ -338,6 +578,234 @@ String RemoteServer::stateJson() const
     return JSON::toString (var (root.get()), true);
 }
 
+/** "#000", "Param 17" and the like: a placeholder the plugin never named.
+    Kontakt reports 2049 of these before anything useful, so they sort last. */
+static bool looksUnnamed (const String& name)
+{
+    const auto t = name.trim();
+    if (t.isEmpty()) return true;
+    if (t.startsWithChar ('#') && t.substring (1).containsOnly ("0123456789")) return true;
+    return false;
+}
+
+/** Human name for a VST3 controller number, matching the desktop picker. */
+static String controllerLabel (int controller)
+{
+    if (controller < 0)    return {};
+    if (controller < 128)  return "CC " + String (controller);
+    if (controller == 128) return "Aftertouch";
+    if (controller == 129) return "Pitch bend";
+    if (controller == 130) return "Program change";
+    return {};
+}
+
+/** The current program's slots, each with the parameters chosen for its plugin.
+
+    Grouped by slot because that is how the setup is built and how the desktop
+    labels things: "1: Kontakt 8" is the same slot in both views. A split with an
+    organ on one slot and a pad on another should not merge into one list of
+    knobs with no clue which sound they belong to. */
+String RemoteServer::slotsJson (int inputIndex) const
+{
+    DynamicObject::Ptr root (new DynamicObject());
+    Array<var> out;
+
+    const auto& setup = engine.getSetup();
+    if (inputIndex >= 0 && inputIndex < (int) setup.inputs.size())
+    {
+        const auto& in = setup.inputs[(size_t) inputIndex];
+        const int prog = in.currentProgram;
+        const auto& def = in.programs[(size_t) prog];
+
+        for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
+        {
+            const auto& slot = def.slots[(size_t) sIdx];
+
+            // A slot with no plugin has nothing to show.
+            if (slot.plugin.name.isEmpty()) continue;
+
+            DynamicObject::Ptr so (new DynamicObject());
+            so->setProperty ("slot", sIdx);
+            so->setProperty ("effect", -1);
+            so->setProperty ("name", String (sIdx + 1) + ": " + slot.plugin.name);
+            so->setProperty ("enabled", slot.enabled);
+
+            Array<var> sliders;
+            auto* plugin = engine.getPlugin (inputIndex, prog, sIdx, -1);
+            const bool live = plugin != nullptr;
+            so->setProperty ("live", live);
+
+            if (live)
+            {
+                const auto& params = plugin->getParameters();
+                for (const auto& id : favourites.get (slot.plugin))
+                {
+                    const int idx = findParamIndex (params, id);
+                    if (idx < 0) continue;              // the plugin no longer has it
+
+                    const ParamInfo* info = nullptr;
+                    for (const auto& c : params) if (c.index == idx) info = &c;
+                    if (info == nullptr) continue;
+
+                    DynamicObject::Ptr pd (new DynamicObject());
+                    pd->setProperty ("id", info->id);
+                    pd->setProperty ("name", info->name);
+                    pd->setProperty ("value", plugin->getCachedParameterValue (idx));
+                    pd->setProperty ("boolean", info->boolean);
+                    sliders.add (var (pd.get()));
+                }
+            }
+            so->setProperty ("params", sliders);
+            out.add (var (so.get()));
+        }
+    }
+
+    root->setProperty ("slots", out);
+    return JSON::toString (var (root.get()), true);
+}
+
+/** The parameters a user can choose from, for the picker.
+
+    This follows the rules the desktop picker already uses (ParamPicker), rather
+    than inventing a second set: two pickers that disagree about what is worth
+    showing would be worse than either. In short:
+
+      - A plugin that says which (channel, controller) each parameter stands for
+        gets its OWN channel's controllers kept and the other fifteen channels'
+        copies hidden. Hiding all of them, as a first cut of this did, throws
+        away the ones that actually affect what you hear.
+      - A plugin that does not say -- Kontakt names 2049 parameters "#000" and
+        up -- gets runs of identically named parameters treated as the same
+        thing, which is what those runs almost always are.
+      - Searching matches the controller name too, so "CC 74" finds it. */
+String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
+                                 const String& search, bool showSecondary) const
+{
+    DynamicObject::Ptr root (new DynamicObject());
+    Array<var> out;
+    int total = 0, shown = 0, hidden = 0;
+
+    const auto& setup = engine.getSetup();
+    if (inputIndex >= 0 && inputIndex < (int) setup.inputs.size())
+    {
+        const auto& in = setup.inputs[(size_t) inputIndex];
+        const int prog = in.currentProgram;
+
+        if (auto* plugin = engine.getPlugin (inputIndex, prog, slot, effect))
+        {
+            const auto& def = in.programs[(size_t) prog];
+            const PluginDescription* desc = nullptr;
+            if (slot >= 0 && slot < (int) def.slots.size())
+                desc = &def.slots[(size_t) slot].plugin;
+
+            const auto& params = plugin->getParameters();
+            total = (int) params.size();
+
+            // Which entries are the "other channels" or "more of the same"?
+            std::vector<bool> secondary ((size_t) total, false);
+            bool hasChannels = false;
+            for (const auto& info : params) if (info.midiChannel > 0) { hasChannels = true; break; }
+
+            if (hasChannels)
+            {
+                const int pref = in.channel;     // 0 = omni: every channel matters
+                if (pref > 0)
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (params[i].midiChannel > 0 && params[i].midiChannel != pref)
+                            secondary[i] = true;
+            }
+            else
+            {
+                /* No channel information. A run of identically named parameters
+                   is almost always the same control repeated per channel, so
+                   keep the first and fold the rest away. */
+                constexpr int kRunLength = 8;
+                for (size_t i = 0; i < params.size(); )
+                {
+                    size_t j = i + 1;
+                    while (j < params.size() && params[j].name == params[i].name) ++j;
+                    if ((int) (j - i) >= kRunLength)
+                        for (size_t k = i + 1; k < j; ++k) secondary[k] = true;
+                    i = j;
+                }
+            }
+
+            /* Order, not just filtering -- this is what the desktop picker does,
+               and Kontakt shows why it matters. Kontakt names 2049 parameters
+               "#000".."#2048" (empty automation slots) and puts them FIRST, with
+               the genuinely useful ones ("Channel Volume(MSB)", "Pan(MSB)")
+               after. Reading the list in order and stopping at a few hundred
+               shows nothing but junk. So: parameters on this input's channel
+               first, then the plugin's own named parameters, then the rest. */
+            std::vector<size_t> order;
+            order.reserve (params.size());
+            {
+                const int pref = in.channel;
+                if (hasChannels)
+                {
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (params[i].midiChannel > 0 && (pref == 0 || params[i].midiChannel == pref))
+                            order.push_back (i);
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (params[i].midiChannel == 0 && ! looksUnnamed (params[i].name))
+                            order.push_back (i);
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (params[i].midiChannel == 0 && looksUnnamed (params[i].name))
+                            order.push_back (i);
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (params[i].midiChannel > 0 && pref != 0 && params[i].midiChannel != pref)
+                            order.push_back (i);
+                }
+                else
+                {
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (! looksUnnamed (params[i].name)) order.push_back (i);
+                    for (size_t i = 0; i < params.size(); ++i)
+                        if (looksUnnamed (params[i].name)) order.push_back (i);
+                }
+            }
+
+            // An unnamed placeholder is never worth a slider before the named ones.
+            for (size_t i = 0; i < params.size(); ++i)
+                if (looksUnnamed (params[i].name)) secondary[i] = true;
+
+            for (size_t i : order)
+            {
+                const auto& info = params[i];
+
+                if (search.isNotEmpty())
+                {
+                    const auto hay = info.name + " " + controllerLabel (info.midiController);
+                    if (! hay.containsIgnoreCase (search)) continue;
+                }
+
+                // Something already chosen always shows, so it can be unchosen.
+                const bool chosen = desc != nullptr && favourites.contains (*desc, info.id);
+
+                if (secondary[i] && ! showSecondary && ! chosen) { ++hidden; continue; }
+                if (shown >= 300) { ++hidden; continue; }
+                ++shown;
+
+                DynamicObject::Ptr pd (new DynamicObject());
+                pd->setProperty ("id", info.id);
+                pd->setProperty ("name", info.name);
+                pd->setProperty ("detail", controllerLabel (info.midiController)
+                                             + (info.midiChannel > 0 ? " (ch " + String (info.midiChannel) + ")" : String()));
+                pd->setProperty ("value", plugin->getCachedParameterValue (info.index));
+                pd->setProperty ("boolean", info.boolean);
+                pd->setProperty ("chosen", chosen);
+                out.add (var (pd.get()));
+            }
+        }
+    }
+
+    root->setProperty ("params", out);
+    root->setProperty ("total", total);
+    root->setProperty ("shown", shown);
+    root->setProperty ("hidden", hidden);
+    return JSON::toString (var (root.get()), true);
+}
+
 //==============================================================================
 /** Writes raw bytes: the body is already UTF-8, and Content-Length counts bytes,
     not characters. Going through juce::String here once mangled an em-dash in the
@@ -478,6 +946,73 @@ void RemoteServer::handle (StreamingSocket& sock)
         const int prog  = path.fromFirstOccurrenceOf ("program=", false, false).getIntValue();
         // the engine is not thread-safe for this: do it on the message thread
         MessageManager::callAsync ([this, input, prog] { engine.selectProgram (input, prog); });
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/slots"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        sendResponse (sock, "200 OK", "application/json", slotsJson (input));
+        return;
+    }
+    if (path.startsWith ("/api/params"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
+        const bool all   = path.contains ("all=1");   // show the hidden copies too
+        auto search = path.fromFirstOccurrenceOf ("q=", false, false).upToFirstOccurrenceOf ("&", false, false);
+        search = URL::removeEscapeChars (search.replaceCharacter ('+', ' '));
+        sendResponse (sock, "200 OK", "application/json", paramsJson (input, slot, effect, search, all));
+        return;
+    }
+    if (path.startsWith ("/api/setparam"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
+        const auto id    = URL::removeEscapeChars (path.fromFirstOccurrenceOf ("id=", false, false).upToFirstOccurrenceOf ("&", false, false));
+        const float v    = path.fromFirstOccurrenceOf ("value=", false, false).getFloatValue();
+
+        /* Touch the plugin on the message thread, like every other engine call
+           here: the server runs on its own thread and the plugin connection is
+           not ours to drive from it. */
+        MessageManager::callAsync ([this, input, slot, effect, id, v]
+        {
+            const auto& setup = engine.getSetup();
+            if (input < 0 || input >= (int) setup.inputs.size()) return;
+            const int prog = setup.inputs[(size_t) input].currentProgram;
+            if (auto* plugin = engine.getPlugin (input, prog, slot, effect))
+                if (const int idx = findParamIndex (plugin->getParameters(), id); idx >= 0)
+                    plugin->setParameterValue (idx, jlimit (0.0f, 1.0f, v));
+        });
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/favourite"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const auto id    = URL::removeEscapeChars (path.fromFirstOccurrenceOf ("id=", false, false).upToFirstOccurrenceOf ("&", false, false));
+        const bool on    = path.contains ("on=1");
+
+        const auto& setup = engine.getSetup();
+        if (input >= 0 && input < (int) setup.inputs.size())
+        {
+            const auto& in = setup.inputs[(size_t) input];
+            const auto& def = in.programs[(size_t) in.currentProgram];
+            if (slot >= 0 && slot < (int) def.slots.size())
+            {
+                const auto& desc = def.slots[(size_t) slot].plugin;
+                if (on) favourites.add (desc, id);
+                else    favourites.remove (desc, id);
+                ++revision;
+            }
+        }
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }
