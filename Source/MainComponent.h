@@ -4,6 +4,7 @@
 #include "KeyboardPanel.h"
 #include "StagePanel.h"
 #include "RemoteServer.h"
+#include "Hotspot.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -66,6 +67,8 @@ private:
     void showAudioSettings();
     void printProgramMap();
     void showRemote();
+    void chooseHotspotAdapter (std::function<void (bool)> done);
+    void startHotspot();
     void showPluginManager();
 
     Engine& engine;

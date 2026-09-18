@@ -250,6 +250,30 @@ Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
 
+### When the venue has no usable wifi
+
+Guest networks often stop devices from seeing each other, and plenty of stages
+have no wifi at all. **Create a wifi network** in the Phone dialog makes this
+computer serve its own network instead, so the phone joins the laptop directly
+and needs nothing from the venue.
+
+The first time, Performer asks which wifi adapter to use and remembers the
+answer, along with the network name and password. There is nothing to set up on
+the phone: it gets an address automatically when it joins, exactly like joining
+any other wifi, and it still has internet through whatever this computer is
+connected to.
+
+One radio usually cannot be a client and an access point at once, so if this
+computer has a single wifi adapter it will leave its current network while the
+hotspot runs. That is normally what you want on stage. If you would rather keep
+both, a cheap USB wifi adapter gives you a second radio, and Performer prefers
+whichever adapter is free. The adapter list marks which is which, so the choice
+is not a guess.
+
+Pick a network name and password you are happy to reuse, because the phone then
+reconnects on its own at the next gig. Use **Stop the wifi network** in the same
+dialog to return this computer to its normal network.
+
 ## Printing a program map
 
 **Print map** writes a sheet of which program number plays which sound, and

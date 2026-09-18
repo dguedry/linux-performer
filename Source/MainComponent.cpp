@@ -1779,6 +1779,108 @@ void MainComponent::showAudioSettings()
     o.launchAsync();
 }
 
+/** Ask which wifi adapter should serve the hotspot, and remember the answer.
+
+    Asked once per machine, because the answer is a property of the hardware and
+    never changes: a laptop with one radio has one honest option, a laptop with a
+    spare USB adapter has an obviously better one. We only ask when there is a
+    real choice to make; with a single candidate there is nothing to ask about.
+
+    `done (true)` means we have a usable configuration saved. */
+void MainComponent::chooseHotspotAdapter (std::function<void (bool)> done)
+{
+    auto cfg = Hotspot::load (settings);
+
+    auto list = Hotspot::adapters();
+    Array<Hotspot::Adapter> usable;
+    for (auto& a : list) if (a.supportsAccessPoint) usable.add (a);
+
+    if (usable.isEmpty())
+    {
+        auto why = list.isEmpty()
+            ? String ("No wifi adapter was found, so this computer cannot serve its own network.")
+            : String ("This computer's wifi adapter cannot act as an access point. A USB wifi "
+                      "adapter is the usual fix; most cost very little and work without drivers.");
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon, "Cannot create a hotspot", why, "OK");
+        done (false);
+        return;
+    }
+
+    // Already answered, and the adapter is still present: nothing to ask.
+    for (auto& a : usable)
+        if (a.interfaceName == cfg.interfaceName)
+            { done (true); return; }
+
+    if (usable.size() == 1)
+    {
+        cfg.interfaceName = usable[0].interfaceName;
+        Hotspot::save (settings, cfg);
+        done (true);
+        return;
+    }
+
+    // A real choice. Spell out the consequence rather than the hardware, since
+    // "this one will drop your internet" is the part that matters.
+    auto* w = new AlertWindow ("Which wifi adapter should serve the network?",
+                              "Phones will join a wifi network created by this computer.",
+                              MessageBoxIconType::NoIcon);
+    StringArray choices;
+    for (auto& a : usable)
+        choices.add (a.description + (a.inUseAsClient ? "  (in use: this computer would leave its current network)"
+                                                     : "  (free)"));
+    w->addComboBox ("adapter", choices, "Adapter");
+    if (auto* box = w->getComboBoxComponent ("adapter")) box->setSelectedItemIndex (0);
+
+    w->addTextEditor ("network", cfg.networkName, "Network name");
+    w->addTextEditor ("password", cfg.password, "Password");
+    w->addButton ("Use this", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+
+    w->enterModalState (true, ModalCallbackFunction::create (
+        [this, w, usable, cfg, done] (int result) mutable
+        {
+            std::unique_ptr<AlertWindow> owned (w);
+            if (result == 0) { done (false); return; }
+
+            const auto idx = w->getComboBoxComponent ("adapter")->getSelectedItemIndex();
+            cfg.interfaceName = usable[jlimit (0, usable.size() - 1, idx)].interfaceName;
+            cfg.networkName   = w->getTextEditorContents ("network").trim();
+            cfg.password      = w->getTextEditorContents ("password").trim();
+
+            if (cfg.networkName.isEmpty()) cfg.networkName = "PerformerStage";
+            if (cfg.password.length() < 8)
+            {
+                AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Password too short",
+                                                  "Wifi passwords must be at least 8 characters.", "OK");
+                done (false);
+                return;
+            }
+            Hotspot::save (settings, cfg);
+            done (true);
+        }), false);
+}
+
+/** Bring up our own network, then show the phone dialog against it. */
+void MainComponent::startHotspot()
+{
+    chooseHotspotAdapter ([this] (bool ok)
+    {
+        if (! ok) return;
+
+        const auto cfg = Hotspot::load (settings);
+        showStatus ("Starting the wifi network...");
+
+        if (const auto err = Hotspot::start (cfg); err.isNotEmpty())
+        {
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Hotspot", err, "OK");
+            showStatus ("The wifi network did not start.");
+            return;
+        }
+        showStatus ("Wifi network \"" + cfg.networkName + "\" is on.");
+        if (remoteBtn.getToggleState()) showRemote();
+    });
+}
+
 void MainComponent::showRemote()
 {
     if (! remoteBtn.getToggleState())
@@ -1798,13 +1900,12 @@ void MainComponent::showRemote()
     const auto url = remote->getUrl();
     settings.setValue ("remotePort", port);
 
-    // The address is long and has a token in it, so show a QR code: on stage you
-    // point a camera at the screen rather than typing.
+    // Two steps, big type: read off a screen at arm's length while standing up.
     auto* content = new Component();
     content->setSize (420, 320);
     struct RemotePanel : public Component
     {
-        RemotePanel (String u, String c) : url (std::move (u)), code (std::move (c)) {}
+        RemotePanel (String u, String c, String net) : url (std::move (u)), code (std::move (c)), network (std::move (net)) {}
         void paint (Graphics& g) override
         {
             auto r = getLocalBounds().reduced (18);
@@ -1831,17 +1932,52 @@ void MainComponent::showRemote()
             r.removeFromTop (14);
             g.setColour (Colour (0xff9aa0ab));
             g.setFont (FontOptions (12.5f));
-            g.drawFittedText ("The phone must be on the same wifi as this computer. It remembers the code, "
-                              "and the code does not change when Performer restarts, so \"Add to Home Screen\" "
-                              "gives you a one-tap program selector.\n\n"
-                              "Anyone on your network who has the code can change your sounds.",
-                              r, Justification::topLeft, 6);
+
+            const auto note = network.isNotEmpty()
+                ? "The phone must join this computer's wifi network, \"" + network + "\". It remembers "
+                  "the code, and the code does not change when Performer restarts, so \"Add to Home "
+                  "Screen\" gives you a one-tap program selector.\n\n"
+                  "Anyone on that network who has the code can change your sounds."
+                : "The phone must be on the same wifi as this computer. It remembers the code, "
+                  "and the code does not change when Performer restarts, so \"Add to Home Screen\" "
+                  "gives you a one-tap program selector.\n\n"
+                  "No wifi at the venue? Use \"Create a wifi network\" below and the phone joins this "
+                  "computer directly.";
+            g.drawFittedText (note, r.removeFromBottom (r.getHeight() - 4), Justification::topLeft, 7);
         }
-        String url, code;
+        String url, code, network;
     };
-    auto* panel = new RemotePanel (url, remote->getToken());
-    panel->setBounds (0, 0, 420, 320);
+
+    const auto hs = Hotspot::state();
+    auto* panel = new RemotePanel (url, remote->getToken(), hs.active ? hs.networkName : String());
+    panel->setBounds (0, 0, 420, 300);
     content->addAndMakeVisible (panel);
+
+    // Offered here because this is where someone stands when the venue wifi has
+    // just let them down.
+    if (Hotspot::available())
+    {
+        auto* hotspotBtn = new TextButton (hs.active ? "Stop the wifi network" : "Create a wifi network");
+        hotspotBtn->setBounds (18, 300, 384, 30);
+        hotspotBtn->onClick = [this, wasActive = hs.active]
+        {
+            if (auto* dw = findParentComponentOfClass<DialogWindow>()) dw->exitModalState (0);
+            if (wasActive)
+            {
+                if (const auto err = Hotspot::stop(); err.isNotEmpty())
+                    showStatus (err);
+                else
+                    showStatus ("The wifi network is off.");
+                if (remoteBtn.getToggleState()) showRemote();
+            }
+            else
+            {
+                startHotspot();
+            }
+        };
+        content->addAndMakeVisible (hotspotBtn);
+        content->setSize (420, 344);
+    }
 
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
