@@ -2,6 +2,13 @@
 #include "BinaryData.h"
 #include <juce_graphics/juce_graphics.h>
 
+#if JUCE_LINUX || JUCE_MAC
+ #include <ifaddrs.h>
+ #include <net/if.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+#endif
+
 using namespace juce;
 
 namespace perf
@@ -202,14 +209,80 @@ void RemoteServer::stop()
     port = 0;
 }
 
+/** Which address should we print for the phone to type?
+
+    A developer machine can easily have a dozen IPv4 addresses -- Docker and LXD
+    bridges, libvirt networks, one per container network -- and a phone can reach
+    none of them. Picking the first non-loopback address, as this used to, hands
+    the user something like 172.17.0.1 and looks like the feature is broken.
+
+    So rank by interface instead: a wireless interface first (on stage that is
+    either the venue's network or our own hotspot), then wired, then anything
+    else we do not recognise as virtual, and only then give up. Within wireless
+    we prefer a hotspot-shaped address, because if the laptop is serving its own
+    network that is certainly the one the phone is on. */
+static int addressRank (const String& iface, const String& addr)
+{
+    // Virtual interfaces: nothing external is ever on the other side of these.
+    if (iface.startsWith ("docker") || iface.startsWith ("br-") || iface.startsWith ("virbr")
+        || iface.startsWith ("lxdbr") || iface.startsWith ("veth") || iface.startsWith ("vnet")
+        || iface.startsWith ("tun") || iface.startsWith ("tap") || iface.startsWith ("vmnet")
+        || iface.startsWith ("zt") || iface.startsWith ("wg"))
+        return 0;
+
+    const auto wireless = iface.startsWith ("wl") || iface.startsWith ("wlan") || iface.startsWith ("ath");
+    const auto wired    = iface.startsWith ("en") || iface.startsWith ("eth");
+
+    // NetworkManager's shared mode always uses 10.42.x: that is our own hotspot.
+    if (wireless && addr.startsWith ("10.42.")) return 4;
+    if (wireless) return 3;
+    if (wired)    return 2;
+    return 1;
+}
+
 String RemoteServer::getUrl() const
 {
     if (! running.load()) return {};
-    String host = "127.0.0.1";
-    for (auto& ip : IPAddress::getAllAddresses())
-        if (! ip.isNull() && ! ip.toString().startsWith ("127.") && ip.toString().containsChar ('.'))
-            { host = ip.toString(); break; }
-    return "http://" + host + ":" + String (port) + "/";
+    return "http://" + getHostAddress() + ":" + String (port) + "/";
+}
+
+String RemoteServer::getHostAddress()
+{
+    String best = "127.0.0.1";
+    int bestRank = -1;
+
+   #if JUCE_LINUX || JUCE_MAC
+    struct ifaddrs* list = nullptr;
+    if (::getifaddrs (&list) == 0)
+    {
+        for (auto* i = list; i != nullptr; i = i->ifa_next)
+        {
+            if (i->ifa_addr == nullptr || i->ifa_addr->sa_family != AF_INET) continue;
+            if ((i->ifa_flags & IFF_UP) == 0 || (i->ifa_flags & IFF_LOOPBACK) != 0) continue;
+
+            char buf[INET_ADDRSTRLEN] = {};
+            auto* in = reinterpret_cast<struct sockaddr_in*> (i->ifa_addr);
+            if (::inet_ntop (AF_INET, &in->sin_addr, buf, sizeof (buf)) == nullptr) continue;
+
+            const String iface (i->ifa_name), addr (buf);
+            if (addr.startsWith ("127.") || addr.startsWith ("169.254.")) continue;
+
+            if (const auto rank = addressRank (iface, addr); rank > bestRank)
+            {
+                bestRank = rank;
+                best = addr;
+            }
+        }
+        ::freeifaddrs (list);
+    }
+   #endif
+
+    if (bestRank < 0)
+        for (auto& ip : IPAddress::getAllAddresses())
+            if (! ip.isNull() && ! ip.toString().startsWith ("127.") && ip.toString().containsChar ('.'))
+                { best = ip.toString(); break; }
+
+    return best;
 }
 
 //==============================================================================

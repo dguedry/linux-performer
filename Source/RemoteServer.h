@@ -30,8 +30,13 @@ public:
     void stop();
     bool isRunning() const                 { return running.load(); }
     int getPort() const                    { return port; }
-    /** The address to open on the phone, token included, or empty when stopped. */
+    /** The address to open on the phone, or empty when stopped. The code is not
+        in the URL: the page asks for it, so a shortcut survives a restart. */
     juce::String getUrl() const;
+
+    /** The address a phone should use to reach this machine, chosen over
+        container and virtual-machine bridges. Public so tests can check it. */
+    static juce::String getHostAddress();
     juce::String getToken() const          { return token; }
 
 private:
