@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "QrCode.h"
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
 #include "AudioSettingsComponent.h"
@@ -1902,21 +1903,34 @@ void MainComponent::showRemote()
 
     // Two steps, big type: read off a screen at arm's length while standing up.
     auto* content = new Component();
-    content->setSize (420, 320);
+    content->setSize (520, 300);
     struct RemotePanel : public Component
     {
-        RemotePanel (String u, String c, String net) : url (std::move (u)), code (std::move (c)), network (std::move (net)) {}
+        RemotePanel (String u, String c, String net)
+            : url (std::move (u)), code (std::move (c)), network (std::move (net)),
+              qr (QrCode::encode (url)) {}
         void paint (Graphics& g) override
         {
             auto r = getLocalBounds().reduced (18);
             g.fillAll (Colour (0xff1e1f24));
 
+            // Point a camera at this and skip the typing entirely.
+            if (qr.isValid())
+            {
+                auto box = r.removeFromRight (128);
+                qr.draw (g, box.removeFromTop (128), Colours::black, Colours::white);
+                g.setColour (Colour (0xff9aa0ab));
+                g.setFont (FontOptions (11.5f));
+                g.drawFittedText ("or scan this", box.removeFromTop (18), Justification::centred, 1);
+                r.removeFromRight (14);
+            }
+
             g.setColour (Colour (0xff9aa0ab));
             g.setFont (FontOptions (13.0f, Font::bold));
             g.drawFittedText ("1.  OPEN THIS ON YOUR PHONE", r.removeFromTop (20), Justification::centredLeft, 1);
             g.setColour (Colours::white);
-            g.setFont (FontOptions (24.0f, Font::bold));
-            g.drawFittedText (url, r.removeFromTop (40), Justification::centredLeft, 1);
+            g.setFont (FontOptions (20.0f, Font::bold));
+            g.drawFittedText (url, r.removeFromTop (34), Justification::centredLeft, 1);
 
             r.removeFromTop (18);
             g.setColour (Colour (0xff9aa0ab));
@@ -1946,11 +1960,12 @@ void MainComponent::showRemote()
             g.drawFittedText (note, r.removeFromBottom (r.getHeight() - 4), Justification::topLeft, 7);
         }
         String url, code, network;
+        QrCode qr;
     };
 
     const auto hs = Hotspot::state();
     auto* panel = new RemotePanel (url, remote->getToken(), hs.active ? hs.networkName : String());
-    panel->setBounds (0, 0, 420, 300);
+    panel->setBounds (0, 0, 520, 300);
     content->addAndMakeVisible (panel);
 
     // Offered here because this is where someone stands when the venue wifi has
@@ -1958,7 +1973,7 @@ void MainComponent::showRemote()
     if (Hotspot::available())
     {
         auto* hotspotBtn = new TextButton (hs.active ? "Stop the wifi network" : "Create a wifi network");
-        hotspotBtn->setBounds (18, 300, 384, 30);
+        hotspotBtn->setBounds (18, 300, 484, 30);
         hotspotBtn->onClick = [this, wasActive = hs.active]
         {
             if (auto* dw = findParentComponentOfClass<DialogWindow>()) dw->exitModalState (0);
@@ -1976,7 +1991,7 @@ void MainComponent::showRemote()
             }
         };
         content->addAndMakeVisible (hotspotBtn);
-        content->setSize (420, 344);
+        content->setSize (520, 344);
     }
 
     DialogWindow::LaunchOptions o;
@@ -1996,7 +2011,10 @@ void MainComponent::printProgramMap()
     // JUCE cannot print on Linux; write HTML styled for paper and let the browser print it.
     auto out = File::getSpecialLocation (File::tempDirectory)
                    .getChildFile ("performer-program-map-" + String (Time::currentTimeMillis()) + ".html");
-    if (! out.replaceWithText (ProgramMap::toHtml (setup, title)))
+    // Include the phone address only while the server is actually running: a
+    // printed code pointing at a closed port would be worse than none.
+    const auto phoneUrl = (remote != nullptr && remote->isRunning()) ? remote->getUrl() : String();
+    if (! out.replaceWithText (ProgramMap::toHtml (setup, title, phoneUrl)))
     {
         showStatus ("Could not write the program map to " + out.getFullPathName());
         return;

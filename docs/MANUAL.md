@@ -240,8 +240,12 @@ tap one to switch to it. There is a PANIC button too. Nothing is installed:
 it is a progressive web app, so "Add to Home Screen" gives it an icon and it
 opens fullscreen like an app.
 
-Performer shows a plain address and a six-character code. Type the address once
-on the phone, then enter the code; the phone remembers it, and the code does not
+Performer shows a plain address, a six-character code, and a square code you can
+scan. Point the phone's camera at the square and it opens Performer directly,
+which saves reading an address off a screen; **Print map** puts the same code on
+the printed sheet, so one taped to the keyboard is also the way in.
+
+To type it instead, enter the address once on the phone, then the code; the phone remembers it, and the code does not
 change when Performer restarts, so a home-screen shortcut keeps working. The
 code is case-insensitive and avoids characters that misread, so `0`/`O` and
 `1`/`I` never appear.

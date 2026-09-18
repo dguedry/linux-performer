@@ -1,5 +1,6 @@
 #pragma once
 
+#include "QrCode.h"
 #include "Model.h"
 #include <juce_core/juce_core.h>
 
@@ -29,7 +30,11 @@ struct ProgramMap
         return names.joinIntoString (" + ");
     }
 
-    static juce::String toHtml (const Setup& setup, const juce::String& title)
+    /** `phoneUrl`, when given, adds a scannable code to the sheet: tape it to the
+        keyboard and a phone reaches the program selector without anyone typing an
+        address. */
+    static juce::String toHtml (const Setup& setup, const juce::String& title,
+                                const juce::String& phoneUrl = {})
     {
         juce::String h;
         h << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n"
@@ -44,10 +49,19 @@ struct ProgramMap
           << "  td.name { font-size: 12pt; }\n"
           << "  td.what { font-size: 9pt; color: #555; text-align: right; }\n"
           << "  .none { font-size: 10pt; color: #777; font-style: italic; }\n"
+          << "  .qr { float: right; margin: -14mm 0 2mm 4mm; text-align: center; }\n"
+          << "  .qrcap { font-size: 7.5pt; color: #555; margin-top: 1mm; line-height: 1.3; }\n"
           << "  @media print { body { margin: 10mm; } h2 { break-after: avoid; } tr { break-inside: avoid; } }\n"
           << "</style></head><body>\n"
           << "<h1>" << escape (title) << "</h1>\n<div class=\"sub\">Program map";
         h << " &middot; send these numbers as MIDI Program Change</div>\n";
+
+        // A scannable code, so the sheet taped to the keyboard is also the way
+        // in to the phone selector: no address to read out or type.
+        if (phoneUrl.isNotEmpty())
+            if (const auto qr = QrCode::encode (phoneUrl); qr.isValid())
+                h << "<div class=\"qr\">" << qr.toSvg (28)
+                  << "<div class=\"qrcap\">Scan to pick programs<br>from a phone</div></div>\n";
 
         for (const auto& in : setup.inputs)
         {

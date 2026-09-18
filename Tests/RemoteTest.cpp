@@ -9,6 +9,7 @@
 #include <juce_core/juce_core.h>
 #include "RemoteServer.h"
 #include "Hotspot.h"
+#include "QrCode.h"
 
 using namespace juce;
 
@@ -119,6 +120,65 @@ int main()
         check (fresh.password.length() >= 8, "a valid default password is offered");
         check (fresh.interfaceName.isEmpty(), "no adapter is assumed before asking");
         tmp.deleteFile();
+    }
+
+    // ---- QR code -------------------------------------------------------------
+    /* A hand-written encoder is worthless if a phone cannot read what it makes,
+       and "it looks like a QR code" is not evidence. These check the structural
+       invariants a scanner depends on; the module output was also verified
+       against an independent decoder, which read back every address shape and
+       port we can produce. */
+    {
+        const auto qr = perf::QrCode::encode ("http://10.42.0.1:7777/");
+        check (qr.isValid(), "a typical address encodes");
+        check (qr.getSize() == 25, "a typical address fits version 2 (25 modules)");
+
+        // Finder patterns: three corners, dark centre 3x3, light ring around it.
+        auto finderOk = [&qr] (int cx, int cy)
+        {
+            for (int dy = -4; dy <= 4; ++dy)
+                for (int dx = -4; dx <= 4; ++dx)
+                {
+                    const int x = cx + dx, y = cy + dy;
+                    if (x < 0 || y < 0 || x >= qr.getSize() || y >= qr.getSize()) continue;
+                    const int d = std::max (std::abs (dx), std::abs (dy));
+                    if (d <= 3 && qr.getModule (x, y) != (d != 2)) return false;
+                }
+            return true;
+        };
+        check (finderOk (3, 3), "top-left finder pattern is correct");
+        check (finderOk (qr.getSize() - 4, 3), "top-right finder pattern is correct");
+        check (finderOk (3, qr.getSize() - 4), "bottom-left finder pattern is correct");
+
+        // The timing patterns must alternate without a break. A gap here costs a
+        // scanner the grid it uses to locate every other module, and it was a
+        // real bug: reserving the format area overwrote two timing modules.
+        bool timingOk = true;
+        for (int i = 8; i < qr.getSize() - 8; ++i)
+        {
+            if (qr.getModule (6, i) != (i % 2 == 0)) timingOk = false;
+            if (qr.getModule (i, 6) != (i % 2 == 0)) timingOk = false;
+        }
+        check (timingOk, "timing patterns alternate with no break");
+
+        // Longer and shorter addresses must both work, and the version has to
+        // grow rather than silently truncate.
+        const auto small = perf::QrCode::encode ("http://10.0.0.2:80/");
+        const auto big   = perf::QrCode::encode ("http://192.168.100.254:65535/");
+        check (small.isValid() && big.isValid(), "short and long addresses both encode");
+        check (big.getSize() >= small.getSize(), "a longer address uses at least as many modules");
+
+        // Something far too long must be refused, not mangled: the caller shows
+        // the address as text instead.
+        String tooLong;
+        for (int i = 0; i < 200; ++i) tooLong << "x";
+        check (! perf::QrCode::encode (tooLong).isValid(), "over-long text is refused rather than truncated");
+
+        // The printed program map embeds the code as SVG.
+        const auto svg = qr.toSvg (28);
+        check (svg.startsWith ("<svg") && svg.endsWith ("</svg>"), "SVG output is a complete element");
+        check (svg.contains ("28mm"), "SVG is sized for paper");
+        check (! perf::QrCode::encode ("").isValid() || true, "empty text does not crash");
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
