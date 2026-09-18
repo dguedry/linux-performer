@@ -310,6 +310,17 @@ async function fillPicker(q) {
   } catch (e) { if (!e.gate) show(e.message); return; }
 
   list.innerHTML = "";
+
+  /* A plugin that names nothing cannot be given useful controls, and saying so
+     is kinder than 300 rows of "<unassigned>". */
+  if (!q && data.named === 0 && data.total > 0) {
+    const n = document.createElement("div"); n.className = "note";
+    n.textContent = "This plugin does not name its controls: of its " + data.total
+                  + " parameters none have usable names, so there is nothing worth a slider. "
+                  + "Use its own window on the computer instead.";
+    list.appendChild(n);
+  }
+
   if (data.shown === 0) {
     const n = document.createElement("div"); n.className = "note";
     n.textContent = q
@@ -578,13 +589,39 @@ String RemoteServer::stateJson() const
     return JSON::toString (var (root.get()), true);
 }
 
-/** "#000", "Param 17" and the like: a placeholder the plugin never named.
-    Kontakt reports 2049 of these before anything useful, so they sort last. */
-static bool looksUnnamed (const String& name)
+/** A placeholder the plugin never really named, so it sorts below anything with
+    a meaningful name. Plugins spell these differently and there is no standard:
+
+      Kontakt 8     "#000" .. "#2048"        (2049 empty automation slots)
+      Numa Player   "<unassigned>"           (64 of them) and "MIDI CC 0|0" ..
+      others        "Param 17", "" , "-"
+
+    Guessing from the name is unavoidable here: none of these carry any flag
+    saying "this is empty". Being wrong only changes the order, never whether a
+    parameter can be chosen, so a false positive costs a scroll rather than a
+    control. */
+bool RemoteServer::isPlaceholderName (const String& name)
 {
     const auto t = name.trim();
     if (t.isEmpty()) return true;
+    if (t == "-" || t == "--") return true;
+
+    // "<unassigned>", "<none>", "<empty>": anything a plugin brackets like that.
+    if (t.startsWithChar ('<') && t.endsWithChar ('>')) return true;
+
+    // "#000", "Param 17", "Parameter 3": a word plus a bare number.
     if (t.startsWithChar ('#') && t.substring (1).containsOnly ("0123456789")) return true;
+    if (t.startsWithIgnoreCase ("param"))
+    {
+        const auto rest = t.fromFirstOccurrenceOf (" ", false, false).trim();
+        if (rest.isNotEmpty() && rest.containsOnly ("0123456789")) return true;
+    }
+
+    /* "MIDI CC 0|0": a controller proxy the plugin named after the controller
+       rather than after what it does. Useful to reach deliberately, but it
+       should never crowd out the plugin's own controls. */
+    if (t.startsWithIgnoreCase ("midi cc")) return true;
+
     return false;
 }
 
@@ -683,7 +720,7 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
 {
     DynamicObject::Ptr root (new DynamicObject());
     Array<var> out;
-    int total = 0, shown = 0, hidden = 0;
+    int total = 0, shown = 0, hidden = 0, named = 0;
 
     const auto& setup = engine.getSetup();
     if (inputIndex >= 0 && inputIndex < (int) setup.inputs.size())
@@ -747,10 +784,10 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
                         if (params[i].midiChannel > 0 && (pref == 0 || params[i].midiChannel == pref))
                             order.push_back (i);
                     for (size_t i = 0; i < params.size(); ++i)
-                        if (params[i].midiChannel == 0 && ! looksUnnamed (params[i].name))
+                        if (params[i].midiChannel == 0 && ! RemoteServer::isPlaceholderName (params[i].name))
                             order.push_back (i);
                     for (size_t i = 0; i < params.size(); ++i)
-                        if (params[i].midiChannel == 0 && looksUnnamed (params[i].name))
+                        if (params[i].midiChannel == 0 && RemoteServer::isPlaceholderName (params[i].name))
                             order.push_back (i);
                     for (size_t i = 0; i < params.size(); ++i)
                         if (params[i].midiChannel > 0 && pref != 0 && params[i].midiChannel != pref)
@@ -759,15 +796,23 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
                 else
                 {
                     for (size_t i = 0; i < params.size(); ++i)
-                        if (! looksUnnamed (params[i].name)) order.push_back (i);
+                        if (! RemoteServer::isPlaceholderName (params[i].name)) order.push_back (i);
                     for (size_t i = 0; i < params.size(); ++i)
-                        if (looksUnnamed (params[i].name)) order.push_back (i);
+                        if (RemoteServer::isPlaceholderName (params[i].name)) order.push_back (i);
                 }
             }
 
             // An unnamed placeholder is never worth a slider before the named ones.
             for (size_t i = 0; i < params.size(); ++i)
-                if (looksUnnamed (params[i].name)) secondary[i] = true;
+                if (RemoteServer::isPlaceholderName (params[i].name)) secondary[i] = true;
+
+            /* How many the plugin actually named. Some publish nothing useful at
+               all -- Numa Player's 2145 parameters are 2048 controller proxies,
+               64 "<unassigned>" and Bypass -- and a page of placeholders with no
+               explanation reads as the app being broken rather than the plugin
+               declining to say. */
+            for (const auto& info : params)
+                if (! RemoteServer::isPlaceholderName (info.name) && info.midiController < 0) ++named;
 
             for (size_t i : order)
             {
@@ -803,6 +848,7 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
     root->setProperty ("total", total);
     root->setProperty ("shown", shown);
     root->setProperty ("hidden", hidden);
+    root->setProperty ("named", named);
     return JSON::toString (var (root.get()), true);
 }
 

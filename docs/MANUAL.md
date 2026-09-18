@@ -298,6 +298,13 @@ most of them empty automation slots and per-channel copies of the same MIDI
 controller -- so the controls for the channel your input plays on come first,
 then the plugin's own named parameters, and the rest sit behind **Show more**.
 
+Some plugins publish nothing worth a slider. A plugin only offers controls it
+chooses to name, and not all of them do: Studiologic's Numa Player, for example,
+reports 2145 parameters of which 2048 are MIDI controller slots, 64 are marked
+unassigned and one is Bypass, so there is nothing to put on a fader. The picker
+says so rather than showing a page of blanks. Use that plugin's own window
+instead.
+
 A control can only be chosen while its plugin is loaded, which means the program
 you are on. Turn on **Preload all programs** in the toolbar if you want to set
 up controls for programs you are not currently playing.

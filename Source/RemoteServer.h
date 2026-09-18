@@ -38,6 +38,11 @@ public:
     /** The address a phone should use to reach this machine, chosen over
         container and virtual-machine bridges. Public so tests can check it. */
     static juce::String getHostAddress();
+
+    /** True when a parameter name is a placeholder rather than a real control
+        ("#000", "<unassigned>", "MIDI CC 0|3"). Plugins spell these differently
+        and none flag them, so this is a heuristic; public so it can be tested. */
+    static bool isPlaceholderName (const juce::String& name);
     juce::String getToken() const          { return token; }
 
     /** The per-plugin chosen parameters, shared with the desktop so both views

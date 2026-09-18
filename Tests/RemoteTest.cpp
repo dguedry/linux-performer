@@ -334,6 +334,34 @@ int main()
         check (! fresh.hasAny (organ), "a missing favourites file is not an error");
     }
 
+    // ---- telling a real control from a placeholder ----------------------------
+    /* Every plugin spells "this parameter is empty" differently and none flag
+       it, so this is a heuristic -- and the cost of getting it wrong is
+       asymmetric. A missed placeholder just adds a row to scroll past; a real
+       control wrongly called a placeholder sorts below 2000 of them and is
+       effectively lost. These pin the shapes seen on real plugins. */
+    {
+        auto ph = [] (const char* n) { return perf::RemoteServer::isPlaceholderName (n); };
+
+        // Kontakt 8: 2049 empty automation slots.
+        check (ph ("#000") && ph ("#2048"), "Kontakt's \"#000\" slots are placeholders");
+        // Numa Player: 64 unassigned entries and 2048 controller proxies.
+        check (ph ("<unassigned>"), "\"<unassigned>\" is a placeholder");
+        check (ph ("MIDI CC 0|0") && ph ("MIDI CC 15|127"), "a controller-named proxy is a placeholder");
+        // Common shapes from other hosts and plugins.
+        check (ph ("") && ph ("   ") && ph ("-"), "empty and dash names are placeholders");
+        check (ph ("Param 17") && ph ("param 3"), "\"Param 17\" is a placeholder");
+
+        // Real controls must never be mistaken for placeholders.
+        check (! ph ("Leslie Speed"), "a named control is kept");
+        check (! ph ("Upper Drawbar 1"), "a name ending in a number is still a real control");
+        check (! ph ("Channel Volume(MSB)"), "a controller with a real name is kept");
+        check (! ph ("Bypass"), "Bypass is a real control");
+        check (! ph ("Parameter Feedback"), "a name merely starting with \"param\" is kept");
+        check (! ph ("Vibrato and Chorus"), "a multi-word name is kept");
+        check (! ph ("#hashtag"), "a # name that is not all digits is kept");
+    }
+
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
     return failures == 0 ? 0 : 1;
 }
