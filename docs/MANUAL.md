@@ -250,6 +250,10 @@ phone remembers the code, and it does not change when Performer restarts, so a
 home-screen shortcut keeps working. It is case-insensitive and avoids characters
 that misread, so `0`/`O` and `1`/`I` never appear.
 
+Phone control stays on across restarts. If it was on when you quit, Performer
+starts the web app again at launch, so a phone on a stand keeps working without
+anyone going back to the laptop. Turning it off is remembered the same way.
+
 A program picked from the phone is a real change to the setup, exactly like
 picking one on the laptop. It is written to the setup file you have open, within
 a couple of seconds rather than waiting for the next periodic save, because

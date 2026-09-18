@@ -67,6 +67,11 @@ private:
     void showAudioSettings();
     void printProgramMap();
     void showRemote();
+
+    /** Starts the phone-control server, without showing the dialog. Returns true
+        when it is listening. Used at startup to restore the previous session's
+        choice, where a dialog would be an unwanted interruption. */
+    bool startRemote();
     void chooseHotspotAdapter (std::function<void (bool)> done);
     void startHotspot();
     void showPluginManager();

@@ -1468,6 +1468,17 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
     else                                        refreshAll();
 
+    /* Restore phone control if it was on when we last quit. Someone who set up a
+       phone on a stand expects it to still work after a restart, and discovering
+       otherwise mid-set is exactly when they can least afford to go and fix it.
+       Started after the setup is loaded so the page has programs to show. */
+    if (settings.getBoolValue ("remoteOn", false))
+    {
+        remoteBtn.setToggleState (true, dontSendNotification);
+        if (startRemote())
+            showStatus ("Phone control on: " + remote->getUrl() + "  code " + remote->getToken());
+    }
+
     startTimerHz (4);
     setSize (1280, 800);
 }
@@ -1902,24 +1913,41 @@ void MainComponent::startHotspot()
     });
 }
 
+/* Just the server, no dialog. At startup we want the previous session's choice
+   honoured quietly; a dialog appearing on its own every launch would be an
+   interruption, not a help. */
+bool MainComponent::startRemote()
+{
+    if (remote == nullptr) remote = std::make_unique<RemoteServer> (engine, settings);
+    const int port = settings.getIntValue ("remotePort", 7777);
+
+    if (! remote->start (port))
+    {
+        remoteBtn.setToggleState (false, dontSendNotification);
+        settings.setValue ("remoteOn", false);
+        showStatus ("Could not listen on port " + String (port) + " — is another copy of Performer running?");
+        return false;
+    }
+
+    settings.setValue ("remotePort", port);
+    settings.setValue ("remoteOn", true);
+    settings.saveIfNeeded();
+    return true;
+}
+
 void MainComponent::showRemote()
 {
     if (! remoteBtn.getToggleState())
     {
         if (remote != nullptr) remote->stop();
+        settings.setValue ("remoteOn", false);
+        settings.saveIfNeeded();
         showStatus ("Phone control off.");
         return;
     }
-    if (remote == nullptr) remote = std::make_unique<RemoteServer> (engine, settings);
-    const int port = settings.getIntValue ("remotePort", 7777);
-    if (! remote->start (port))
-    {
-        remoteBtn.setToggleState (false, dontSendNotification);
-        showStatus ("Could not listen on port " + String (port) + " — is another copy of Performer running?");
-        return;
-    }
+
+    if (! startRemote()) return;
     const auto url = remote->getUrl();
-    settings.setValue ("remotePort", port);
 
     // Two steps, big type: read off a screen at arm's length while standing up.
     auto* content = new Component();
@@ -2038,7 +2066,7 @@ void MainComponent::showRemote()
        address is right, the server is listening, and the desktop can load the
        page because local traffic never passes the firewall. Say so here rather
        than leaving someone to discover it at a gig. */
-    if (const auto warn = Hotspot::firewallWarning (port); warn.isNotEmpty())
+    if (const auto warn = Hotspot::firewallWarning (remote->getPort()); warn.isNotEmpty())
         AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Phone control", warn, "OK");
 }
 

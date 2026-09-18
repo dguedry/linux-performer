@@ -225,6 +225,38 @@ int main()
         dir.deleteRecursively();
     }
 
+    // ---- phone control is remembered across a restart --------------------------
+    /* Someone who sets a phone on a stand expects it to still work after a
+       restart. The toggle itself has to persist, not just the code: without this
+       the app always came up with the server off, which looks like the phone has
+       broken rather than like a setting was forgotten. */
+    {
+        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-remoteon.settings");
+        tmp.deleteFile();
+        PropertiesFile::Options o;
+        o.applicationName = "performer-remoteon";
+
+        {
+            PropertiesFile pf (tmp, o);
+            check (! pf.getBoolValue ("remoteOn", false), "phone control is off until it is turned on");
+            pf.setValue ("remoteOn", true);
+            pf.setValue ("remotePort", 7777);
+            pf.saveIfNeeded();
+        }
+        {
+            PropertiesFile pf (tmp, o);
+            check (pf.getBoolValue ("remoteOn", false), "phone control being on survives a restart");
+            check (pf.getIntValue ("remotePort", 0) == 7777, "the port survives a restart");
+            pf.setValue ("remoteOn", false);
+            pf.saveIfNeeded();
+        }
+        {
+            PropertiesFile pf (tmp, o);
+            check (! pf.getBoolValue ("remoteOn", true), "turning it off is remembered too");
+        }
+        tmp.deleteFile();
+    }
+
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
     return failures == 0 ? 0 : 1;
 }
