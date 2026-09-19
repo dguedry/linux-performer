@@ -1400,6 +1400,44 @@ void RemoteServer::handle (StreamingSocket& sock)
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }
+    if (path.startsWith ("/api/readback"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+
+        /* Asks the PLUGIN what a parameter is, rather than reporting our cached
+           copy. "The phone shows the right number" and "the plugin actually
+           moved" are different claims, and only this distinguishes them. */
+        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const auto id    = URL::removeEscapeChars (path.fromFirstOccurrenceOf ("id=", false, false).upToFirstOccurrenceOf ("&", false, false));
+
+        float cached = -1.0f, live = -1.0f;
+        bool ok = false;
+        WaitableEvent done;
+        MessageManager::callAsync ([&]
+        {
+            const auto& setup = engine.getSetup();
+            if (input >= 0 && input < (int) setup.inputs.size())
+            {
+                const int prog = setup.inputs[(size_t) input].currentProgram;
+                if (auto* plugin = engine.getPlugin (input, prog, slot, -1))
+                    if (const int idx = findParamIndex (plugin->getParameters(), id); idx >= 0)
+                    {
+                        cached = plugin->getCachedParameterValue (idx);
+                        ok = plugin->fetchParameterValue (idx, live);
+                    }
+            }
+            done.signal();
+        });
+        done.wait (3000);
+
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("cached", cached);
+        o->setProperty ("plugin", live);
+        o->setProperty ("ok", ok);
+        sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
+        return;
+    }
     if (path.startsWith ("/api/panic"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
