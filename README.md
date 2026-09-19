@@ -2,10 +2,10 @@
 
 **A live-performance plugin host for Linux.** Point your keyboards at it, build
 a program for each sound in your set, and change sounds from the keyboard while
-you play.
+you play -- or from a phone or tablet on a music stand, with no app to install.
 
 <p align="center">
-  <img src="docs/images/performer.png" alt="Performer: two inputs, a program list, two instrument slots with key and velocity ranges, and MIDI mappings" width="900">
+  <img src="docs/images/performer.png" alt="Performer: two keyboards as inputs, a program list grouped by kind, a Hammond B-3X loaded with its key and velocity ranges, and MIDI mappings for vibrato and Leslie speed" width="900">
 </p>
 
 Performer exists because the live hosts keyboard players rely on -- MainStage,
@@ -14,7 +14,8 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 [yabridge](https://github.com/robbert-vdh/yabridge) work like any other plugin.
 
 - **A program per sound, 128 per keyboard**, selected by MIDI Program Change
-  while you play. Upper and Lower manuals change independently.
+  while you play. Upper and Lower manuals change independently. Group them by
+  kind -- organs, strings, brass -- to find things quickly.
 - **Splits and layers** with per-slot key range, velocity range, velocity
   curve, transpose, gain and pan.
 - **Insert effects** per instrument and per program.
@@ -25,9 +26,10 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 - **Built for low latency**: a native PipeWire/JACK client, 128-sample blocks
   by default, parallel plugin loading, and a late-block counter you can watch.
 - **An on-screen keyboard** for building a set without a controller attached.
-- **Phone control**: a built-in web app for selecting programs from a phone or
-  tablet. Scan the code or type a short one; it is installable to the home
-  screen, and Performer can serve its own wifi network when the venue has none.
+- **Phone or tablet control**: a built-in web app for changing programs and
+  turning a few chosen plugin controls from a music stand. Nothing to install --
+  scan the code or type a short one, and add it to the home screen if you like.
+  Performer can serve its own wifi network when the venue has none.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
 in the toolbar to read the same manual inside the app. The rest of this
