@@ -270,16 +270,25 @@ int main()
         g.inputs[0].programs[1].slots.emplace_back();
         g.inputs[1].programs[0].slots.emplace_back();
 
-        g.inputs[0].programs[0].slots[0].phoneControls = { "7", "10" };
-        g.inputs[0].programs[1].slots[0].phoneControls = { "74" };
+        g.inputs[0].programs[0].slots[0].phoneControls = {
+            { "7",  "Channel Volume", "Volume", PhoneControl::Widget::automatic },
+            { "10", "Pan(MSB)",       {},       PhoneControl::Widget::automatic } };
+        g.inputs[0].programs[1].slots[0].phoneControls = {
+            { "74", "Cutoff", "Brightness", PhoneControl::Widget::fader } };
         // The third instance deliberately chooses nothing.
 
         const auto back = Setup::fromVar (g.toVar());
         CHECK (back.inputs[0].programs[0].slots[0].phoneControls.size() == 2);
         CHECK (back.inputs[0].programs[1].slots[0].phoneControls.size() == 1);
         CHECK (back.inputs[1].programs[0].slots[0].phoneControls.empty());
-        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[0] == "7");
-        CHECK (back.inputs[0].programs[1].slots[0].phoneControls[0] == "74");
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[0].paramId == "7");
+        CHECK (back.inputs[0].programs[1].slots[0].phoneControls[0].paramId == "74");
+        // Labels and widget overrides are the point of the editor: they must survive.
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[0].label == "Volume");
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[1].label.isEmpty());
+        CHECK (back.inputs[0].programs[1].slots[0].phoneControls[0].widget == PhoneControl::Widget::fader);
+        // Order is meaningful -- drawbars are not in plugin order.
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[1].paramId == "10");
 
         // A slot that chose nothing shows nothing, rather than inheriting.
         CHECK (back.inputs[1].programs[0].slots[0].phoneControls.empty());

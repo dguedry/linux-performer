@@ -964,9 +964,9 @@ String RemoteServer::slotsJson (int inputIndex) const
                    on one Kontakt appear on every other one. */
                 const auto chosen = engine.getSlotPhoneControls (inputIndex, prog, sIdx);
 
-                for (const auto& id : chosen)
+                for (const auto& ctl : chosen)
                 {
-                    const int idx = findParamIndex (params, id);
+                    const int idx = findParamIndex (params, ctl.paramId);
                     if (idx < 0) continue;              // the plugin no longer has it
 
                     const ParamInfo* info = nullptr;
@@ -975,9 +975,13 @@ String RemoteServer::slotsJson (int inputIndex) const
 
                     DynamicObject::Ptr pd (new DynamicObject());
                     pd->setProperty ("id", info->id);
-                    pd->setProperty ("name", info->name);
+                    // The label wins when there is one: "Growl" beats "CC 3",
+                    // and on a phone the short one is what fits.
+                    pd->setProperty ("name", ctl.label.isNotEmpty() ? ctl.label : info->name);
                     pd->setProperty ("value", plugin->getCachedParameterValue (idx));
-                    pd->setProperty ("boolean", looksLikeSwitch (*info));
+                    pd->setProperty ("boolean", ctl.widget == PhoneControl::Widget::automatic
+                                                  ? looksLikeSwitch (*info)
+                                                  : ctl.widget == PhoneControl::Widget::sw);
                     pd->setProperty ("steps", info->numSteps);
                     sliders.add (var (pd.get()));
                 }
@@ -1112,7 +1116,8 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
 
                 // Something already chosen always shows, so it can be unchosen.
                 // Ticked for THIS slot.
-                const bool chosen = std::find (slotChosen.begin(), slotChosen.end(), info.id) != slotChosen.end();
+                const bool chosen = std::any_of (slotChosen.begin(), slotChosen.end(),
+                                                 [&] (const PhoneControl& c) { return c.paramId == info.id; });
 
                 if (secondary[i] && ! showSecondary && ! chosen) { ++hidden; continue; }
                 if (shown >= 300) { ++hidden; continue; }

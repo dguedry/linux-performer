@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include "PhoneTemplate.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <vector>
 
@@ -35,14 +36,13 @@ struct SlotDef
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
     std::vector<EffectDef> effects;   // processed in order after the instrument
 
-    /** Parameter IDs shown as controls on the phone, for THIS instance.
+    /** The controls shown on the phone for THIS instance, in the order they
+        should appear, with any custom labels.
 
         Per instance rather than per plugin: two Kontakts in one setup are two
-        different instruments, and choosing a filter cutoff on the strings
-        should not put the same control on the drums. The per-plugin list is
-        still used, but only as the starting point when a slot has chosen
-        nothing yet. */
-    std::vector<juce::String> phoneControls;
+        different instruments, and a filter cutoff chosen on the strings should
+        not appear on the drums. */
+    std::vector<PhoneControl> phoneControls;
 
     juce::var toVar() const;
     static SlotDef fromVar (const juce::var&);

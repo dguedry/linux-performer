@@ -155,8 +155,12 @@ public:
     /** The controls shown on the phone for one slot. Per instance: two Kontakts
         in a setup are two instruments, and a control chosen on one should not
         appear on the other. */
-    std::vector<juce::String> getSlotPhoneControls (int inputIndex, int program, int slot) const;
+    std::vector<PhoneControl> getSlotPhoneControls (int inputIndex, int program, int slot) const;
     void setSlotPhoneControl (int inputIndex, int program, int slot, const juce::String& paramId, bool on);
+
+    /** Replaces a slot's controls outright -- applying a template, relabelling,
+        reordering. */
+    void setSlotPhoneControls (int inputIndex, int program, int slot, std::vector<PhoneControl>);
 
     //==============================================================================
     // Effects. slot == -1 addresses the program-level chain.

@@ -304,6 +304,30 @@ on, labelled the way the desktop labels them, and a slider for each control you
 have chosen from that plugin. Press **Choose** on a slot to pick them: search by
 name, tap to add or remove, press **Done**.
 
+**Phone...** on a slot opens an editor for that instrument's controls: which
+parameters appear, what each is called on the phone, whether it is drawn as a
+fader or a switch, and what order they come in. A short label is worth setting
+-- "Growl" fits where "CC 3" tells you nothing, and nine drawbars only fit side
+by side because their labels are one character.
+
+### Sharing controls as a template
+
+The same editor saves a set of controls as a **template**, and exports it as a
+file you can send to someone else.
+
+This matters most for Kontakt and its like. Kontakt's parameters are generic
+MIDI controllers, so a host can only ever call them "CC 3" and "CC 21"; what
+they actually do depends on the library loaded into it, which Performer cannot
+see. Someone who owns that library works out once that CC 21 is the bark, labels
+them, and shares it. Everyone else gets those labels without the detective work.
+
+Templates are chosen by name and never applied automatically. Two instances of
+one plugin look identical from outside, so there is nothing to detect, and a
+wrong guess applied silently would be worse than being asked. When you apply
+one, Performer says how well it fits: how many of its controls the plugin still
+has, and how many it now calls something else. That last number is what a Rhodes
+template landing on a drum kit looks like.
+
 A control that has two positions gets an ON/OFF button; one with a handful --
 a drawbar has nine -- gets a fader that snaps to them and reads out the
 position, rather than a percentage that can never land on a real setting.

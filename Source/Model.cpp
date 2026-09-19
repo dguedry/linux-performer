@@ -84,9 +84,9 @@ var SlotDef::toVar() const
     // Only written when chosen, so setups that never used the phone are unchanged.
     if (! phoneControls.empty())
     {
-        Array<var> ids;
-        for (const auto& id : phoneControls) ids.add (id);
-        o->setProperty ("phoneControls", ids);
+        Array<var> arr;
+        for (const auto& c : phoneControls) arr.add (c.toVar());
+        o->setProperty ("phoneControls", arr);
     }
     return var (o);
 }
@@ -110,9 +110,18 @@ SlotDef SlotDef::fromVar (const var& v)
     s.effects    = effectsFromVar (v);
     if (auto* o = v.getDynamicObject())
         if (auto* arr = o->getProperty ("phoneControls").getArray())
-            for (const auto& id : *arr)
-                if (id.toString().isNotEmpty())
-                    s.phoneControls.push_back (id.toString());
+            for (const auto& c : *arr)
+            {
+                /* Written as bare ID strings before labels existed; accept both
+                   so a setup saved last week still loads. */
+                if (c.isString())
+                {
+                    if (c.toString().isNotEmpty())
+                        s.phoneControls.push_back ({ c.toString(), {}, {}, PhoneControl::Widget::automatic });
+                }
+                else if (auto ctl = PhoneControl::fromVar (c); ctl.paramId.isNotEmpty())
+                    s.phoneControls.push_back (ctl);
+            }
     return s;
 }
 
