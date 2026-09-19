@@ -289,6 +289,42 @@ public:
             list.repaintRow (owner.getEditedProgram());
         };
 
+        /* Groups are a label, never a container: a program's number is fixed by
+           MIDI Program Change, so a group cannot move or renumber anything. It
+           exists to make 128 rows findable. */
+        addAndMakeVisible (groupEditor);
+        groupEditor.setTextToShowWhenEmpty ("Group", textDim);
+        groupEditor.setTooltip ("Optional category -- Organs, Strings, Brass. Used to group this list "
+                                "and the phone app; it never changes a program's number.");
+        groupEditor.onTextChange = [this]
+        {
+            engine.setProgramGroup (owner.getSelectedInput(), owner.getEditedProgram(), groupEditor.getText());
+            list.repaint();
+        };
+        // Offer the groups already in use, so "Organ", "organs" and "Organ " do
+        // not become three different groups through typing alone.
+        groupEditor.onFocusLost = [this] { groupEditor.setText (groupEditor.getText().trim(), false); };
+        addAndMakeVisible (groupBtn);
+        groupBtn.setTooltip ("Pick a group already used on this input");
+        groupBtn.onClick = [this]
+        {
+            PopupMenu m;
+            const auto used = engine.getProgramGroups (owner.getSelectedInput());
+            const auto current = groupEditor.getText().trim();
+            m.addItem (1, "(no group)", true, current.isEmpty());
+            int id = 2;
+            for (const auto& gname : used) m.addItem (id++, gname, true, gname == current);
+            if (used.isEmpty()) m.addItem (-1, "No groups yet -- type one", false);
+
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (groupBtn),
+                             [this, used] (int choice)
+            {
+                if (choice <= 0) return;
+                const auto text = choice == 1 ? String() : used[choice - 2];
+                groupEditor.setText (text, true);
+            });
+        };
+
         addAndMakeVisible (copyBtn);
         addAndMakeVisible (pasteBtn);
         addAndMakeVisible (clearBtn);
@@ -310,7 +346,10 @@ public:
             const int p = inputs[(size_t) in].currentProgram;
             list.selectRow (p, false, true);
             nameEditor.setText (inputs[(size_t) in].programs[(size_t) p].name, dontSendNotification);
+            groupEditor.setText (inputs[(size_t) in].programs[(size_t) p].group, dontSendNotification);
         }
+        groupEditor.setEnabled (valid);
+        groupBtn.setEnabled (valid);
         list.updateContent();
         list.repaint();
     }
@@ -320,6 +359,11 @@ public:
         auto r = getLocalBounds().reduced (6);
         header.setBounds (r.removeFromTop (22));
         auto bottom = r.removeFromBottom (26);
+        r.removeFromBottom (4);
+        auto groupRow = r.removeFromBottom (24);
+        groupBtn.setBounds (groupRow.removeFromRight (28));
+        groupRow.removeFromRight (4);
+        groupEditor.setBounds (groupRow);
         r.removeFromBottom (4);
         nameEditor.setBounds (r.removeFromBottom (24));
         r.removeFromBottom (4);
@@ -353,6 +397,15 @@ public:
             g.setFont (FontOptions (11.0f));
             g.drawText (String (prog.slots.size()) + (prog.slots.size() == 1 ? " plugin" : " plugins"), w - 70, 0, 64, h, Justification::centredRight, true);
         }
+
+        // The group, dimmed and to the right of the name: visible when scanning
+        // the list, never competing with the program's own name.
+        if (prog.group.isNotEmpty())
+        {
+            g.setColour (Colour (0xff7f8896));
+            g.setFont (FontOptions (10.5f));
+            g.drawText (prog.group.toUpperCase(), 8, 0, w - 80, h, Justification::centredRight, true);
+        }
     }
 
     void listBoxItemClicked (int row, const MouseEvent&) override
@@ -367,7 +420,8 @@ private:
     MainComponent& owner;
     Label header { {}, "PROGRAMS" };
     ListBox list;
-    TextEditor nameEditor;
+    TextEditor nameEditor, groupEditor;
+    TextButton groupBtn { "v" };
     TextButton copyBtn { "Copy" }, pasteBtn { "Paste" }, clearBtn { "Clear" };
     int clipboard = -1;
 };

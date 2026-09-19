@@ -49,6 +49,8 @@ struct ProgramMap
           << "  td.name { font-size: 12pt; }\n"
           << "  td.what { font-size: 9pt; color: #555; text-align: right; }\n"
           << "  .none { font-size: 10pt; color: #777; font-style: italic; }\n"
+          << "  td.grp { font-size: 8.5pt; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;\n"
+          << "           color: #444; padding-top: 3mm; border-bottom: 0.8pt solid #888; }\n"
           << "  .qr { float: right; margin: -14mm 0 2mm 4mm; text-align: center; }\n"
           << "  .qrcap { font-size: 7.5pt; color: #555; margin-top: 1mm; line-height: 1.3; }\n"
           << "  @media print { body { margin: 10mm; } h2 { break-after: avoid; } tr { break-inside: avoid; } }\n"
@@ -71,14 +73,34 @@ struct ProgramMap
                   << escape (in.midiDeviceName) << (in.channel > 0 ? ", channel " + juce::String (in.channel) : juce::String (", omni")) << "</span>";
             h << "</h2>\n";
 
-            juce::String rows;
+            /* Grouped, but never reordered: the numbers must stay in order because
+               that is what you send from the keyboard, and a sheet where 007 sits
+               above 003 is a sheet you cannot read at a glance. Groups appear as
+               headings over runs, in the order they first occur. */
+            juce::StringArray order;
             for (int i = 0; i < InputDef::numPrograms; ++i)
             {
                 const auto& p = in.programs[(size_t) i];
                 if (p.isEmpty() && p.name.isEmpty()) continue;
-                rows << "<tr><td class=\"n\">" << juce::String (i).paddedLeft ('0', 3) << "</td>"
-                     << "<td class=\"name\">" << escape (p.name.isNotEmpty() ? p.name : "(unnamed)") << "</td>"
-                     << "<td class=\"what\">" << escape (summarise (p)) << "</td></tr>\n";
+                order.addIfNotAlreadyThere (p.group);
+            }
+
+            juce::String rows;
+            for (const auto& gname : order)
+            {
+                if (order.size() > 1)
+                    rows << "<tr><td class=\"grp\" colspan=\"3\">"
+                         << escape (gname.isNotEmpty() ? gname : "Other") << "</td></tr>\n";
+
+                for (int i = 0; i < InputDef::numPrograms; ++i)
+                {
+                    const auto& p = in.programs[(size_t) i];
+                    if (p.isEmpty() && p.name.isEmpty()) continue;
+                    if (p.group != gname) continue;
+                    rows << "<tr><td class=\"n\">" << juce::String (i).paddedLeft ('0', 3) << "</td>"
+                         << "<td class=\"name\">" << escape (p.name.isNotEmpty() ? p.name : "(unnamed)") << "</td>"
+                         << "<td class=\"what\">" << escape (summarise (p)) << "</td></tr>\n";
+                }
             }
             if (rows.isEmpty()) h << "<p class=\"none\">No programs yet.</p>\n";
             else                h << "<table>\n" << rows << "</table>\n";

@@ -151,6 +151,8 @@ var ProgramDef::toVar() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("name", name);
+    // Only written when set, so setups without groups stay byte-identical.
+    if (group.isNotEmpty()) o->setProperty ("group", group);
 
     Array<var> slotArr;
     for (auto& s : slots) slotArr.add (s.toVar());
@@ -167,6 +169,7 @@ ProgramDef ProgramDef::fromVar (const var& v)
 {
     ProgramDef p;
     p.name = propStr (v, "name");
+    p.group = propStr (v, "group");      // absent in setups written before groups
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("slots").getArray() : nullptr)
         for (auto& s : *arr) p.slots.push_back (SlotDef::fromVar (s));
     p.effects = effectsFromVar (v);

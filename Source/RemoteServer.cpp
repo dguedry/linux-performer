@@ -51,6 +51,13 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   button.p.on .n { color:#06121f; }
   /* Controls. Tall rows and a fat thumb: this is aimed at by a finger, on a
      stand, in bad light -- not clicked with a mouse. */
+  /* Group filters. Only drawn when the setup actually uses groups, so someone
+     who has not touched the feature sees exactly what they saw before. */
+  .groups { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+  .groups button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
+                   padding:9px 16px; font-size:13px; font-weight:700; letter-spacing:.02em; }
+  .groups button.on { background:var(--accent); color:#06121f; }
+
   .slots { margin-top:14px; }
   .slot { background:var(--panel); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
   .slot h2 { font-size:13px; color:var(--dim); letter-spacing:.06em; margin:0 0 10px; text-transform:uppercase;
@@ -160,7 +167,11 @@ async function api(path, opts) {
 }
 function show(msg) { const e = document.getElementById("err"); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
 
+let lastState = null;
+const filters = {};          // input index -> chosen group, "" for all
+
 function render(s) {
+  lastState = s;
   const root = document.getElementById("inputs");
   root.innerHTML = "";
   s.inputs.forEach((inp, i) => {
@@ -172,8 +183,31 @@ function render(s) {
     now.querySelector(".title").textContent = inp.currentName || "(empty)";
     if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "loading…"; now.appendChild(l); }
     wrap.appendChild(now);
+    /* Which group is being shown, per input. Kept across refreshes so a poll
+       does not throw you back to "All" while you are looking for a sound. */
+    const groups = [];
+    inp.programs.forEach(p => { if (p.group && !groups.includes(p.group)) groups.push(p.group); });
+
+    if (groups.length) {
+      const bar = document.createElement("div"); bar.className = "groups";
+      const mk = (label, value) => {
+        const b = document.createElement("button");
+        b.textContent = label;
+        if ((filters[i] || "") === value) b.className = "on";
+        b.onclick = () => { filters[i] = value; render(lastState); };
+        bar.appendChild(b);
+      };
+      mk("All", "");
+      groups.forEach(gname => mk(gname, gname));
+      if (inp.programs.some(p => !p.group)) mk("Other", "\u0000other");
+      wrap.appendChild(bar);
+    }
+
+    const active = filters[i] || "";
     const grid = document.createElement("div"); grid.className = "grid";
     inp.programs.forEach(p => {
+      if (active === "\u0000other") { if (p.group) return; }
+      else if (active && p.group !== active) return;
       const b = document.createElement("button");
       b.className = "p" + (p.index === inp.current ? " on" : "");
       b.innerHTML = '<span class="n"></span><span class="t"></span>';
@@ -580,6 +614,7 @@ String RemoteServer::stateJson() const
             DynamicObject::Ptr pd (new DynamicObject());
             pd->setProperty ("index", p);
             pd->setProperty ("name", def.name);
+            if (def.group.isNotEmpty()) pd->setProperty ("group", def.group);
             progs.add (var (pd.get()));
         }
         o->setProperty ("programs", progs);

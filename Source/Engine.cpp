@@ -459,6 +459,26 @@ void Engine::setProgramName (int inputIndex, int program, const String& name)
         setup.inputs[(size_t) inputIndex].programs[(size_t) program].name = name;
 }
 
+void Engine::setProgramGroup (int inputIndex, int program, const String& group)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    const auto trimmed = group.trim();
+    if (def.group == trimmed) return;
+    def.group = trimmed;
+    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+}
+
+StringArray Engine::getProgramGroups (int inputIndex) const
+{
+    StringArray out;
+    if (! validInput (inputIndex)) return out;
+    for (const auto& p : setup.inputs[(size_t) inputIndex].programs)
+        if (p.group.isNotEmpty())
+            out.addIfNotAlreadyThere (p.group);
+    return out;
+}
+
 void Engine::copyProgram (int inputIndex, int from, int to)
 {
     if (! validInput (inputIndex) || ! validProgram (from) || ! validProgram (to) || from == to) return;

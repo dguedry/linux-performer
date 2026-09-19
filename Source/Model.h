@@ -64,6 +64,14 @@ struct MappingDef
 struct ProgramDef
 {
     juce::String name;
+
+    /** Free-text category: "Organs", "Strings", "Brass". Purely a label for
+        finding things -- a program's number is fixed by MIDI Program Change, so
+        a group can never move or renumber it. Empty means ungrouped.
+
+        Per input, like everything else about a program: 007 on Upper has nothing
+        to do with 007 on Lower, and neither do their groups. */
+    juce::String group;
     std::vector<SlotDef> slots;
     std::vector<EffectDef> effects;   // program-level chain, applied to the summed slots
     std::vector<MappingDef> mappings;

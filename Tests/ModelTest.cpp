@@ -213,6 +213,52 @@ int main()
         }
     }
 
+    // ---- program groups --------------------------------------------------------
+    /* A group is a label, never a container: a program's number is fixed by MIDI
+       Program Change, so grouping must not move or renumber anything. */
+    {
+        Setup g;
+        g.inputs.resize (2);
+        g.inputs[0].programs[3].name  = "Jimmy";
+        g.inputs[0].programs[3].group = "Organs";
+        g.inputs[0].programs[7].name  = "Strings 1";
+        g.inputs[0].programs[7].group = "Strings";
+        g.inputs[0].programs[9].name  = "Ungrouped";
+        g.inputs[1].programs[3].name  = "Bass";
+        g.inputs[1].programs[3].group = "Basses";
+
+        const auto back = Setup::fromVar (g.toVar());
+        CHECK (back.inputs[0].programs[3].group == "Organs");
+        CHECK (back.inputs[0].programs[7].group == "Strings");
+        CHECK (back.inputs[0].programs[9].group.isEmpty());
+        CHECK (back.inputs[1].programs[3].group == "Basses");   // per input, not shared
+
+        // The number is the identity: a group must never shift it.
+        CHECK (back.inputs[0].programs[3].name == "Jimmy");
+        CHECK (back.inputs[0].programs[7].name == "Strings 1");
+
+        /* A setup saved before groups existed simply has no group key. Programs
+           are stored sparsely with an explicit "index", so find the entry by
+           that rather than by its position in the array. */
+        auto older = g.toVar();
+        if (auto* root = older.getDynamicObject())
+            if (auto* ins = root->getProperty ("inputs").getArray())
+                if (auto* in0 = (*ins)[0].getDynamicObject())
+                    if (auto* progs = in0->getProperty ("programs").getArray())
+                        for (auto& entry : *progs)
+                            if (auto* po = entry.getDynamicObject())
+                                if ((int) po->getProperty ("index") == 3)
+                                    po->removeProperty ("group");
+        CHECK (Setup::fromVar (older).inputs[0].programs[3].group.isEmpty());
+        CHECK (Setup::fromVar (older).inputs[0].programs[3].name == "Jimmy");
+
+        // The printed map groups without losing anything.
+        const auto html = ProgramMap::toHtml (g, "Grouped");
+        CHECK (html.contains ("Organs") && html.contains ("Strings"));
+        CHECK (html.contains ("Jimmy") && html.contains ("Ungrouped"));
+        CHECK (html.contains ("Other"));            // the ungrouped run is labelled
+    }
+
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

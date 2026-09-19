@@ -124,6 +124,24 @@ seconds). Preloading costs RAM: each plugin instance is a full copy.
 change, so held notes and reverbs fade naturally instead of being cut off.
 Four seconds is a good default.
 
+### Grouping programs
+
+Each program can carry a group: **Organs**, **Strings**, **Brass**, whatever
+suits your set. Type it in the box under the program name, or press the small
+button beside it to pick a group already in use on that input.
+
+A group is a label, not a folder. A program's number is fixed, because that is
+what your keyboard sends as a Program Change, so grouping never moves or
+renumbers anything. What it does is make 128 programs findable: the phone shows
+a row of group buttons to filter by, and the printed map prints each group as
+its own section.
+
+Groups belong to an input, like everything else about a program. Program 007 on
+Upper has nothing to do with 007 on Lower, and neither do their groups, so both
+keyboards can have their own "Keys" meaning different sounds. Programs with no
+group are listed under **Other**, never hidden, and if you use no groups at all
+nothing changes anywhere.
+
 ## Slots: instruments inside a program
 
 Each slot is one plugin instrument. The controls, left to right:

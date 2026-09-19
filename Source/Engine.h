@@ -90,6 +90,14 @@ public:
     // Programs
     void selectProgram (int inputIndex, int program);
     void setProgramName (int inputIndex, int program, const juce::String&);
+
+    /** The program's category ("Organs", "Strings"), or empty for ungrouped. */
+    void setProgramGroup (int inputIndex, int program, const juce::String&);
+
+    /** Every group name in use on this input, in the order the programs appear,
+        so a picker can offer what is already there rather than inviting
+        "Organ", "organs" and "Organ " as three separate groups. */
+    juce::StringArray getProgramGroups (int inputIndex) const;
     bool isProgramLoaded (int inputIndex, int program) const;
     void copyProgram (int inputIndex, int from, int to);
     void clearProgram (int inputIndex, int program);
