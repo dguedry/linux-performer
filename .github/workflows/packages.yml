@@ -11,12 +11,71 @@ permissions:
   contents: write
 
 jobs:
+  # A push to main cuts the next patch release in the same run: bump the version
+  # in CMakeLists.txt, tag it, and let the build jobs check out that commit.
+  #
+  # Without this, every push built a .deb and .rpm and then threw them away,
+  # because the release job below only runs for a tag. Nothing had been tagged
+  # since v0.1.0, so the "Download the latest release" link in the README kept
+  # serving packages from that day while the code moved on.
+  #
+  # Opt out by ending the commit SUBJECT with [no-release]. The bump commit puts
+  # that marker in its own subject, so it self-skips and cannot loop.
+  auto-tag:
+    name: Auto-tag next patch (push to main)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.cut.outputs.version }}
+      sha: ${{ steps.cut.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: cut
+        run: |
+          set -euo pipefail
+          SUBJECT="$(git log -1 --pretty=%s)"
+          case "$SUBJECT" in
+            *"[no-release]") echo "subject ends with [no-release]; not releasing"; exit 0 ;;
+          esac
+
+          CURRENT="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"
+          if [ -z "$CURRENT" ]; then echo "could not read PERFORMER_VERSION"; exit 1; fi
+          MAJOR="${CURRENT%%.*}"; REST="${CURRENT#*.}"
+          MINOR="${REST%%.*}";    PATCH="${REST#*.}"
+          VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "tag v$VERSION already exists; skipping"; exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          sed -i "s/^set(PERFORMER_VERSION \"[^\"]*\"/set(PERFORMER_VERSION \"$VERSION\"/" CMakeLists.txt
+          git add CMakeLists.txt
+          printf '%s\n\n%s\n' "Release $VERSION [no-release]" "$SUBJECT" | git commit -F -
+          git tag -a "v$VERSION" -m "Performer $VERSION"
+          git push origin HEAD:main
+          git push origin "v$VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "released v$VERSION"
+
   deb:
     name: Debian/Ubuntu package
+    needs: [auto-tag]
+    if: always() && (needs.auto-tag.result == 'success' || needs.auto-tag.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
+        with:
+          submodules: recursive
+          # On the auto-tag path, build the bump commit so the package carries
+          # the version that was just tagged rather than the one before it.
+          ref: ${{ needs.auto-tag.outputs.sha || github.sha }}
       - name: Build dependencies
         run: |
           sudo apt-get update
@@ -24,10 +83,13 @@ jobs:
             libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxext-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk \
             calf-plugins xvfb dpkg-dev file
-      - name: Version from tag
+      - name: Version
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "v=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "v=0.1.0" >> "$GITHUB_OUTPUT"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ needs.auto-tag.outputs.version }}" ]]; then V="${{ needs.auto-tag.outputs.version }}"
+          else V="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
+          echo "v=$V" >> "$GITHUB_OUTPUT"
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
       - name: Build
@@ -43,6 +105,8 @@ jobs:
 
   rpm:
     name: Fedora package
+    needs: [auto-tag]
+    if: always() && (needs.auto-tag.result == 'success' || needs.auto-tag.result == 'skipped')
     runs-on: ubuntu-latest
     container: fedora:41
     steps:
@@ -53,11 +117,16 @@ jobs:
             libXinerama-devel libXcursor-devel libXext-devel freetype-devel fontconfig-devel \
             mesa-libGL-devel ladspa-devel lv2-calf-plugins xorg-x11-server-Xvfb procps-ng
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
-      - name: Version from tag
+        with:
+          submodules: recursive
+          ref: ${{ needs.auto-tag.outputs.sha || github.sha }}
+      - name: Version
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "v=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "v=0.1.0" >> "$GITHUB_OUTPUT"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ needs.auto-tag.outputs.version }}" ]]; then V="${{ needs.auto-tag.outputs.version }}"
+          else V="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
+          echo "v=$V" >> "$GITHUB_OUTPUT"
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
       - name: Build
@@ -78,16 +147,22 @@ jobs:
 
   release:
     name: Attach packages to the release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, rpm]
+    # Either a tag was pushed by hand, or auto-tag just cut one in this run.
+    # Keying off the tag alone is what left the packages unpublished.
+    needs: [auto-tag, deb, rpm]
+    if: |
+      always() && needs.deb.result == 'success' && needs.rpm.result == 'success'
+      && (startsWith(github.ref, 'refs/tags/v') || needs.auto-tag.outputs.version != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with: { path: pkgs, merge-multiple: true }
       - name: Create or update the release
-        env: { GH_TOKEN: '${{ github.token }}' }
+        env:
+          GH_TOKEN: '${{ github.token }}'
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', needs.auto-tag.outputs.version) }}
         run: |
           ls -la pkgs
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Performer $GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Performer $TAG" --generate-notes
+          gh release upload "$TAG" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber
