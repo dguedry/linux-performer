@@ -328,6 +328,24 @@ one, Performer says how well it fits: how many of its controls the plugin still
 has, and how many it now calls something else. That last number is what a Rhodes
 template landing on a drum kit looks like.
 
+### Showing a plugin's own window
+
+**Window** on a slot opens that plugin's own interface on the phone, mirrored
+from the computer. Some plugins cannot be followed any other way. The parameters
+worth putting on a phone for a Kontakt library are its MIDI controller inputs:
+values go in, and nothing comes back. Asking Kontakt what CC 12 is set to
+returns whatever was last written to it, not where the drawbar actually sits, so
+a fader on the phone can drive that organ but can never follow it. Mirroring the
+window sidesteps that, because what you see is what the plugin is showing.
+
+This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
+any are missing. The stream stays on your own machine until the phone asks for
+it, and stops when Performer does.
+
+It is for setting up and adjusting rather than playing. A plugin window on a
+tablet is a picture of an interface built for a mouse, so expect to tap
+precisely and to miss sometimes.
+
 While the phone page is open, Performer asks the loaded plugins what their
 chosen controls are set to, about once a second, so the sliders follow the
 plugin as well as drive it. Some plugins never volunteer that: the parameters

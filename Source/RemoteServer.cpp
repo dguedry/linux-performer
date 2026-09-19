@@ -1,5 +1,6 @@
 #include "RemoteServer.h"
 #include "MappingSuggestions.h"
+#include "PluginView.h"
 #include "BinaryData.h"
 #include <juce_graphics/juce_graphics.h>
 
@@ -74,6 +75,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
              display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .slot h2 button { background:none; border:1px solid #3a3d47; color:var(--dim); border-radius:8px;
                     padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:.04em; }
+  .slot h2 { gap:6px; }
   /* Faders stand up and sit side by side, the way drawbars do on the organ
      itself: nine of them across one row instead of nine rows down the page.
      They wrap when there are more than fit, and fall back to one wide
@@ -330,7 +332,23 @@ async function loadSlots(i) {
     const nm = document.createElement("span"); nm.textContent = sl.name;
     const ed = document.createElement("button"); ed.textContent = "Choose";
     ed.onclick = () => openPicker(i, sl);
-    h.appendChild(nm); h.appendChild(ed);
+
+    /* The plugin's own window, mirrored. Some plugins cannot be followed any
+       other way -- Kontakt reports nothing when you move a drawbar in it -- so
+       this shows the real thing rather than a guess at its state. */
+    const win = document.createElement("button"); win.textContent = "Window";
+    win.onclick = async () => {
+      win.textContent = "...";
+      try {
+        const r = await api("/api/pluginview?input=" + i + "&slot=" + sl.slot, { method: "POST" });
+        win.textContent = "Window";
+        if (r.error) { show(r.error); return; }
+        window.open(location.protocol + "//" + location.hostname + ":" + r.port
+                    + "/vnc.html?autoconnect=1&resize=scale&path=websockify", "_blank");
+      } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
+    };
+
+    h.appendChild(nm); h.appendChild(win); h.appendChild(ed);
     box.appendChild(h);
 
     if (!sl.live) {
@@ -781,6 +799,7 @@ bool RemoteServer::start (int p)
 void RemoteServer::stop()
 {
     stopTimer();
+    PluginView::stopAll();      // no orphan x11vnc or websockify left behind
     running = false;
     if (listener != nullptr) listener->close();
     stopThread (2000);
@@ -1499,6 +1518,63 @@ void RemoteServer::handle (StreamingSocket& sock)
         o->setProperty ("cached", cached);
         o->setProperty ("plugin", live);
         o->setProperty ("ok", ok);
+        sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
+        return;
+    }
+    if (path.startsWith ("/api/pluginview"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot  = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+
+        /* Mirrors the plugin's own window. Needed because some plugins cannot be
+           followed any other way: Kontakt's host-visible parameters are MIDI
+           controller inputs, so reading one back gives what was last written to
+           it, never where the drawbar actually is. */
+        String title, error;
+        WaitableEvent ready;
+        MessageManager::callAsync ([this, input, slot, &title, &error, &ready]
+        {
+            const auto& setup = engine.getSetup();
+            if (input >= 0 && input < (int) setup.inputs.size())
+            {
+                const auto& in = setup.inputs[(size_t) input];
+                const int prog = in.currentProgram;
+                const auto& def = in.programs[(size_t) prog];
+                if (slot >= 0 && slot < (int) def.slots.size())
+                {
+                    auto* plugin = engine.getPlugin (input, prog, slot, -1);
+                    if (plugin == nullptr || ! plugin->isAlive())
+                        error = "That plugin is not running.";
+                    else if (! plugin->isEditorOpen() && ! plugin->showEditor (
+                                 in.name + " / " + String (prog).paddedLeft ('0', 3)
+                                 + "  " + def.name + " / " + plugin->getName()))
+                        error = "Could not open that plugin's window.";
+                    else
+                        title = in.name + " / " + String (prog).paddedLeft ('0', 3)
+                              + "  " + def.name + " / " + plugin->getName();
+                }
+            }
+            ready.signal();
+        });
+        ready.wait (20000);
+
+        DynamicObject::Ptr o (new DynamicObject());
+        if (error.isNotEmpty() || title.isEmpty())
+        {
+            o->setProperty ("error", error.isNotEmpty() ? error : String ("No plugin in that slot."));
+        }
+        else
+        {
+            String startError;
+            // Give the window a moment to appear before looking for it.
+            for (int i = 0; i < 20 && PluginView::findWindow (title) == 0; ++i)
+                Thread::sleep (100);
+
+            const auto session = PluginView::start (title, startError);
+            if (! session.isValid()) o->setProperty ("error", startError);
+            else                     o->setProperty ("port", session.webPort);
+        }
         sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
         return;
     }
