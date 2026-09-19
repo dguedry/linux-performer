@@ -67,6 +67,11 @@ public:
     float getCachedParameterValue (int index) const;
     /** Round trip to the plugin for the current value. */
     bool fetchParameterValue (int index, float& value);
+
+    /** The same, but gives up almost immediately. For polling on the message
+        thread, where a plugin that has stopped answering must cost a frame
+        rather than freeze the window for the usual ten-second timeout. */
+    bool pollParameterValue (int index, float& value);
     /** Non-realtime set (UI / tests). */
     bool setParameterValue (int index, float value);
 

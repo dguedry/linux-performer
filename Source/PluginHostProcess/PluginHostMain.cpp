@@ -379,8 +379,22 @@ private:
            why a plugin changing its own program left the phone showing stale
            drawbars: Hammond B-3X reports a program change from one of its own
            worker threads, so every one of those updates was thrown away. */
-        if (suppressNotifications.load (std::memory_order_relaxed)) return;
-        if (Thread::getCurrentThreadId() == audioThreadId.load (std::memory_order_relaxed)) return;
+        const bool suppressed = suppressNotifications.load (std::memory_order_relaxed);
+        const bool onAudio = Thread::getCurrentThreadId() == audioThreadId.load (std::memory_order_relaxed);
+
+        /* Log every one, including the ones we drop, with the parameter's name:
+           "does this plugin report its own edits" cannot be answered without
+           seeing what it reports and what we discard. */
+        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+        {
+            String pname;
+            if (instance != nullptr)
+                if (auto* p = paramAt (index)) pname = p->getName (64);
+            std::fprintf (stderr, "[param] %d '%s' = %.3f  suppressed=%d audioThread=%d\n",
+                          index, pname.toRawUTF8(), value, (int) suppressed, (int) onAudio);
+        }
+
+        if (suppressed || onAudio) return;
 
         MemoryOutputStream out; out.writeInt (index); out.writeFloat (value);
         notify (ipc::Msg::notifyParamChanged, out);

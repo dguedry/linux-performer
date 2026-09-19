@@ -21,6 +21,7 @@ namespace perf
     It is not protection against someone who can read your screen, which is the
     right level for a stage tool. */
 class RemoteServer : private juce::Thread,
+                     private juce::Timer,
                      private Engine::Listener
 {
 public:
@@ -58,6 +59,18 @@ public:
 private:
     void run() override;
     void handle (juce::StreamingSocket&);
+    /* Some plugins never tell the host when their own controls move. Kontakt is
+       the case that forced this: the parameters worth putting on a phone are its
+       MIDI controller inputs, and a plugin has no reason to push a value back
+       out through an input, so moving a drawbar in its window is silent. Asking
+       is the only way to know.
+
+       Only the controls actually on the phone, and only while someone is
+       looking: a readback is well under a millisecond, but doing it for
+       thousands of parameters nobody is watching would be waste. */
+    void timerCallback() override;
+    void pollVisibleControls();
+
     void migrateFavouritesToSlots();
     juce::String stateJson() const;
     juce::String slotsJson (int inputIndex) const;
@@ -85,6 +98,10 @@ private:
        positions, not rebuild the page and throw away which group is filtered
        or which slot's picker is open. */
     std::atomic<int> paramRevision { 0 };
+    /* When the page last asked for anything. Polling stops shortly after the
+       last phone goes away, so a rig left running does not keep interrogating
+       its plugins forever. */
+    std::atomic<double> lastPageRequest { 0.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RemoteServer)
 };

@@ -328,6 +328,13 @@ one, Performer says how well it fits: how many of its controls the plugin still
 has, and how many it now calls something else. That last number is what a Rhodes
 template landing on a drum kit looks like.
 
+While the phone page is open, Performer asks the loaded plugins what their
+chosen controls are set to, about once a second, so the sliders follow the
+plugin as well as drive it. Some plugins never volunteer that: the parameters
+worth putting on a phone for a Kontakt library are its MIDI controller inputs,
+and a plugin has no reason to report a value back out through an input. Asking
+is the only way to know. It stops a few seconds after the last phone goes away.
+
 A control that has two positions gets an ON/OFF button; one with a handful --
 a drawbar has nine -- gets a fader that snaps to them and reads out the
 position, rather than a percentage that can never land on a real setting.

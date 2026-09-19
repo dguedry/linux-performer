@@ -290,6 +290,21 @@ bool RemotePlugin::fetchParameterValue (int index, float& value)
     return true;
 }
 
+bool RemotePlugin::pollParameterValue (int index, float& value)
+{
+    MemoryOutputStream out;
+    out.writeInt (index);
+    MemoryBlock resp;
+    // 60ms: far longer than a healthy plugin needs, short enough that a wedged
+    // one cannot make the interface stutter noticeably.
+    if (! request (ipc::Msg::getParameterValue, out.getMemoryBlock(), 60, &resp)) return false;
+    MemoryInputStream in (resp, false);
+    value = in.readFloat();
+    if (paramValues != nullptr && index >= 0 && index < (int) params.size())
+        paramValues[(size_t) index].store (value);
+    return true;
+}
+
 bool RemotePlugin::setParameterValue (int index, float value)
 {
     if (paramValues != nullptr && index >= 0 && index < (int) params.size())

@@ -665,6 +665,63 @@ RemoteServer::~RemoteServer()
     after an update and find them gone -- the data is still on disk, just keyed
     by plugin rather than by slot. Runs once per slot: a slot that has anything
     of its own is left alone. */
+void RemoteServer::timerCallback()
+{
+    /* Stop once nobody is looking. The page polls every second, so a few
+       seconds of silence means the phone is closed, asleep or out of range. */
+    if (Time::getMillisecondCounterHiRes() - lastPageRequest.load() > 5000.0) return;
+    pollVisibleControls();
+}
+
+void RemoteServer::pollVisibleControls()
+{
+    const auto& setup = engine.getSetup();
+    bool anyChanged = false;
+    int polled = 0;
+
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    {
+        const auto& in = setup.inputs[(size_t) i];
+        const int prog = in.currentProgram;
+        const auto& def = in.programs[(size_t) prog];
+
+        for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
+        {
+            const auto& chosen = def.slots[(size_t) sIdx].phoneControls;
+            if (chosen.empty()) continue;
+
+            auto* plugin = engine.getPlugin (i, prog, sIdx, -1);
+            if (plugin == nullptr || ! plugin->isAlive()) continue;
+
+            const auto& params = plugin->getParameters();
+            for (const auto& ctl : chosen)
+            {
+                const int idx = findParamIndex (params, ctl.paramId);
+                if (idx < 0) continue;
+
+                const float before = plugin->getCachedParameterValue (idx);
+                float now = before;
+                if (! plugin->pollParameterValue (idx, now)) continue;    // busy or gone
+
+                /* A real move, not float noise. Without a threshold a plugin
+                   that jitters in its last bits would bump the revision every
+                   tick and make the page refetch forever. */
+                ++polled;
+                if (std::abs (now - before) > 0.0005f)
+                    anyChanged = true;
+            }
+        }
+    }
+
+    /* Kept behind the switch: "is polling running, and is it seeing anything"
+       is the first question when a control does not follow. */
+    if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+        std::fprintf (stderr, "[poll] read %d control(s), changed=%d\n", polled, (int) anyChanged);
+
+    if (anyChanged)
+        ++paramRevision;
+}
+
 void RemoteServer::migrateFavouritesToSlots()
 {
     auto setup = engine.getSetup();
@@ -714,6 +771,8 @@ bool RemoteServer::start (int p)
     }
     port = p;
     migrateFavouritesToSlots();
+    lastPageRequest.store (Time::getMillisecondCounterHiRes());
+    startTimer (700);          // between the page's 1s poll and a usable feel
     running = true;
     startThread();
     return true;
@@ -721,6 +780,7 @@ bool RemoteServer::start (int p)
 
 void RemoteServer::stop()
 {
+    stopTimer();
     running = false;
     if (listener != nullptr) listener->close();
     stopThread (2000);
@@ -1278,6 +1338,10 @@ void RemoteServer::handle (StreamingSocket& sock)
         // The page itself is harmless without a token; the API is not.
         if (path.startsWith ("/api/")) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
     }
+
+    // Any request means a page is watching, which is what keeps polling alive.
+    if (path.startsWith ("/api/"))
+        lastPageRequest.store (Time::getMillisecondCounterHiRes());
 
     if (path.startsWith ("/api/state"))
     {
