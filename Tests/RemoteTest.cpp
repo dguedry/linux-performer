@@ -10,6 +10,7 @@
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "QrCode.h"
+#include "PhoneTemplate.h"
 #include "BinaryData.h"
 #include "Favourites.h"
 #include "Engine.h"
@@ -439,6 +440,107 @@ int main()
             rs.stop();
         }
         else std::cout << "skip parameter-revision check (could not bind)" << std::endl;
+        dir.deleteRecursively();
+    }
+
+    // ---- phone templates -------------------------------------------------------
+    /* Made to be shared, so the file format matters more than the code around
+       it: a template someone posts today has to still load in a year. */
+    {
+        auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-templates");
+        dir.deleteRecursively(); dir.createDirectory();
+
+        perf::PhoneTemplate t;
+        t.name = "Scarbee Rhodes";
+        t.pluginName = "Kontakt 8";
+        t.pluginKey = "VST3-Kontakt 8-61884ed3-f852a294";
+        t.author = "someone";
+        t.notes = "CC 21 is the bark";
+        t.controls.push_back ({ "1295059456", "Pan(MSB)", "Pan", perf::PhoneControl::Widget::automatic });
+        t.controls.push_back ({ "1295057664", "CC 3", "Growl", perf::PhoneControl::Widget::fader });
+        t.controls.push_back ({ "1295061000", "CC 21", "Vibrato", perf::PhoneControl::Widget::sw });
+
+        // Round trip through the wire format.
+        const auto back = perf::PhoneTemplate::fromVar (t.toVar());
+        check (back.name == "Scarbee Rhodes", "the name survives");
+        check (back.controls.size() == 3, "every control survives");
+        check (back.controls[1].label == "Growl", "a custom label survives");
+        check (back.controls[1].widget == perf::PhoneControl::Widget::fader, "a forced fader survives");
+        check (back.controls[2].widget == perf::PhoneControl::Widget::sw, "a forced switch survives");
+        check (back.controls[0].widget == perf::PhoneControl::Widget::automatic, "automatic is the default");
+        check (back.notes == "CC 21 is the bark", "notes survive, for whoever applies it");
+
+        // A file someone can send.
+        const auto f = dir.getChildFile ("rhodes.performer-template.json");
+        check (perf::PhoneTemplates::exportToFile (t, f).wasOk(), "a template exports to a file");
+
+        perf::PhoneTemplate imported;
+        check (perf::PhoneTemplates::importFromFile (f, imported).wasOk(), "and imports again");
+        check (imported.controls.size() == 3, "with its controls intact");
+        check (imported.pluginKey == t.pluginKey, "and the plugin it was made for");
+
+        // Things people will actually do by mistake.
+        const auto wrong = dir.getChildFile ("setup.json");
+        wrong.replaceWithText ("{\"inputs\":[]}");
+        perf::PhoneTemplate dummy;
+        check (perf::PhoneTemplates::importFromFile (wrong, dummy).failed(),
+               "a file that is not a template is refused");
+
+        const auto broken = dir.getChildFile ("broken.json");
+        broken.replaceWithText ("not json at all");
+        check (perf::PhoneTemplates::importFromFile (broken, dummy).failed(), "so is a broken file");
+
+        const auto missing = dir.getChildFile ("nope.json");
+        check (perf::PhoneTemplates::importFromFile (missing, dummy).failed(), "so is one that is not there");
+
+        // A template from a future version must be refused, not half-read.
+        auto futureVar = t.toVar();
+        if (auto* o = futureVar.getDynamicObject()) o->setProperty ("version", 99);
+        const auto future = dir.getChildFile ("future.json");
+        future.replaceWithText (JSON::toString (futureVar, false));
+        check (perf::PhoneTemplates::importFromFile (future, dummy).failed(),
+               "a newer template version is refused rather than misread");
+
+        // The library on this machine.
+        {
+            perf::PhoneTemplates lib (dir.getChildFile ("templates.json"));
+            check (lib.all().empty(), "the library starts empty");
+            lib.put (t);
+            check (lib.all().size() == 1, "a template is stored");
+            lib.put (t);
+            check (lib.all().size() == 1, "storing the same name replaces rather than duplicates");
+            check (lib.contains ("Scarbee Rhodes"), "and can be found by name");
+        }
+        {
+            perf::PhoneTemplates lib (dir.getChildFile ("templates.json"));
+            check (lib.all().size() == 1, "templates survive a restart");
+            lib.remove ("Scarbee Rhodes");
+            check (lib.all().empty(), "and can be removed");
+        }
+
+        // Does this template fit the plugin in front of us?
+        {
+            perf::ParamInfoList params;
+            params.push_back ({ 0, "1295059456", "Pan(MSB)" });
+            params.push_back ({ 1, "1295057664", "CC 3" });
+            // The third control's parameter is missing entirely.
+            const auto fit = t.checkAgainst (params);
+            check (fit.matched == 2, "controls the plugin still has are matched");
+            check (fit.missing == 1, "and a missing one is reported");
+            check (fit.summary().contains ("missing"), "the summary says so in words");
+        }
+        {
+            // The right IDs, but the plugin calls one something else: what
+            // applying a Rhodes template to a drum kit looks like.
+            perf::ParamInfoList params;
+            params.push_back ({ 0, "1295059456", "Pan(MSB)" });
+            params.push_back ({ 1, "1295057664", "Kick Tune" });
+            params.push_back ({ 2, "1295061000", "Snare" });
+            const auto fit = t.checkAgainst (params);
+            check (fit.renamed == 2, "renamed parameters are counted separately");
+            check (fit.missing == 0, "they are present, just different");
+        }
+
         dir.deleteRecursively();
     }
 
