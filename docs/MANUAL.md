@@ -304,6 +304,14 @@ on, labelled the way the desktop labels them, and a slider for each control you
 have chosen from that plugin. Press **Choose** on a slot to pick them: search by
 name, tap to add or remove, press **Done**.
 
+A control that has two positions gets an ON/OFF button; one with a handful --
+a drawbar has nine -- gets a fader that snaps to them and reads out the
+position, rather than a percentage that can never land on a real setting.
+Anything else gets an ordinary fader. Plugins are unreliable about saying which
+is which, so Performer uses the number of positions the plugin reports rather
+than its claim about being a switch: Hammond B-3X calls every one of its
+parameters continuous, including the ones labelled Switch.
+
 Choices are remembered per plugin, not per program. Pick the drawbars on a
 Hammond B-3X once and they are there in every program that loads it, and in
 every setup. They are stored by the plugin's own parameter ID, so an updated
@@ -407,8 +415,8 @@ A footswitch is the usual choice; most send CC 64 or CC 80. That controller
 works on any input and in any program, so it taps the tempo whatever you happen
 to be playing, and only the press counts, not the release.
 
-The phone app shows the tempo too, with its own TAP button, so you can set it
-from the music stand. Tapping there is as accurate as tapping on the laptop:
+The phone app shows the tempo and a TAP button in its header, beside PANIC, so
+you can set it from the music stand without giving up screen space to it. Tapping there is as accurate as tapping on the laptop:
 the timing is measured where the tempo lives rather than on the phone, and a
 local network adds about three milliseconds, far below what a finger can
 control.

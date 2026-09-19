@@ -229,6 +229,7 @@ bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int b
             p.automatable = in.readBool();
             p.discrete = in.readBool();
             p.boolean = in.readBool();
+            p.numSteps = in.readInt();
             p.value = in.readFloat();
             p.midiChannel = in.readInt();
             p.midiController = in.readInt();

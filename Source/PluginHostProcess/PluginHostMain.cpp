@@ -202,6 +202,11 @@ private:
                     out.writeBool (p->isAutomatable());
                     out.writeBool (p->isDiscrete());
                     out.writeBool (p->isBoolean());
+                    // How many positions the parameter has, when it says. A
+                    // two-step parameter is a switch whatever isBoolean claims:
+                    // B-3X reports every one of its drawbars and switches as
+                    // continuous and non-boolean.
+                    out.writeInt (p->getNumSteps());
                     out.writeFloat (p->getValue());
                     const auto& a = midi[(size_t) p->getParameterIndex()];
                     out.writeInt (a.channel);

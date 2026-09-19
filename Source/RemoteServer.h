@@ -43,6 +43,12 @@ public:
         ("#000", "<unassigned>", "MIDI CC 0|3"). Plugins spell these differently
         and none flag them, so this is a heuristic; public so it can be tested. */
     static bool isPlaceholderName (const juce::String& name);
+
+    /** True when a parameter is a switch rather than something to sweep.
+        Plugins are unreliable about saying so -- Hammond B-3X reports its
+        switches as continuous -- so this also uses the step count and the name.
+        Public so it can be tested. */
+    static bool isSwitchLike (bool boolFlag, int numSteps, const juce::String& name);
     juce::String getToken() const          { return token; }
 
     /** The per-plugin chosen parameters, shared with the desktop so both views

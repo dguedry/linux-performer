@@ -53,16 +53,15 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      stand, in bad light -- not clicked with a mouse. */
   /* Group filters. Only drawn when the setup actually uses groups, so someone
      who has not touched the feature sees exactly what they saw before. */
-  /* Tempo. A big tap target at the top, because tapping is the point and a
-     stand is not a place for precision. */
-  .tempo { display:flex; align-items:center; gap:12px; background:var(--panel);
-           border-radius:12px; padding:10px 12px; margin-bottom:10px; }
-  .tempo .bpm { font-size:26px; font-weight:800; color:var(--accent);
-                font-variant-numeric:tabular-nums; min-width:104px; }
-  .tempo .bpm span { font-size:13px; color:var(--dim); font-weight:600; margin-left:4px; }
-  .tempo button { flex:1; background:var(--row); color:#fff; border:0; border-radius:10px;
-                  padding:16px; font-size:17px; font-weight:700; }
-  .tempo button:active { background:var(--accent); color:#06121f; }
+  /* Tempo lives in the header beside PANIC: it is worth a glance and a tap, not
+     a band across the top of the screen. */
+  .hdr { display:flex; align-items:center; gap:8px; }
+  .hdr .bpm { font-size:15px; font-weight:800; color:var(--accent);
+              font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .hdr .bpm i { font-size:10px; color:var(--dim); font-style:normal; font-weight:600; margin-left:2px; }
+  #tap { background:var(--row); color:#fff; border:0; border-radius:8px;
+         padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
+  #tap:active { background:var(--accent); color:#06121f; }
 
   .groups { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
   .groups button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
@@ -75,18 +74,25 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
              display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .slot h2 button { background:none; border:1px solid #3a3d47; color:var(--dim); border-radius:8px;
                     padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:.04em; }
-  .ctl { margin:14px 0; }
-  .ctl .lab { display:flex; justify-content:space-between; font-size:15px; margin-bottom:8px; gap:10px; }
-  .ctl .lab .v { color:var(--dim); font-variant-numeric:tabular-nums; }
-  .ctl input[type=range] { width:100%; height:38px; -webkit-appearance:none; appearance:none; background:transparent; }
-  .ctl input[type=range]::-webkit-slider-runnable-track { height:10px; border-radius:5px; background:var(--row); }
-  .ctl input[type=range]::-moz-range-track { height:10px; border-radius:5px; background:var(--row); }
-  .ctl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:34px; height:34px; margin-top:-12px;
+  /* Controls are compact: the label and value share one line with the fader
+     rather than sitting above it, so nine drawbars fit on a phone screen
+     instead of four. Still a 28px thumb -- this is aimed at with a finger. */
+  .ctl { margin:9px 0; }
+  .ctl .lab { display:flex; justify-content:space-between; font-size:13px; margin-bottom:2px; gap:10px; }
+  .ctl .lab .v { color:var(--dim); font-variant-numeric:tabular-nums; font-size:12px; }
+  .ctl input[type=range] { width:100%; height:26px; -webkit-appearance:none; appearance:none; background:transparent; }
+  .ctl input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--row); }
+  .ctl input[type=range]::-moz-range-track { height:6px; border-radius:3px; background:var(--row); }
+  .ctl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px; margin-top:-10px;
       border-radius:50%; background:var(--accent); border:0; }
-  .ctl input[type=range]::-moz-range-thumb { width:34px; height:34px; border-radius:50%; background:var(--accent); border:0; }
-  .sw { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-  .sw button { border:0; border-radius:10px; padding:12px 20px; font-size:15px; font-weight:700;
-               background:var(--row); color:#fff; min-width:92px; }
+  .ctl input[type=range]::-moz-range-thumb { width:26px; height:26px; border-radius:50%; background:var(--accent); border:0; }
+
+  /* Switches sit on one row, two to a line where they fit: an organ has a lot
+     of them and each one only needs to say on or off. */
+  .sw { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:7px 0; }
+  .sw .nm { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sw button { border:0; border-radius:8px; padding:7px 0; font-size:12px; font-weight:800;
+               background:var(--row); color:var(--dim); width:62px; flex:none; letter-spacing:.04em; }
   .sw button.on { background:var(--accent); color:#06121f; }
   .empty { color:var(--dim); font-size:14px; margin:6px 0 2px; }
 
@@ -124,7 +130,14 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                  border-radius:12px; padding:16px; font-size:17px; font-weight:700; }
 </style></head>
 <body>
-<header><h1>PERFORMER</h1><button id="panic">PANIC</button></header>
+<header>
+  <h1>PERFORMER</h1>
+  <div class="hdr">
+    <span class="bpm" id="bpm">--<i>bpm</i></span>
+    <button id="tap">TAP</button>
+    <button id="panic">PANIC</button>
+  </div>
+</header>
 <div id="err"></div>
 <div id="gate">
   <form id="codeform">
@@ -133,10 +146,6 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
     <button type="submit">Connect</button>
     <p class="hint" id="gatemsg"></p>
   </form>
-</div>
-<div class="tempo" id="tempo">
-  <div class="bpm" id="bpm">--<span>bpm</span></div>
-  <button id="tap">TAP</button>
 </div>
 <div id="inputs"></div>
 <div id="pick">
@@ -160,7 +169,7 @@ document.getElementById("tap").onclick = async () => {
 
 function showTempo(bpm) {
   document.getElementById("bpm").innerHTML =
-    (Math.round(bpm * 10) / 10).toFixed(1) + '<span>bpm</span>';
+    (Math.round(bpm * 10) / 10).toFixed(1) + '<i>bpm</i>';
 }
 
 let picking = null;          // the slot whose controls are being chosen, if any
@@ -304,9 +313,9 @@ function control(i, sl, pr) {
 
   if (pr.boolean) {
     const row = document.createElement("div"); row.className = "sw";
-    const lab = document.createElement("span"); lab.textContent = pr.name;
+    const lab = document.createElement("span"); lab.className = "nm"; lab.textContent = pr.name;
     const b = document.createElement("button");
-    const paint = v => { b.textContent = v >= 0.5 ? "On" : "Off"; b.className = v >= 0.5 ? "on" : ""; };
+    const paint = v => { b.textContent = v >= 0.5 ? "ON" : "OFF"; b.className = v >= 0.5 ? "on" : ""; };
     paint(pr.value);
     b.onclick = async () => {
       const next = (b.className === "on") ? 0 : 1;
@@ -323,10 +332,21 @@ function control(i, sl, pr) {
   const vv = document.createElement("span"); vv.className = "v";
   lab.appendChild(nm); lab.appendChild(vv);
 
+  /* A parameter with a handful of positions -- a drawbar has nine -- gets a
+     fader that snaps to them and reads out the position, rather than a
+     percentage that can never land on a real setting. */
+  const stepped = pr.steps > 1 && pr.steps <= 32;
   const r = document.createElement("input");
-  r.type = "range"; r.min = 0; r.max = 1000; r.step = 1;
-  r.value = Math.round(pr.value * 1000);
-  vv.textContent = Math.round(pr.value * 100) + "%";
+  r.type = "range";
+  r.min = 0;
+  r.max = stepped ? pr.steps - 1 : 1000;
+  r.step = 1;
+  r.value = stepped ? Math.round(pr.value * (pr.steps - 1)) : Math.round(pr.value * 1000);
+
+  const readOut = () => stepped ? String(r.value)
+                                : Math.round(r.value / 10) + "%";
+  const normalised = () => stepped ? (r.value / (pr.steps - 1)) : (r.value / 1000);
+  vv.textContent = readOut();
 
   /* Send while dragging so it feels live, but no faster than the plugin can
      keep up with: a finger drag fires far more events than are useful, and
@@ -335,10 +355,10 @@ function control(i, sl, pr) {
   const send = async () => {
     pendingTimer = null;
     lastSent = Date.now();
-    try { await setParam(i, sl, pr.id, r.value / 1000); } catch (e) { show(e.message); }
+    try { await setParam(i, sl, pr.id, normalised()); } catch (e) { show(e.message); }
   };
   r.oninput = () => {
-    vv.textContent = Math.round(r.value / 10) + "%";
+    vv.textContent = readOut();
     if (pendingTimer) return;
     const wait = Math.max(0, 40 - (Date.now() - lastSent));
     pendingTimer = setTimeout(send, wait);
@@ -692,6 +712,34 @@ bool RemoteServer::isPlaceholderName (const String& name)
     return false;
 }
 
+/** Is this parameter a switch rather than something to sweep?
+
+    Plugins are unreliable about saying so. Hammond B-3X reports every one of
+    its parameters as non-boolean and continuous, including "Volume Switch" and
+    "Percussion Switch", so trusting isBoolean alone gives a fader for something
+    with two positions.
+
+    Two steps is the strong signal. Failing that, a name that ends in "Switch"
+    or reads like on/off is a good guess -- and a wrong guess is cheap here,
+    since a switch shown as a fader still works and vice versa. */
+bool RemoteServer::isSwitchLike (bool boolFlag, int numSteps, const String& name)
+{
+    if (boolFlag) return true;
+    if (numSteps == 2) return true;
+
+    const auto n = name.trim();
+    if (n.endsWithIgnoreCase (" switch") || n.endsWithIgnoreCase (" on/off")
+        || n.endsWithIgnoreCase (" enable") || n.endsWithIgnoreCase (" bypass")
+        || n.equalsIgnoreCase ("bypass") || n.endsWithIgnoreCase (" mute"))
+        return true;
+    return false;
+}
+
+static bool looksLikeSwitch (const ParamInfo& p)
+{
+    return RemoteServer::isSwitchLike (p.boolean, p.numSteps, p.name);
+}
+
 /** Human name for a VST3 controller number, matching the desktop picker. */
 static String controllerLabel (int controller)
 {
@@ -755,7 +803,8 @@ String RemoteServer::slotsJson (int inputIndex) const
                     pd->setProperty ("id", info->id);
                     pd->setProperty ("name", info->name);
                     pd->setProperty ("value", plugin->getCachedParameterValue (idx));
-                    pd->setProperty ("boolean", info->boolean);
+                    pd->setProperty ("boolean", looksLikeSwitch (*info));
+                    pd->setProperty ("steps", info->numSteps);
                     sliders.add (var (pd.get()));
                 }
             }
@@ -904,7 +953,8 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
                 pd->setProperty ("detail", controllerLabel (info.midiController)
                                              + (info.midiChannel > 0 ? " (ch " + String (info.midiChannel) + ")" : String()));
                 pd->setProperty ("value", plugin->getCachedParameterValue (info.index));
-                pd->setProperty ("boolean", info.boolean);
+                pd->setProperty ("boolean", looksLikeSwitch (info));
+                pd->setProperty ("steps", info.numSteps);
                 pd->setProperty ("chosen", chosen);
                 out.add (var (pd.get()));
             }

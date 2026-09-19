@@ -362,6 +362,29 @@ int main()
         check (! ph ("#hashtag"), "a # name that is not all digits is kept");
     }
 
+    // ---- switch or fader? ------------------------------------------------------
+    /* Plugins are unreliable about saying which is which. Hammond B-3X reports
+       every parameter as non-boolean and continuous, including "Volume Switch",
+       but it does report step counts -- two for its switches, nine for its
+       drawbars -- so the step count is the signal worth trusting. */
+    {
+        auto sw = [] (bool b, int steps, const char* n)
+                  { return perf::RemoteServer::isSwitchLike (b, steps, n); };
+
+        check (sw (true, 0, "Anything"), "a plugin that says boolean is believed");
+        check (sw (false, 2, "Percussion Switch"), "two steps is a switch whatever the plugin claims");
+        check (! sw (false, 9, "Upper Drawbar 1"), "a nine-position drawbar is not a switch");
+        check (! sw (false, 0, "Leslie Speed"), "a continuous control is not a switch");
+        check (! sw (false, 6, "Vibrato and Chorus"), "a six-position selector is not a switch");
+
+        // Names, for plugins that report nothing useful at all.
+        check (sw (false, 0, "Volume Switch"), "a name ending in Switch is a switch");
+        check (sw (false, 0, "Bypass"), "Bypass is a switch");
+        check (sw (false, 0, "Reverb Enable"), "a name ending in Enable is a switch");
+        check (! sw (false, 0, "Switch Time"), "a name merely starting with Switch is not");
+        check (! sw (false, 0, "Drawbar 3"), "an ordinary name is not a switch");
+    }
+
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
     return failures == 0 ? 0 : 1;
 }
