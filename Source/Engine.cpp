@@ -300,6 +300,8 @@ double Engine::tapTempo()
 
 void Engine::resetTapTempo() { tapTimes.clear(); }
 
+void Engine::armTapTempoLearn (bool b) { tapLearnArmed.store (b); }
+
 void Engine::setTapTempoCC (int cc)
 {
     setup.tapTempoCC = jlimit (0, 127, cc);
@@ -1306,6 +1308,11 @@ void Engine::handleAsyncUpdate()
                 selectProgram (e.input, e.a);
                 break;
 
+            case Event::tapLearn:
+                setTapTempoCC (e.a);
+                listeners.call ([cc = e.a] (Listener& l) { l.tapTempoLearned (cc); });
+                break;
+
             case Event::tapTempo:
                 if (const double bpm = tapTempo(); bpm > 0.0)
                     listeners.call ([bpm] (Listener& l)
@@ -1436,9 +1443,20 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
 
     // Program Change is filtered on its own channel, which is not always the one the
     // keyboard plays on, so this is tested before the note filter would drop it.
-    /* Tap tempo first, and outside the channel filter: the tempo belongs to the
-       rig, so a footswitch taps it whatever this input is set to play on and
-       whatever program is loaded. Only the press counts, not the release. */
+    /* Learning the tap controller comes first, and outside the channel filter
+       for the same reason the tap itself is: the pedal you press to teach it is
+       the pedal you will press to use it, whatever channel it happens to send
+       on. Ahead of the tap check so an assigned controller can be reassigned. */
+    if (tapLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        tapLearnArmed.store (false);
+        postEvent ({ Event::tapLearn, i, m.getControllerNumber(), 0, 0, 0 });
+        return;
+    }
+
+    /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
+       footswitch taps it whatever this input is set to play on and whatever
+       program is loaded. Only the press counts, not the release. */
     if (const int tap = tapCC.load (std::memory_order_relaxed);
         tap > 0 && m.isController() && m.getControllerNumber() == tap && m.getControllerValue() >= 64)
     {

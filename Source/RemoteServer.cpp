@@ -53,6 +53,17 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
      stand, in bad light -- not clicked with a mouse. */
   /* Group filters. Only drawn when the setup actually uses groups, so someone
      who has not touched the feature sees exactly what they saw before. */
+  /* Tempo. A big tap target at the top, because tapping is the point and a
+     stand is not a place for precision. */
+  .tempo { display:flex; align-items:center; gap:12px; background:var(--panel);
+           border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+  .tempo .bpm { font-size:26px; font-weight:800; color:var(--accent);
+                font-variant-numeric:tabular-nums; min-width:104px; }
+  .tempo .bpm span { font-size:13px; color:var(--dim); font-weight:600; margin-left:4px; }
+  .tempo button { flex:1; background:var(--row); color:#fff; border:0; border-radius:10px;
+                  padding:16px; font-size:17px; font-weight:700; }
+  .tempo button:active { background:var(--accent); color:#06121f; }
+
   .groups { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
   .groups button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                    padding:9px 16px; font-size:13px; font-weight:700; letter-spacing:.02em; }
@@ -123,6 +134,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
     <p class="hint" id="gatemsg"></p>
   </form>
 </div>
+<div class="tempo" id="tempo">
+  <div class="bpm" id="bpm">--<span>bpm</span></div>
+  <button id="tap">TAP</button>
+</div>
 <div id="inputs"></div>
 <div id="pick">
   <header>
@@ -133,6 +148,21 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   <div id="picklist"></div>
 </div>
 <script>
+/* Tapping is timed on the server, where the tempo lives: a few milliseconds of
+   network on a local wifi is far below the precision of a finger, and doing the
+   averaging in two places would let them disagree. */
+document.getElementById("tap").onclick = async () => {
+  try {
+    const r = await api("/api/tap", { method: "POST" });
+    if (r && r.tempo) showTempo(r.tempo);
+  } catch (e) { if (!e.gate) show(e.message); }
+};
+
+function showTempo(bpm) {
+  document.getElementById("bpm").innerHTML =
+    (Math.round(bpm * 10) / 10).toFixed(1) + '<span>bpm</span>';
+}
+
 let picking = null;          // the slot whose controls are being chosen, if any
 let showAll = false;         // include the per-channel copies in the picker
 let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
@@ -172,6 +202,7 @@ const filters = {};          // input index -> chosen group, "" for all
 
 function render(s) {
   lastState = s;
+  if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
   root.innerHTML = "";
   s.inputs.forEach((inp, i) => {
@@ -593,6 +624,7 @@ String RemoteServer::stateJson() const
     const auto& setup = engine.getSetup();
     DynamicObject::Ptr root (new DynamicObject());
     root->setProperty ("revision", revision.load());
+    root->setProperty ("tempo", engine.getTempoBpm());
     Array<var> inputs;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
@@ -1094,6 +1126,40 @@ void RemoteServer::handle (StreamingSocket& sock)
                 ++revision;
             }
         }
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/tap"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+
+        /* Tapped on the phone. The tap has to be timed where it happens, and it
+           happens here: the round trip from a music stand is a few milliseconds
+           on a local network, far below the precision of a human finger. What
+           would ruin it is waiting for the next poll, so this answers with the
+           new tempo rather than making the page wait a second to see it. */
+        double bpm = 0.0;
+        WaitableEvent done;
+        MessageManager::callAsync ([this, &bpm, &done]
+        {
+            bpm = engine.tapTempo();
+            if (bpm <= 0.0) bpm = engine.getTempoBpm();
+            done.signal();
+        });
+        done.wait (500);
+        ++revision;
+
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("tempo", bpm);
+        sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
+        return;
+    }
+    if (path.startsWith ("/api/settempo"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const double bpm = path.fromFirstOccurrenceOf ("bpm=", false, false).getDoubleValue();
+        MessageManager::callAsync ([this, bpm] { engine.setTempoBpm (bpm); engine.resetTapTempo(); });
+        ++revision;
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }

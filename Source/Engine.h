@@ -49,6 +49,8 @@ public:
         virtual void programContentChanged (int inputIndex, int program) { juce::ignoreUnused (inputIndex, program); }
         /** A MIDI controller arrived while learn mode was armed. */
         virtual void learnReceived (int inputIndex, MappingDef::Source source, int number) { juce::ignoreUnused (inputIndex, source, number); }
+        /** A controller was pressed while waiting to learn the tap controller. */
+        virtual void tapTempoLearned (int cc) { juce::ignoreUnused (cc); }
         /** The user touched a parameter in a plugin GUI (effect == -1 for an instrument). */
         virtual void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) { juce::ignoreUnused (inputIndex, program, slot, effect, paramIndex); }
         virtual void statusMessage (const juce::String&) {}
@@ -92,6 +94,12 @@ public:
         means any channel, so a footswitch works wherever it is plugged in. */
     int getTapTempoCC() const                       { return setup.tapTempoCC; }
     void setTapTempoCC (int cc);
+
+    /** Waits for the next controller and makes that the tap controller, so you
+        can press the pedal rather than look up what it sends. The listener's
+        tapTempoLearned() fires when one arrives. */
+    void armTapTempoLearn (bool);
+    bool isTapTempoLearnArmed() const               { return tapLearnArmed.load(); }
 
     //==============================================================================
     // Inputs
@@ -212,7 +220,7 @@ private:
 
     struct Event
     {
-        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo };
+        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -311,6 +319,7 @@ private:
     int blockSize = 512;
 
     std::atomic<bool> learnArmed { false };
+    std::atomic<bool> tapLearnArmed { false };
     std::atomic<bool> panicRequested { false };
     std::atomic<int> lateBlocks { 0 };
     std::atomic<int> lastBlockSamples { 0 };

@@ -1738,6 +1738,12 @@ void MainComponent::refreshProgramView()
 // Engine::Listener ------------------------------------------------------------
 void MainComponent::setupChanged() { markDirty(); updateTempoLabel(); refreshAll(); }
 
+void MainComponent::tapTempoLearned (int cc)
+{
+    showStatus ("CC " + String (cc) + " now taps the tempo.");
+    markDirty();
+}
+
 void MainComponent::programChanged (int inputIndex, int)
 {
     markDirty();
@@ -2040,7 +2046,10 @@ void MainComponent::showTempoMenu()
 
     const int tapCC = engine.getTapTempoCC();
     m.addSectionHeader ("Tap from a MIDI controller");
-    m.addItem (2, tapCC > 0 ? "Change from CC " + String (tapCC) + "..." : "Assign a controller...");
+    // Pressing the pedal beats looking up what it sends, so that comes first.
+    m.addItem (4, "Learn: press the pedal or button...");
+    m.addItem (2, tapCC > 0 ? "Type a controller number (now CC " + String (tapCC) + ")..."
+                            : "Type a controller number...");
     if (tapCC > 0)
         m.addItem (3, "Stop using CC " + String (tapCC));
 
@@ -2091,6 +2100,11 @@ void MainComponent::showTempoMenu()
             engine.setTapTempoCC (0);
             showStatus ("No controller taps the tempo now.");
             markDirty();
+        }
+        else if (choice == 4)
+        {
+            engine.armTapTempoLearn (true);
+            showStatus ("Press the pedal or button that should tap the tempo...");
         }
     });
 }

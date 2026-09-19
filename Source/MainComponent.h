@@ -49,6 +49,7 @@ private:
     void programChanged (int inputIndex, int program) override;
     void programContentChanged (int inputIndex, int program) override;
     void learnReceived (int inputIndex, MappingDef::Source, int number) override;
+    void tapTempoLearned (int cc) override;
     void parameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex) override;
     void statusMessage (const juce::String&) override;
 

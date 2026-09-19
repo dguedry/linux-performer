@@ -1006,6 +1006,39 @@ int main()
         CHECK (std::abs (engine.getTempoBpm() - 120.0) < 0.001);
         engine.setTapTempoCC (0);
 
+        /* Learning the tap controller: press the pedal rather than look up what
+           it sends. Must work outside the channel filter, and must be able to
+           replace a controller that is already assigned. */
+        engine.setTapTempoCC (0);
+        engine.armTapTempoLearn (true);
+        CHECK (engine.isTapTempoLearnArmed());
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 67, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getTapTempoCC() == 67);
+        CHECK (! engine.isTapTempoLearnArmed());       // disarms itself
+
+        // The release half must not be what gets learned.
+        engine.setTapTempoCC (0);
+        engine.armTapTempoLearn (true);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 70, 0));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getTapTempoCC() == 0);           // ignored, still waiting
+        CHECK (engine.isTapTempoLearnArmed());
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 70, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getTapTempoCC() == 70);
+
+        // Reassigning while a controller is already assigned: learning wins,
+        // rather than the old controller swallowing the press as a tap.
+        engine.armTapTempoLearn (true);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 70, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        engine.armTapTempoLearn (true);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 64, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getTapTempoCC() == 64);
+        engine.setTapTempoCC (0);
+
         // A setup written before tempo existed loads at a sane default.
         auto older = engine.captureSetup().toVar();
         if (auto* o = older.getDynamicObject()) { o->removeProperty ("tempoBpm"); o->removeProperty ("tapTempoCC"); }
