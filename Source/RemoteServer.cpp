@@ -245,6 +245,7 @@ const filters = {};          // input index -> chosen group, "" for all
 function render(s) {
   lastState = s;
   if (s.tempo) showTempo(s.tempo);
+  paramRev = -1;          // each loadSlots below records what it actually drew
   const root = document.getElementById("inputs");
   root.innerHTML = "";
   s.inputs.forEach((inp, i) => {
@@ -315,7 +316,13 @@ async function loadSlots(i) {
 
   host.innerHTML = "";
   Object.keys(painters).forEach(k => { if (k.startsWith(i + "/")) delete painters[k]; });
-  if (data.params !== undefined) paramRev = data.params;
+
+  /* Record the OLDEST revision any input was drawn from, not the newest. Each
+     input is fetched separately, so a change landing between the two calls is
+     in one input's values and not the other's; taking the newest would mark
+     that change as already seen and the stale input would never catch up. */
+  if (data.params !== undefined)
+    paramRev = (paramRev < 0 || data.params < paramRev) ? data.params : paramRev;
   data.slots.forEach(sl => {
     const box = document.createElement("div"); box.className = "slot";
 
