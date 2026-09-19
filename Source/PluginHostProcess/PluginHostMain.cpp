@@ -371,9 +371,17 @@ private:
     // AudioProcessorListener --------------------------------------------------------
     void audioProcessorParameterChanged (AudioProcessor*, int index, float value) override
     {
-        // GUI edits arrive on the message thread; anything else (automation, our own
-        // block-driven changes) is not a "touch" and must not block the audio thread.
-        if (suppressNotifications || ! MessageManager::getInstance()->isThisTheMessageThread()) return;
+        /* Report this unless we caused it ourselves, or we are on the audio
+           thread -- notify() takes a lock and writes to a socket, which must
+           never happen mid-block.
+
+           This used to require the MESSAGE thread, which was too strict, and is
+           why a plugin changing its own program left the phone showing stale
+           drawbars: Hammond B-3X reports a program change from one of its own
+           worker threads, so every one of those updates was thrown away. */
+        if (suppressNotifications.load (std::memory_order_relaxed)) return;
+        if (Thread::getCurrentThreadId() == audioThreadId.load (std::memory_order_relaxed)) return;
+
         MemoryOutputStream out; out.writeInt (index); out.writeFloat (value);
         notify (ipc::Msg::notifyParamChanged, out);
     }
@@ -504,7 +512,14 @@ private:
     struct AudioThread : public Thread
     {
         explicit AudioThread (PluginServer& s) : Thread ("plugin-rt"), server (s) {}
-        void run() override { server.audioLoop (*this); }
+        void run() override
+        {
+            // So a parameter notification can tell "this is the render thread"
+            // from "this is some other thread the plugin happens to use".
+            server.audioThreadId.store (getThreadId(), std::memory_order_relaxed);
+            server.audioLoop (*this);
+            server.audioThreadId.store (nullptr, std::memory_order_relaxed);
+        }
         PluginServer& server;
     };
 
@@ -630,6 +645,10 @@ private:
     std::thread control;
     std::mutex sendMutex, processMutex;
     std::atomic<bool> suppressNotifications { false };
+    /* Which thread renders blocks. A parameter notification arriving on it is
+       dropped, because sending one takes a lock; anything else -- the message
+       thread, or a worker thread of the plugin's own -- is safe to report. */
+    std::atomic<Thread::ThreadID> audioThreadId { nullptr };
     AudioBuffer<float> scratch;
     MidiBuffer midi;
     double sampleRate = 44100.0;
