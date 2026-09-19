@@ -67,6 +67,8 @@ private:
 
     void showAudioSettings();
     void printProgramMap();
+    void showTempoMenu();
+    void updateTempoLabel();
     void showRemote();
 
     /** Starts the phone-control server, without showing the dialog. Returns true
@@ -97,6 +99,11 @@ private:
     std::unique_ptr<RemoteServer> remote;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
+
+    // Tempo: a readout you can tap, because a tap tempo you cannot see is one
+    // you cannot trust.
+    juce::TextButton tapButton { "Tap" };
+    juce::Label tempoLabel;
     juce::Label statusLabel, cpuLabel, fileLabel;
 
     std::unique_ptr<InputsPanel> inputsPanel;

@@ -975,6 +975,37 @@ int main()
         CHECK (std::abs (saved.tempoBpm - 143.0) < 0.001);
         CHECK (saved.tapTempoCC == 80);
 
+        /* The footswitch path: a CC arriving on any input taps the tempo. This is
+           the part that runs on the audio thread and posts to the message
+           thread, so it exercises more than tapTempo() alone. */
+        engine.setTempoBpm (120.0);
+        engine.setTapTempoCC (80);
+        engine.resetTapTempo();
+        for (int i = 0; i < 4; ++i)
+        {
+            engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 127));
+            MessageManager::getInstance()->runDispatchLoopUntil (20);
+            if (i < 3) Thread::sleep (480);
+        }
+        MessageManager::getInstance()->runDispatchLoopUntil (50);
+        std::printf ("     four CC 80 taps at ~500ms -> %.1f bpm\n", engine.getTempoBpm());
+        CHECK (engine.getTempoBpm() > 100.0 && engine.getTempoBpm() < 140.0);
+
+        // The release half of a footswitch press must not count as a tap.
+        engine.setTempoBpm (120.0);
+        engine.resetTapTempo();
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 0));
+        MessageManager::getInstance()->runDispatchLoopUntil (30);
+        CHECK (std::abs (engine.getTempoBpm() - 120.0) < 0.001);
+
+        // A different CC does nothing.
+        engine.resetTapTempo();
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 127));
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (30);
+        CHECK (std::abs (engine.getTempoBpm() - 120.0) < 0.001);
+        engine.setTapTempoCC (0);
+
         // A setup written before tempo existed loads at a sane default.
         auto older = engine.captureSetup().toVar();
         if (auto* o = older.getDynamicObject()) { o->removeProperty ("tempoBpm"); o->removeProperty ("tapTempoCC"); }

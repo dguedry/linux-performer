@@ -1499,6 +1499,26 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     remoteBtn.setTooltip ("Select programs from a phone or tablet on the same network");
     remoteBtn.onClick = [this] { showRemote(); };
 
+    /* Tempo. Tapping is the point -- you set it between songs by ear, not by
+       typing a number -- but the reading has to be visible or nobody trusts it.
+       Right-click for the number and the tap controller. */
+    addAndMakeVisible (tempoLabel);
+    tempoLabel.setColour (Label::textColourId, Colours::white);
+    tempoLabel.setJustificationType (Justification::centredRight);
+    tempoLabel.setTooltip ("The tempo every plugin is told, for tempo-synced delays and arpeggiators");
+
+    addAndMakeVisible (tapButton);
+    tapButton.setTooltip ("Tap four times in time. Right-click to type a tempo or assign a footswitch.");
+    tapButton.onClick = [this]
+    {
+        // A right-click arrives here too; treat it as "configure", not a tap,
+        // so someone reaching for the menu does not nudge the tempo.
+        if (ModifierKeys::getCurrentModifiers().isPopupMenu()) { showTempoMenu(); return; }
+        if (const double bpm = engine.tapTempo(); bpm > 0.0)
+            showStatus ("Tempo " + String (bpm, 1) + " bpm");
+        updateTempoLabel();
+    };
+
     addAndMakeVisible (tailLabel);
     tailLabel.setColour (Label::textColourId, textDim);
     addAndMakeVisible (tailSlider);
@@ -1537,6 +1557,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
             showStatus ("Phone control on: " + remote->getUrl() + "  code " + remote->getToken());
     }
 
+    updateTempoLabel();
     startTimerHz (4);
     setSize (1280, 800);
 }
@@ -1572,22 +1593,32 @@ void MainComponent::resized()
     auto toolbar = r.removeFromTop (44).reduced (8, 8);
     for (auto* b : { &newBtn, &openBtn, &saveBtn, &saveAsBtn })
     {
-        b->setBounds (toolbar.removeFromLeft (80));
-        toolbar.removeFromLeft (4);
+        b->setBounds (toolbar.removeFromLeft (74));
+        toolbar.removeFromLeft (3);
     }
     toolbar.removeFromLeft (12);
-    printBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
-    remoteBtn.setBounds (toolbar.removeFromLeft (70));      toolbar.removeFromLeft (12);
-    helpBtn.setBounds (toolbar.removeFromLeft (56));        toolbar.removeFromLeft (12);
-    audioBtn.setBounds (toolbar.removeFromLeft (80));       toolbar.removeFromLeft (4);
-    pluginsBtn.setBounds (toolbar.removeFromLeft (80));     toolbar.removeFromLeft (4);
-    midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (12);
-    panicBtn.setBounds (toolbar.removeFromRight (90));      toolbar.removeFromRight (12);
-    keyboardBtn.setBounds (toolbar.removeFromRight (90));   toolbar.removeFromRight (4);
-    stageBtn.setBounds (toolbar.removeFromRight (80));      toolbar.removeFromRight (12);
-    tailSlider.setBounds (toolbar.removeFromRight (70));    toolbar.removeFromRight (2);
-    tailLabel.setBounds (toolbar.removeFromRight (34));     toolbar.removeFromRight (8);
-    preloadToggle.setBounds (toolbar.removeFromRight (170));
+    printBtn.setBounds (toolbar.removeFromLeft (76));       toolbar.removeFromLeft (4);
+    remoteBtn.setBounds (toolbar.removeFromLeft (66));      toolbar.removeFromLeft (8);
+    helpBtn.setBounds (toolbar.removeFromLeft (52));        toolbar.removeFromLeft (8);
+    audioBtn.setBounds (toolbar.removeFromLeft (74));       toolbar.removeFromLeft (4);
+    pluginsBtn.setBounds (toolbar.removeFromLeft (74));     toolbar.removeFromLeft (4);
+    midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (8);
+    panicBtn.setBounds (toolbar.removeFromRight (84));      toolbar.removeFromRight (10);
+    keyboardBtn.setBounds (toolbar.removeFromRight (82));   toolbar.removeFromRight (4);
+    stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (8);
+    tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
+    tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
+    tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
+    tempoLabel.setBounds (toolbar.removeFromRight (58));    toolbar.removeFromRight (6);
+
+    /* Whatever is left goes to the preload checkbox, and it is hidden rather
+       than squashed when there is nothing left. Taking a fixed 170 here is what
+       silently pushed it (and then the tempo readout) off the end of a
+       1280-wide window. */
+    const bool roomForPreload = toolbar.getWidth() >= 120;
+    preloadToggle.setVisible (roomForPreload);
+    if (roomForPreload)
+        preloadToggle.setBounds (toolbar.removeFromRight (jmin (170, toolbar.getWidth())));
 
     auto status = r.removeFromBottom (24).reduced (8, 2);
     cpuLabel.setBounds (status.removeFromRight (470));
@@ -1705,7 +1736,7 @@ void MainComponent::refreshProgramView()
 }
 
 // Engine::Listener ------------------------------------------------------------
-void MainComponent::setupChanged() { markDirty(); refreshAll(); }
+void MainComponent::setupChanged() { markDirty(); updateTempoLabel(); refreshAll(); }
 
 void MainComponent::programChanged (int inputIndex, int)
 {
@@ -1992,6 +2023,76 @@ bool MainComponent::startRemote()
     settings.setValue ("remoteOn", true);
     settings.saveIfNeeded();
     return true;
+}
+
+void MainComponent::updateTempoLabel()
+{
+    tempoLabel.setText (String (engine.getTempoBpm(), 1) + " bpm", dontSendNotification);
+}
+
+/** Typing a tempo, and choosing what taps it. Behind a right-click because
+    neither is something you do mid-song: on stage you tap. */
+void MainComponent::showTempoMenu()
+{
+    PopupMenu m;
+    m.addSectionHeader ("Tempo");
+    m.addItem (1, "Type a tempo...");
+
+    const int tapCC = engine.getTapTempoCC();
+    m.addSectionHeader ("Tap from a MIDI controller");
+    m.addItem (2, tapCC > 0 ? "Change from CC " + String (tapCC) + "..." : "Assign a controller...");
+    if (tapCC > 0)
+        m.addItem (3, "Stop using CC " + String (tapCC));
+
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (tapButton), [this] (int choice)
+    {
+        if (choice == 1)
+        {
+            auto* w = new AlertWindow ("Tempo", "Beats per minute (20 to 300).", MessageBoxIconType::NoIcon);
+            w->addTextEditor ("bpm", String (engine.getTempoBpm(), 1));
+            w->addButton ("Set", 1, KeyPress (KeyPress::returnKey));
+            w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+            w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
+            {
+                std::unique_ptr<AlertWindow> owned (w);
+                if (r == 0) return;
+                const auto typed = w->getTextEditorContents ("bpm").getDoubleValue();
+                if (typed <= 0.0) { showStatus ("That is not a tempo."); return; }
+                engine.setTempoBpm (typed);
+                engine.resetTapTempo();          // a typed tempo ends the tapping
+                updateTempoLabel();
+                showStatus ("Tempo " + String (engine.getTempoBpm(), 1) + " bpm");
+                markDirty();
+            }), false);
+        }
+        else if (choice == 2)
+        {
+            auto* w = new AlertWindow ("Tap tempo",
+                                       "Which controller taps the tempo? A footswitch usually sends "
+                                       "CC 64 (sustain) or CC 80.\n\nIt works on any input and in any "
+                                       "program, and only the press counts.",
+                                       MessageBoxIconType::NoIcon);
+            w->addTextEditor ("cc", String (jmax (1, engine.getTapTempoCC())));
+            w->addButton ("Use it", 1, KeyPress (KeyPress::returnKey));
+            w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+            w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
+            {
+                std::unique_ptr<AlertWindow> owned (w);
+                if (r == 0) return;
+                const int cc = w->getTextEditorContents ("cc").getIntValue();
+                if (cc < 1 || cc > 127) { showStatus ("A controller number is 1 to 127."); return; }
+                engine.setTapTempoCC (cc);
+                showStatus ("CC " + String (cc) + " now taps the tempo.");
+                markDirty();
+            }), false);
+        }
+        else if (choice == 3)
+        {
+            engine.setTapTempoCC (0);
+            showStatus ("No controller taps the tempo now.");
+            markDirty();
+        }
+    });
 }
 
 void MainComponent::showRemote()

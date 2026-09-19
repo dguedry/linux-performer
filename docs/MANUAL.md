@@ -390,6 +390,29 @@ Pick a network name and password you are happy to reuse, because the phone then
 reconnects on its own at the next gig. Use **Stop the wifi network** in the same
 dialog to return this computer to its normal network.
 
+## Tempo
+
+Plugins with a tempo-synced delay, tremolo or arpeggiator ask the host what the
+tempo is. The toolbar shows it, and **Tap** sets it: tap four times in time and
+it follows. One tempo serves the whole rig, because a band plays a song at a
+tempo rather than an instrument at one, and it is saved with the setup.
+
+Right-click **Tap** to type an exact tempo, or to name a MIDI controller that
+taps it. A footswitch is the usual choice; most send CC 64 or CC 80. That
+controller works on any input and in any program, so it taps the tempo whatever
+you happen to be playing, and only the press counts, not the release.
+
+Taps more than two seconds apart start a fresh count rather than averaging
+across the gap, so you can stop, think, and start again without a stale tempo
+dragging the result. Only the last eight taps count, so speeding up is followed
+rather than averaged away.
+
+Performer has no transport: there is nothing to start or stop. Plugins are told
+the music is always running, which is what a live rig looks like from inside a
+plugin. If a plugin's delay still does not sync, it may simply never ask the
+host; running Performer with `PERFORMER_REPORT_TEMPO=1` prints whether each
+plugin asked and what it was told.
+
 ## Printing a program map
 
 **Print map** writes a sheet of which program number plays which sound, and
