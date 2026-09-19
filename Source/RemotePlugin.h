@@ -84,6 +84,10 @@ public:
     void queueParameterChange (int index, float value);
     /** Hands a block to the plugin. Input may be nullptr for instruments. Audio thread only. */
     void beginProcess (const float* inL, const float* inR, const juce::MidiBuffer&, int numSamples);
+
+    /** The tempo reported to the plugin. Set from the message thread; the audio
+        thread copies it into each block, so a change costs nothing per block. */
+    void setTempo (double bpm, int timeSigNumerator, int timeSigDenominator);
     /** Waits for the block until `deadline` (CLOCK_MONOTONIC). Returns false if the
         plugin is late or dead; the caller must then treat the output as silence. */
     bool finishProcess (float* outL, float* outR, const timespec& deadline);
@@ -132,6 +136,12 @@ private:
     uint32_t pendingParamCount = 0;
     ipc::ParamChange pendingParams[ipc::kMaxParamChanges];
     std::atomic<int> missedBlocks { 0 };
+
+    // Tempo: written by the message thread, read by the audio thread each block.
+    std::atomic<double> tempoBpm { 120.0 };
+    std::atomic<int> tempoNumerator { 4 }, tempoDenominator { 4 };
+    double ppqPosition = 0.0;              // audio thread only
+    double currentSampleRate = 48000.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RemotePlugin)
 };

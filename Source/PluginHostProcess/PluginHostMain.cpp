@@ -57,6 +57,12 @@ public:
 
     ~PluginServer()
     {
+        /* Whether the plugin ever asked for tempo, and what it last got. Worth
+           keeping: "my delay is not syncing" is otherwise impossible to tell
+           apart from "this plugin never asks". PERFORMER_REPORT_TEMPO=1. */
+        if (playHead != nullptr && std::getenv ("PERFORMER_REPORT_TEMPO") != nullptr)
+            std::fprintf (stderr, "[tempo] plugin asked %d times, last bpm %.2f\n",
+                          playHead->asked.load(), playHead->lastBpm.load());
         stopAudioThread();
         // Bridged plugins (yabridge) throw if their other half is already gone;
         // nothing here may escape, we're on our way out anyway.
@@ -139,7 +145,9 @@ private:
 
                 inst->enableAllBuses();
                 inst->setNonRealtime (false);
-                inst->setPlayHead (nullptr);
+                playHead = std::make_unique<HostPlayHead> (shm);
+                playHead->sampleRate = sr;
+                inst->setPlayHead (playHead.get());
                 inst->prepareToPlay (sr, bs);
                 inst->addListener (this);
                 sampleRate = sr; blockSize = bs;
@@ -443,6 +451,50 @@ private:
     };
 
     //==============================================================================
+    /** Tells the plugin the tempo the host is keeping.
+
+        Performer has no transport: there is no timeline on stage, nothing to
+        start or stop. But a plugin that syncs a delay or an arpeggiator asks the
+        host for tempo, and with no playhead at all it either guesses 120 or does
+        nothing. So this reports a position that advances continuously and a
+        transport that is always playing, which is what a live rig looks like
+        from the plugin's point of view.
+
+        Read straight from shared memory: the host rewrites these before each
+        block, and a torn read of a double would at worst be one block of a wrong
+        tempo, not a crash. */
+    struct HostPlayHead : public AudioPlayHead
+    {
+        explicit HostPlayHead (ipc::SharedBlock* s) : shm (s) {}
+
+        Optional<PositionInfo> getPosition() const override
+        {
+            asked.fetch_add (1, std::memory_order_relaxed);
+            lastBpm.store (shm->bpm, std::memory_order_relaxed);
+            PositionInfo p;
+            const double bpm = shm->bpm > 0.0 ? shm->bpm : 120.0;
+            p.setBpm (bpm);
+            p.setPpqPosition (shm->ppqPosition);
+            p.setTimeSignature (TimeSignature { shm->timeSigNumerator  > 0 ? shm->timeSigNumerator  : 4,
+                                                shm->timeSigDenominator > 0 ? shm->timeSigDenominator : 4 });
+            p.setIsPlaying (true);
+            p.setIsRecording (false);
+            p.setTimeInSamples (samplesElapsed);
+            p.setTimeInSeconds ((double) samplesElapsed / jmax (1.0, sampleRate));
+            return p;
+        }
+
+        ipc::SharedBlock* shm;
+        int64_t samplesElapsed = 0;
+        double sampleRate = 48000.0;
+
+        // Proof the plugin actually asked, and what it was told. Reported to
+        // stderr when the process exits so a test can see it.
+        mutable std::atomic<int> asked { 0 };
+        mutable std::atomic<double> lastBpm { 0.0 };
+    };
+
+    //==============================================================================
     // Audio thread: waits for blocks from the host and renders them.
     struct AudioThread : public Thread
     {
@@ -554,6 +606,7 @@ private:
         }
 
         instance->processBlock (view, midi);
+        if (playHead != nullptr) playHead->samplesElapsed += n;
 
         const int nOut = instance->getMainBusNumOutputChannels();
         if (nOut <= 0) return;
@@ -562,6 +615,7 @@ private:
     }
 
     //==============================================================================
+    std::unique_ptr<HostPlayHead> playHead;
     ipc::SharedBlock* shm;
     int socketFd;
     AudioPluginFormatManager formatManager;

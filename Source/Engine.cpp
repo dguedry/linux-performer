@@ -219,6 +219,9 @@ void Engine::loadSetup (Setup newSetup)
 {
     teardownRuntimes();
     setup = std::move (newSetup);
+    // The audio thread reads the tap controller from its own copy.
+    tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
+    tapTimes.clear();
     rebuildRuntimes();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -233,6 +236,75 @@ Setup Engine::captureSetup()
 
 void Engine::setPreloadAllPrograms (bool b)  { setup.preloadAllPrograms = b; }
 void Engine::setReleaseTailSeconds (double s) { setup.releaseTailSeconds = jlimit (0.0, 30.0, s); }
+
+//==============================================================================
+void Engine::setTempoBpm (double bpm)
+{
+    const auto clamped = jlimit (20.0, 300.0, bpm);
+    if (std::abs (clamped - setup.tempoBpm) < 0.001) return;
+    setup.tempoBpm = clamped;
+
+    // Every plugin, not just the ones sounding: a preloaded program should not
+    // come in at the old tempo when it is selected.
+    for (auto& in : runtimes)
+    {
+        if (in == nullptr) continue;
+        for (auto& [prog, rt] : in->loaded)
+        {
+            for (auto& s : rt->slots)
+            {
+                if (s->plugin != nullptr) s->plugin->setTempo (clamped, 4, 4);
+                for (auto& e : s->effects)
+                    if (e->plugin != nullptr) e->plugin->setTempo (clamped, 4, 4);
+            }
+            for (auto& e : rt->effects)
+                if (e->plugin != nullptr) e->plugin->setTempo (clamped, 4, 4);
+        }
+    }
+
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+double Engine::tapTempo()
+{
+    const auto now = Time::getMillisecondCounterHiRes();
+
+    /* A gap this long means the last tap was part of a different attempt, not
+       this one. 2 seconds is 30 bpm: slower than anything anyone taps, so no
+       real tempo is lost by starting over. */
+    constexpr double kGapMs = 2000.0;
+    if (! tapTimes.empty() && now - tapTimes.back() > kGapMs)
+        tapTimes.clear();
+
+    tapTimes.push_back (now);
+
+    // Keep a short window: the player speeding up should be followed, not
+    // averaged away against taps from ten seconds ago.
+    constexpr size_t kMaxTaps = 8;
+    if (tapTimes.size() > kMaxTaps)
+        tapTimes.erase (tapTimes.begin(), tapTimes.begin() + (int) (tapTimes.size() - kMaxTaps));
+
+    // One tap sets nothing: two is the first interval worth believing.
+    if (tapTimes.size() < 2) return 0.0;
+
+    const double span = tapTimes.back() - tapTimes.front();
+    const double perBeat = span / (double) (tapTimes.size() - 1);
+    if (perBeat <= 0.0) return 0.0;
+
+    const double bpm = 60000.0 / perBeat;
+    if (bpm < 20.0 || bpm > 300.0) return 0.0;      // a slip, not a tempo
+
+    setTempoBpm (bpm);
+    return setup.tempoBpm;
+}
+
+void Engine::resetTapTempo() { tapTimes.clear(); }
+
+void Engine::setTapTempoCC (int cc)
+{
+    setup.tapTempoCC = jlimit (0, 127, cc);
+    tapCC.store (setup.tapTempoCC, std::memory_order_relaxed);
+}
 
 void Engine::rebuildRuntimes()
 {
@@ -687,6 +759,8 @@ void Engine::attachLoaded (LoadResult& r)
             listeners.call ([&] (Listener& l) { l.statusMessage (r.error); });
         if (r.sampleRate != sampleRate || r.blockSize != blockSize)
             r.plugin->prepare (sampleRate, blockSize);      // device changed while loading
+        // A plugin that has just loaded knows nothing about the rig's tempo.
+        r.plugin->setTempo (setup.tempoBpm, 4, 4);
         r.plugin->setListener (node);
         const ScopedLock sl (lock);
         node->plugin = std::move (r.plugin);
@@ -1232,6 +1306,12 @@ void Engine::handleAsyncUpdate()
                 selectProgram (e.input, e.a);
                 break;
 
+            case Event::tapTempo:
+                if (const double bpm = tapTempo(); bpm > 0.0)
+                    listeners.call ([bpm] (Listener& l)
+                        { l.statusMessage ("Tempo " + String (bpm, 1) + " bpm"); });
+                break;
+
             case Event::learn:
                 listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
                 break;
@@ -1356,6 +1436,16 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
 
     // Program Change is filtered on its own channel, which is not always the one the
     // keyboard plays on, so this is tested before the note filter would drop it.
+    /* Tap tempo first, and outside the channel filter: the tempo belongs to the
+       rig, so a footswitch taps it whatever this input is set to play on and
+       whatever program is loaded. Only the press counts, not the release. */
+    if (const int tap = tapCC.load (std::memory_order_relaxed);
+        tap > 0 && m.isController() && m.getControllerNumber() == tap && m.getControllerValue() >= 64)
+    {
+        postEvent ({ Event::tapTempo, i, 0, 0, 0, 0 });
+        return;
+    }
+
     if (m.isProgramChange())
     {
         if (in.respondToProgramChange.load() && acceptsProgramChangeOn (in, ch))

@@ -124,6 +124,15 @@ struct Setup
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding
 
+    /** Tempo handed to every plugin, for tempo-synced delays and arpeggiators.
+        One tempo for the whole rig rather than one per program: a band plays a
+        song at a tempo, not an instrument. */
+    double tempoBpm = 120.0;
+
+    /** Controller number that taps the tempo, or 0 for none. Global for the same
+        reason the tempo is: a footswitch should work whatever is loaded. */
+    int tapTempoCC = 0;
+
     juce::var toVar() const;
     static Setup fromVar (const juce::var&);
 

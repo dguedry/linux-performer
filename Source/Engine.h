@@ -74,6 +74,25 @@ public:
     void setPreloadAllPrograms (bool);
     void setReleaseTailSeconds (double);
 
+    // Tempo ----------------------------------------------------------------------
+    /** One tempo for the whole rig, handed to every plugin so tempo-synced
+        delays and arpeggiators have something to sync to. */
+    double getTempoBpm() const                      { return setup.tempoBpm; }
+    void setTempoBpm (double bpm);
+
+    /** Registers one tap and returns the tempo it implies, or 0 while there are
+        not yet enough taps to be sure. Sets the tempo itself once it is. */
+    double tapTempo();
+
+    /** Forgets the taps so far, so the next tap starts a fresh count. */
+    void resetTapTempo();
+
+    /** A controller that taps the tempo, on any input and in any program: tempo
+        belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
+        means any channel, so a footswitch works wherever it is plugged in. */
+    int getTapTempoCC() const                       { return setup.tapTempoCC; }
+    void setTapTempoCC (int cc);
+
     //==============================================================================
     // Inputs
     int  addInput (const juce::String& name);
@@ -193,7 +212,7 @@ private:
 
     struct Event
     {
-        enum Type { programChange, learn, touched, pluginDied, pluginLoaded };
+        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -277,6 +296,12 @@ private:
 
     Setup setup;
     std::vector<std::unique_ptr<InputRuntime>> runtimes;
+
+    /** Tap tempo. Only the recent taps count: a pause means the player has
+        stopped tapping and started again, and averaging across that gap would
+        give a tempo nobody asked for. */
+    std::vector<double> tapTimes;      // milliseconds, message thread only
+    std::atomic<int> tapCC { 0 };      // read on the audio thread
 
     juce::CriticalSection lock;          // guards runtimes for audio + midi threads
     juce::CriticalSection eventLock;

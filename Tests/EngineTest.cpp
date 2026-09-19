@@ -781,6 +781,10 @@ int main()
     // this reproduces the multi-out / inactive-bus crash seen with Kontakt via yabridge.
     if (auto vst3Path = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_VST3", {}); vst3Path.isNotEmpty())
     {
+        // A tempo no default would produce, so the helper's report proves this
+        // value reached the plugin rather than 120 being a coincidence.
+        engine.setTempoBpm (137.0);
+
         AudioPluginFormat* vst3 = nullptr;
         for (auto* f : host.getFormatManager().getFormats())
             if (f->getName() == "VST3") vst3 = f;
@@ -925,6 +929,60 @@ int main()
     }
 
     engine.removeListener (&listener);
+    // ---- tempo and tap tempo ---------------------------------------------------
+    /* Plugins were handed no playhead at all, so a tempo-synced delay had
+       nothing to sync to. One tempo for the whole rig, and a tap that settles
+       fast enough to be useful between songs. */
+    {
+        engine.setTempoBpm (120.0);
+        CHECK (std::abs (engine.getTempoBpm() - 120.0) < 0.001);
+
+        engine.setTempoBpm (10.0);
+        CHECK (engine.getTempoBpm() >= 20.0);          // clamped, not accepted
+        engine.setTempoBpm (10000.0);
+        CHECK (engine.getTempoBpm() <= 300.0);
+
+        engine.setTempoBpm (120.0);
+        engine.resetTapTempo();
+        CHECK (engine.tapTempo() == 0.0);              // one tap implies nothing
+
+        // Four taps at 500ms is 120 bpm. Real taps are not exact, so allow a
+        // little slop -- and this is the interval a player would actually use.
+        engine.resetTapTempo();
+        engine.tapTempo();
+        double tapped = 0.0;
+        for (int i = 0; i < 3; ++i) { Thread::sleep (500); tapped = engine.tapTempo(); }
+        std::printf ("     four taps at 500ms -> %.1f bpm\n", tapped);
+        CHECK (tapped > 100.0 && tapped < 140.0);
+
+        // A long pause starts a fresh count rather than averaging across it.
+        engine.resetTapTempo();
+        engine.tapTempo();
+        Thread::sleep (2100);
+        CHECK (engine.tapTempo() == 0.0);              // treated as a first tap
+
+        // The tap controller is remembered and clamped.
+        engine.setTapTempoCC (64);
+        CHECK (engine.getTapTempoCC() == 64);
+        engine.setTapTempoCC (999);
+        CHECK (engine.getTapTempoCC() == 127);
+        engine.setTapTempoCC (0);                      // none
+
+        // Tempo and the tap controller survive a save and load.
+        engine.setTempoBpm (143.0);
+        engine.setTapTempoCC (80);
+        const auto saved = Setup::fromVar (engine.captureSetup().toVar());
+        CHECK (std::abs (saved.tempoBpm - 143.0) < 0.001);
+        CHECK (saved.tapTempoCC == 80);
+
+        // A setup written before tempo existed loads at a sane default.
+        auto older = engine.captureSetup().toVar();
+        if (auto* o = older.getDynamicObject()) { o->removeProperty ("tempoBpm"); o->removeProperty ("tapTempoCC"); }
+        const auto legacy = Setup::fromVar (older);
+        CHECK (std::abs (legacy.tempoBpm - 120.0) < 0.001);
+        CHECK (legacy.tapTempoCC == 0);
+    }
+
     std::printf (failures == 0 ? "EngineTest: all checks passed\n" : "EngineTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

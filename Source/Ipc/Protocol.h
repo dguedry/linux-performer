@@ -18,7 +18,7 @@ namespace perf::ipc
 {
 
 constexpr uint32_t kMagic         = 0x50524631;   // "PRF1"
-constexpr uint32_t kVersion       = 1;
+constexpr uint32_t kVersion       = 2;            // 2 added tempo to the block
 constexpr int      kMaxBlock      = 8192;         // samples per block we can exchange
 constexpr int      kMaxMidi       = 2048;
 constexpr int      kMaxParamChanges = 512;
@@ -52,6 +52,16 @@ struct SharedBlock
     int32_t  numSamples;
     uint32_t midiCount;
     uint32_t paramChangeCount;
+
+    /* Tempo, so a delay or arpeggiator that syncs to the host has something to
+       sync to. Performer has no transport -- there is nothing to play along to
+       on stage -- so the position advances continuously and "playing" is always
+       true: a plugin that waits for a running transport before it will run its
+       LFO would otherwise sit silent. */
+    double   bpm;
+    double   ppqPosition;             // musical position, advanced per block
+    int32_t  timeSigNumerator;
+    int32_t  timeSigDenominator;
 
     MidiEvent   midi[kMaxMidi];
     ParamChange paramChanges[kMaxParamChanges];

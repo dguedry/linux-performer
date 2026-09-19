@@ -243,10 +243,18 @@ bool RemotePlugin::load (const PluginDescription& desc, double sampleRate, int b
 
 bool RemotePlugin::prepare (double sampleRate, int blockSize)
 {
+    currentSampleRate = sampleRate;      // needed to advance the musical position
     MemoryOutputStream out;
     out.writeDouble (sampleRate);
     out.writeInt (blockSize);
     return request (ipc::Msg::prepare, out.getMemoryBlock(), kControlTimeoutMs);
+}
+
+void RemotePlugin::setTempo (double bpm, int numerator, int denominator)
+{
+    tempoBpm.store (jlimit (20.0, 300.0, bpm), std::memory_order_relaxed);
+    tempoNumerator.store (jmax (1, numerator), std::memory_order_relaxed);
+    tempoDenominator.store (jmax (1, denominator), std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -465,6 +473,17 @@ void RemotePlugin::beginProcess (const float* inL, const float* inR, const MidiB
 
     const int n = jmin (numSamples, ipc::kMaxBlock);
     shm->numSamples = n;
+
+    /* Tempo for this block. The musical position advances by however many beats
+       this block covers, so a synced delay lands where the plugin expects rather
+       than restarting from zero every block. */
+    const double bpm = tempoBpm.load (std::memory_order_relaxed);
+    shm->bpm = bpm;
+    shm->ppqPosition = ppqPosition;
+    shm->timeSigNumerator = tempoNumerator.load (std::memory_order_relaxed);
+    shm->timeSigDenominator = tempoDenominator.load (std::memory_order_relaxed);
+    if (currentSampleRate > 0.0)
+        ppqPosition += ((double) n / currentSampleRate) * (bpm / 60.0);
 
     uint32_t count = 0;
     for (const auto meta : midi)
