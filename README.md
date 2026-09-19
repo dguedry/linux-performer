@@ -58,15 +58,21 @@ every used program stays loaded and changes are instant (at the cost of RAM).
 `Performer` and `performer-plugin-host` into `/usr/bin`, plus a launcher entry
 and the icon.
 
+The package filename carries the version, so fetch whichever the latest release
+lists rather than hard-coding a number:
+
 ```sh
 # Debian / Ubuntu
-wget https://github.com/dguedry/linux-performer/releases/latest/download/performer_0.1.0_amd64.deb
-sudo apt install ./performer_0.1.0_amd64.deb
+gh release download --repo dguedry/linux-performer --pattern '*.deb'
+sudo apt install ./performer_*_amd64.deb
 
 # Fedora
-wget https://github.com/dguedry/linux-performer/releases/latest/download/performer-0.1.0-1.x86_64.rpm
-sudo dnf install ./performer-0.1.0-1.x86_64.rpm
+gh release download --repo dguedry/linux-performer --pattern '*.rpm'
+sudo dnf install ./performer-*.x86_64.rpm
 ```
+
+Without the GitHub CLI, open the releases page above and download the file
+directly; both packages are attached to every release.
 
 Every push also builds both packages as workflow artifacts under
 [Actions](https://github.com/dguedry/linux-performer/actions), if you want a
