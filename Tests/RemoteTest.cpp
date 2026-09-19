@@ -26,6 +26,11 @@ static void check (bool ok, const String& what)
 
 int main()
 {
+    /* The engine delivers events through an async update, which needs a message
+       manager. Without this the parameter-change path silently does nothing --
+       which is exactly what it looked like when this test first failed. */
+    ScopedJuceInitialiser_GUI juceInit;
+
     // The chosen address must be one this machine actually has, and never a
     // container bridge or a link-local address.
     const auto host = perf::RemoteServer::getHostAddress();
@@ -383,6 +388,58 @@ int main()
         check (sw (false, 0, "Reverb Enable"), "a name ending in Enable is a switch");
         check (! sw (false, 0, "Switch Time"), "a name merely starting with Switch is not");
         check (! sw (false, 0, "Drawbar 3"), "an ordinary name is not a switch");
+    }
+
+    // ---- the page follows a plugin that changes its own values ------------------
+    /* A B-3X program change moves every drawbar at once. Nothing the user did on
+       the phone caused it, so nothing bumped the revision the page polls, and
+       the faders kept showing the values from when they were drawn. The server
+       counts parameter changes separately from structural ones, so the page can
+       refresh fader positions without rebuilding and losing the group filter,
+       an open picker, or a drag in progress. */
+    {
+        auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-paramrev");
+        dir.deleteRecursively(); dir.createDirectory();
+        PropertiesFile::Options po; po.applicationName = "performer-paramrev";
+        PropertiesFile props (dir.getChildFile ("p.settings"), po);
+
+        perf::PluginHost host (props);
+        perf::Engine engine (host, props, false);
+        perf::RemoteServer rs (engine, props);
+
+        if (rs.start (7793))
+        {
+            auto paramsRev = [&]
+            {
+                const auto body = URL ("http://127.0.0.1:7793/api/state?t=" + rs.getToken())
+                                    .readEntireTextStream (false);
+                var parsed;
+                if (JSON::parse (body, parsed).failed()) return -1;
+                if (auto* o = parsed.getDynamicObject()) return (int) o->getProperty ("params");
+                return -1;
+            };
+
+            const int before = paramsRev();
+            check (before >= 0, "the state carries a parameter revision");
+
+
+            /* What a plugin moving its own parameter looks like from outside: the
+               engine tells every listener, and the server counts it. Going
+               through the engine rather than poking the server directly is the
+               point -- this is the wiring that was missing. */
+            engine.notifyParameterTouchedForTesting (0, 0, 0, -1, 3);
+
+            /* The engine queues this and delivers it on the message thread, so
+               the loop has to run before the server has heard anything. */
+            for (int i = 0; i < 40 && paramsRev() == before; ++i)
+                MessageManager::getInstance()->runDispatchLoopUntil (25);
+
+            const int after = paramsRev();
+            check (after != before, "a plugin-side parameter change bumps that revision");
+            rs.stop();
+        }
+        else std::cout << "skip parameter-revision check (could not bind)" << std::endl;
+        dir.deleteRecursively();
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");

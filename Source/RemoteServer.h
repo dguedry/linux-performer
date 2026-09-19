@@ -67,6 +67,11 @@ private:
     void setupChanged() override              { ++revision; }
     void programContentChanged (int, int) override { ++revision; }
 
+    /* A plugin changed a parameter itself -- its own preset menu, a knob in its
+       window, a program change inside it. The page has to be told, or its
+       faders keep showing what the values were when it drew them. */
+    void parameterTouched (int, int, int, int, int) override { ++paramRevision; }
+
     Engine& engine;
     juce::PropertiesFile& settings;
     Favourites favourites;
@@ -75,6 +80,10 @@ private:
     int port = 0;
     std::atomic<bool> running { false };
     std::atomic<int> revision { 0 };     // bumped on any change, so the page can poll cheaply
+    /* Separate from `revision`: a parameter moving should refresh the fader
+       positions, not rebuild the page and throw away which group is filtered
+       or which slot's picker is open. */
+    std::atomic<int> paramRevision { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RemoteServer)
 };

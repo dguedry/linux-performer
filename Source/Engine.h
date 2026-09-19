@@ -89,6 +89,12 @@ public:
     /** Forgets the taps so far, so the next tap starts a fresh count. */
     void resetTapTempo();
 
+    /** Announces a parameter change as a plugin's own callback would, so the
+        path from "a plugin moved something" to "the phone notices" can be
+        tested without a plugin. */
+    void notifyParameterTouchedForTesting (int inputIndex, int program, int slot, int effect, int paramIndex)
+    { noteParameterTouched (inputIndex, program, slot, effect, paramIndex); }
+
     /** A controller that taps the tempo, on any input and in any program: tempo
         belongs to the rig, not to one sound. 0 = nothing assigned. Channel 0
         means any channel, so a footswitch works wherever it is plugged in. */

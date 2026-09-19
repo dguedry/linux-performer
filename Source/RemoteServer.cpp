@@ -199,6 +199,12 @@ function showTempo(bpm) {
     (Math.round(bpm * 10) / 10).toFixed(1) + '<i>bpm</i>';
 }
 
+/* How to repaint each control when the plugin moves it. Keyed by slot and
+   parameter, rebuilt whenever the controls are, so a stale entry cannot paint
+   a widget that is no longer on the page. */
+let painters = {};
+let paramRev = -1;
+
 let picking = null;          // the slot whose controls are being chosen, if any
 let showAll = false;         // include the per-channel copies in the picker
 let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
@@ -308,6 +314,8 @@ async function loadSlots(i) {
   catch (e) { if (e.gate) throw e; return; }
 
   host.innerHTML = "";
+  Object.keys(painters).forEach(k => { if (k.startsWith(i + "/")) delete painters[k]; });
+  if (data.params !== undefined) paramRev = data.params;
   data.slots.forEach(sl => {
     const box = document.createElement("div"); box.className = "slot";
 
@@ -354,6 +362,7 @@ async function loadSlots(i) {
 function vertical(i, sl, pr) {
   const wrap = document.createElement("div"); wrap.className = "vert";
   wrap.title = pr.name;
+  const key = i + "/" + sl.slot + "/" + sl.effect + "/" + pr.id;
 
   const stepped = pr.steps > 1 && pr.steps <= 32;
   const vv = document.createElement("div"); vv.className = "v";
@@ -386,6 +395,16 @@ function vertical(i, sl, pr) {
   const words = pr.name.trim().split(/\s+/);
   nm.textContent = words.length > 1 ? words[words.length - 1] : pr.name;
 
+  /* Follow the plugin when it moves this itself -- its own preset menu, a knob
+     in its window -- but never while a finger is on it, and never so soon after
+     a send that our own change bounces back and fights the drag. */
+  painters[key] = v => {
+    if (document.activeElement === r) return;
+    if (Date.now() - lastSent < 400) return;
+    r.value = stepped ? Math.round(v * (pr.steps - 1)) : Math.round(v * 1000);
+    vv.textContent = readOut();
+  };
+
   track.appendChild(r);
   wrap.appendChild(vv); wrap.appendChild(track); wrap.appendChild(nm);
   return wrap;
@@ -400,11 +419,15 @@ function control(i, sl, pr) {
     const b = document.createElement("button");
     const paint = v => { b.textContent = v >= 0.5 ? "ON" : "OFF"; b.className = v >= 0.5 ? "on" : ""; };
     paint(pr.value);
+    let switched = 0;
     b.onclick = async () => {
       const next = (b.className === "on") ? 0 : 1;
+      switched = Date.now();
       paint(next);
       try { await setParam(i, sl, pr.id, next); } catch (e) { show(e.message); }
     };
+    painters[i + "/" + sl.slot + "/" + sl.effect + "/" + pr.id] =
+      v => { if (Date.now() - switched > 400) paint(v); };
     row.appendChild(lab); row.appendChild(b);
     wrap.appendChild(row);
     return wrap;
@@ -447,6 +470,13 @@ function control(i, sl, pr) {
     pendingTimer = setTimeout(send, wait);
   };
   r.onchange = send;      // always send the value the finger settled on
+
+  painters[i + "/" + sl.slot + "/" + sl.effect + "/" + pr.id] = v => {
+    if (document.activeElement === r) return;
+    if (Date.now() - lastSent < 400) return;
+    r.value = stepped ? Math.round(v * (pr.steps - 1)) : Math.round(v * 1000);
+    vv.textContent = readOut();
+  };
 
   wrap.appendChild(lab); wrap.appendChild(r);
   return wrap;
@@ -547,6 +577,25 @@ document.getElementById("pickdone").onclick = () => {
   loadSlots(i);
 };
 
+/* Values only. A plugin changing its own program moves every drawbar at once,
+   and the page has to follow without rebuilding: rebuilding would drop the
+   group filter, close a picker and interrupt a drag. */
+async function refreshValues() {
+  if (picking || !lastState) return;
+  for (let i = 0; i < lastState.inputs.length; ++i) {
+    let data;
+    try { data = await api("/api/slots?input=" + i); }
+    catch (e) { return; }
+    data.slots.forEach(sl => {
+      sl.params.forEach(pr => {
+        const f = painters[i + "/" + sl.slot + "/" + sl.effect + "/" + pr.id];
+        if (f) f(pr.value);
+      });
+    });
+    if (data.params !== undefined) paramRev = data.params;
+  }
+}
+
 async function refresh(force) {
   /* Never rebuild the page while the picker is open: choosing a control bumps
      the revision, and re-rendering underneath would shut the picker on the
@@ -555,6 +604,8 @@ async function refresh(force) {
   try {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); }
+    // A parameter moved inside a plugin: refresh the faders, not the page.
+    else if (s.params !== undefined && s.params !== paramRev) { paramRev = s.params; refreshValues(); }
     show("");
   } catch (e) {
     if (e.gate) askForCode("That code was not accepted — check Performer and try again.");
@@ -728,6 +779,7 @@ String RemoteServer::stateJson() const
     DynamicObject::Ptr root (new DynamicObject());
     root->setProperty ("revision", revision.load());
     root->setProperty ("tempo", engine.getTempoBpm());
+    root->setProperty ("params", paramRevision.load());
     Array<var> inputs;
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
@@ -843,6 +895,7 @@ static String controllerLabel (int controller)
 String RemoteServer::slotsJson (int inputIndex) const
 {
     DynamicObject::Ptr root (new DynamicObject());
+    root->setProperty ("params", paramRevision.load());
     Array<var> out;
 
     const auto& setup = engine.getSetup();
