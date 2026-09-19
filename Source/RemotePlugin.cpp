@@ -410,6 +410,9 @@ void RemotePlugin::handleNotification (const ipc::FrameHeader& header, const Mem
         {
             const int index = in.readInt();
             const float value = in.readFloat();
+            if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+                std::fprintf (stderr, "[host] %s reported param %d = %.3f\n",
+                              name.toRawUTF8(), index, value);
             if (paramValues != nullptr && index >= 0 && index < (int) params.size())
                 paramValues[(size_t) index].store (value);
             if (listener != nullptr)

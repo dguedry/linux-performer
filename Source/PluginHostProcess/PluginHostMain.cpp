@@ -387,12 +387,22 @@ private:
     }
     void audioProcessorParameterChangeGestureBegin (AudioProcessor*, int index) override
     {
+        /* Logged because "my plugin's own edits do not reach the phone" is
+           otherwise indistinguishable from "this plugin never tells the host".
+           PERFORMER_REPORT_PARAMS=1. */
+        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+            std::fprintf (stderr, "[gesture] begin on param %d\n", index);
         if (! MessageManager::getInstance()->isThisTheMessageThread()) return;
         auto* p = paramAt (index);
         MemoryOutputStream out; out.writeInt (index); out.writeFloat (p != nullptr ? p->getValue() : 0.0f);
         notify (ipc::Msg::notifyParamTouched, out);
     }
-    void audioProcessorChanged (AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorChanged (AudioProcessor*, const ChangeDetails& d) override
+    {
+        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+            std::fprintf (stderr, "[changed] params=%d program=%d latency=%d\n",
+                          (int) d.parameterInfoChanged, (int) d.programChanged, (int) d.latencyChanged);
+    }
 
     //==============================================================================
     // Editor window
