@@ -74,9 +74,36 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
              display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .slot h2 button { background:none; border:1px solid #3a3d47; color:var(--dim); border-radius:8px;
                     padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:.04em; }
+  /* Faders stand up and sit side by side, the way drawbars do on the organ
+     itself: nine of them across one row instead of nine rows down the page.
+     They wrap when there are more than fit, and fall back to one wide
+     horizontal fader for a lone continuous control, where a tall thin column
+     would just be harder to hit. */
+  /* One row wherever it can manage it: nine drawbars belong side by side, not
+     six and then three. The faders share the width rather than taking a fixed
+     size, down to a floor that still leaves something to grab. */
+  .banks { display:flex; flex-wrap:wrap; gap:4px; margin:10px 0 4px; }
+  .vert { display:flex; flex-direction:column; align-items:center; gap:3px;
+          background:var(--row); border-radius:8px; padding:8px 2px 6px;
+          flex:1 1 0; min-width:34px; max-width:56px; }
+  .vert .v { font-size:12px; font-weight:700; color:var(--accent);
+             font-variant-numeric:tabular-nums; line-height:1; }
+  .vert .nm { font-size:10px; color:var(--dim); text-align:center; line-height:1.15;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+  /* A vertical range input: rotated, because writing-mode support is uneven
+     across the mobile browsers this has to work on. */
+  .vert .track { height:120px; width:34px; display:flex; align-items:center; justify-content:center; }
+  .vert input[type=range] { width:120px; transform:rotate(-90deg); -webkit-appearance:none;
+                            appearance:none; background:transparent; margin:0; }
+  .vert input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--panel); }
+  .vert input[type=range]::-moz-range-track { height:6px; border-radius:3px; background:var(--panel); }
+  .vert input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px;
+      margin-top:-10px; border-radius:6px; background:var(--accent); border:0; }
+  .vert input[type=range]::-moz-range-thumb { width:26px; height:26px; border-radius:6px; background:var(--accent); border:0; }
+
   /* Controls are compact: the label and value share one line with the fader
-     rather than sitting above it, so nine drawbars fit on a phone screen
-     instead of four. Still a 28px thumb -- this is aimed at with a finger. */
+     rather than sitting above it. Still a 26px thumb -- this is aimed at with a
+     finger. */
   .ctl { margin:9px 0; }
   .ctl .lab { display:flex; justify-content:space-between; font-size:13px; margin-bottom:2px; gap:10px; }
   .ctl .lab .v { color:var(--dim); font-variant-numeric:tabular-nums; font-size:12px; }
@@ -301,13 +328,69 @@ async function loadSlots(i) {
       box.appendChild(e);
     }
 
-    sl.params.forEach(pr => box.appendChild(control(i, sl, pr)));
+    /* Faders stand up and share a row; switches stay full-width rows, where the
+       name has somewhere to go. A single fader on its own is left horizontal:
+       one tall thin column is harder to hit than a wide one and saves nothing. */
+    const faders = sl.params.filter(p => !p.boolean);
+    const switches = sl.params.filter(p => p.boolean);
+
+    if (faders.length > 1) {
+      const bank = document.createElement("div"); bank.className = "banks";
+      faders.forEach(pr => bank.appendChild(vertical(i, sl, pr)));
+      box.appendChild(bank);
+    } else {
+      faders.forEach(pr => box.appendChild(control(i, sl, pr)));
+    }
+    switches.forEach(pr => box.appendChild(control(i, sl, pr)));
     host.appendChild(box);
   });
 }
 
 /* One control. A switch gets a button rather than a slider, because a two-value
    parameter on a fader is fiddly to hit and reads as broken. */
+/* One upright fader. The label is the distinguishing part of the name -- nine
+   parameters called "Upper Drawbar N" differ only in the last word -- with the
+   whole name on the tooltip for anyone who hovers. */
+function vertical(i, sl, pr) {
+  const wrap = document.createElement("div"); wrap.className = "vert";
+  wrap.title = pr.name;
+
+  const stepped = pr.steps > 1 && pr.steps <= 32;
+  const vv = document.createElement("div"); vv.className = "v";
+
+  const track = document.createElement("div"); track.className = "track";
+  const r = document.createElement("input");
+  r.type = "range";
+  r.min = 0;
+  r.max = stepped ? pr.steps - 1 : 1000;
+  r.step = 1;
+  r.value = stepped ? Math.round(pr.value * (pr.steps - 1)) : Math.round(pr.value * 1000);
+
+  const readOut = () => stepped ? String(r.value) : Math.round(r.value / 10) + "%";
+  const normalised = () => stepped ? (r.value / (pr.steps - 1)) : (r.value / 1000);
+  vv.textContent = readOut();
+
+  let pendingTimer = null, lastSent = 0;
+  const send = async () => {
+    pendingTimer = null; lastSent = Date.now();
+    try { await setParam(i, sl, pr.id, normalised()); } catch (e) { show(e.message); }
+  };
+  r.oninput = () => {
+    vv.textContent = readOut();
+    if (pendingTimer) return;
+    pendingTimer = setTimeout(send, Math.max(0, 40 - (Date.now() - lastSent)));
+  };
+  r.onchange = send;
+
+  const nm = document.createElement("div"); nm.className = "nm";
+  const words = pr.name.trim().split(/\s+/);
+  nm.textContent = words.length > 1 ? words[words.length - 1] : pr.name;
+
+  track.appendChild(r);
+  wrap.appendChild(vv); wrap.appendChild(track); wrap.appendChild(nm);
+  return wrap;
+}
+
 function control(i, sl, pr) {
   const wrap = document.createElement("div"); wrap.className = "ctl";
 

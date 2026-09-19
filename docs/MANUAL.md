@@ -261,7 +261,7 @@ input with its current program in large type and every program you have set up;
 tap one to switch to it. There is a PANIC button too. Nothing is installed on
 the phone: it is a web page.
 
-![The web app on a phone: group filters, the programs of one input, and sliders for the Hammond drawbars](images/phone-app.png)
+![The web app on a phone: group filters, the programs of one input, and the Hammond drawbars as upright faders](images/phone-app.png)
 
 The current program for each input is highlighted, and the big number at the top
 of each block is what a keyboard would send as a Program Change. Tapping a

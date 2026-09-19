@@ -121,7 +121,7 @@ plugins, select an input and give it a MIDI device, click a program, press
 **Phone** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
-![The web app on a phone: group filters, the programs of one input, and sliders for the Hammond drawbars](docs/images/phone-app.png)
+![The web app on a phone: group filters, the programs of one input, and the Hammond drawbars as upright faders](docs/images/phone-app.png)
 
 ![The Phone control dialog](docs/images/phone-control.png)
 
