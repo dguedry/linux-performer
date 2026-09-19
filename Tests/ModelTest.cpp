@@ -259,6 +259,46 @@ int main()
         CHECK (html.contains ("Other"));            // the ungrouped run is labelled
     }
 
+    // ---- phone controls are per instance ---------------------------------------
+    /* Two Kontakts in a setup are two instruments. Choosing a control on one
+       must not put it on the other, which is what keying these by plugin type
+       did. They live on the slot and travel with the setup. */
+    {
+        Setup g;
+        g.inputs.resize (2);
+        g.inputs[0].programs[0].slots.emplace_back();
+        g.inputs[0].programs[1].slots.emplace_back();
+        g.inputs[1].programs[0].slots.emplace_back();
+
+        g.inputs[0].programs[0].slots[0].phoneControls = { "7", "10" };
+        g.inputs[0].programs[1].slots[0].phoneControls = { "74" };
+        // The third instance deliberately chooses nothing.
+
+        const auto back = Setup::fromVar (g.toVar());
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls.size() == 2);
+        CHECK (back.inputs[0].programs[1].slots[0].phoneControls.size() == 1);
+        CHECK (back.inputs[1].programs[0].slots[0].phoneControls.empty());
+        CHECK (back.inputs[0].programs[0].slots[0].phoneControls[0] == "7");
+        CHECK (back.inputs[0].programs[1].slots[0].phoneControls[0] == "74");
+
+        // A slot that chose nothing shows nothing, rather than inheriting.
+        CHECK (back.inputs[1].programs[0].slots[0].phoneControls.empty());
+
+        // A setup written before this existed simply has no list.
+        auto older = g.toVar();
+        if (auto* root = older.getDynamicObject())
+            if (auto* ins = root->getProperty ("inputs").getArray())
+                if (auto* in0 = (*ins)[0].getDynamicObject())
+                    if (auto* progs = in0->getProperty ("programs").getArray())
+                        for (auto& entry : *progs)
+                            if (auto* po = entry.getDynamicObject())
+                                if (auto* slots = po->getProperty ("slots").getArray())
+                                    for (auto& sv : *slots)
+                                        if (auto* so = sv.getDynamicObject())
+                                            so->removeProperty ("phoneControls");
+        CHECK (Setup::fromVar (older).inputs[0].programs[0].slots[0].phoneControls.empty());
+    }
+
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

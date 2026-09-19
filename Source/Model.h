@@ -35,6 +35,15 @@ struct SlotDef
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
     std::vector<EffectDef> effects;   // processed in order after the instrument
 
+    /** Parameter IDs shown as controls on the phone, for THIS instance.
+
+        Per instance rather than per plugin: two Kontakts in one setup are two
+        different instruments, and choosing a filter cutoff on the strings
+        should not put the same control on the drums. The per-plugin list is
+        still used, but only as the starting point when a slot has chosen
+        nothing yet. */
+    std::vector<juce::String> phoneControls;
+
     juce::var toVar() const;
     static SlotDef fromVar (const juce::var&);
 };

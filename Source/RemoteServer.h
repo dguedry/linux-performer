@@ -58,6 +58,7 @@ public:
 private:
     void run() override;
     void handle (juce::StreamingSocket&);
+    void migrateFavouritesToSlots();
     juce::String stateJson() const;
     juce::String slotsJson (int inputIndex) const;
     juce::String paramsJson (int inputIndex, int slot, int effect, const juce::String& search, bool allChannels) const;

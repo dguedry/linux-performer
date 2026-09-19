@@ -81,6 +81,13 @@ var SlotDef::toVar() const
     o->setProperty ("pan", pan);
     o->setProperty ("outChannel", outChannel);
     o->setProperty ("effects", effectsToVar (effects));
+    // Only written when chosen, so setups that never used the phone are unchanged.
+    if (! phoneControls.empty())
+    {
+        Array<var> ids;
+        for (const auto& id : phoneControls) ids.add (id);
+        o->setProperty ("phoneControls", ids);
+    }
     return var (o);
 }
 
@@ -101,6 +108,11 @@ SlotDef SlotDef::fromVar (const var& v)
     s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
     s.effects    = effectsFromVar (v);
+    if (auto* o = v.getDynamicObject())
+        if (auto* arr = o->getProperty ("phoneControls").getArray())
+            for (const auto& id : *arr)
+                if (id.toString().isNotEmpty())
+                    s.phoneControls.push_back (id.toString());
     return s;
 }
 

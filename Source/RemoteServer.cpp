@@ -651,6 +651,37 @@ RemoteServer::~RemoteServer()
     stop();
 }
 
+/** Moves choices made before controls were per instance onto the slots that
+    were showing them.
+
+    Without this, everyone who had already picked controls would open the phone
+    after an update and find them gone -- the data is still on disk, just keyed
+    by plugin rather than by slot. Runs once per slot: a slot that has anything
+    of its own is left alone. */
+void RemoteServer::migrateFavouritesToSlots()
+{
+    auto setup = engine.getSetup();
+    bool changed = false;
+
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+        for (int prog = 0; prog < InputDef::numPrograms; ++prog)
+        {
+            const auto& def = setup.inputs[(size_t) i].programs[(size_t) prog];
+            for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
+            {
+                if (! def.slots[(size_t) sIdx].phoneControls.empty()) continue;
+                for (const auto& id : favourites.get (def.slots[(size_t) sIdx].plugin))
+                {
+                    engine.setSlotPhoneControl (i, prog, sIdx, id, true);
+                    changed = true;
+                }
+            }
+        }
+
+    if (changed)
+        ++revision;
+}
+
 bool RemoteServer::start (int p)
 {
     stop();
@@ -675,6 +706,7 @@ bool RemoteServer::start (int p)
         return false;
     }
     port = p;
+    migrateFavouritesToSlots();
     running = true;
     startThread();
     return true;
@@ -926,7 +958,13 @@ String RemoteServer::slotsJson (int inputIndex) const
             if (live)
             {
                 const auto& params = plugin->getParameters();
-                for (const auto& id : favourites.get (slot.plugin))
+                /* This instance's own controls, and only its own. An empty list
+                   means this slot has chosen nothing and shows nothing: seeding
+                   it from a shared per-plugin list is what made a control picked
+                   on one Kontakt appear on every other one. */
+                const auto chosen = engine.getSlotPhoneControls (inputIndex, prog, sIdx);
+
+                for (const auto& id : chosen)
                 {
                     const int idx = findParamIndex (params, id);
                     if (idx < 0) continue;              // the plugin no longer has it
@@ -982,13 +1020,9 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
 
         if (auto* plugin = engine.getPlugin (inputIndex, prog, slot, effect))
         {
-            const auto& def = in.programs[(size_t) prog];
-            const PluginDescription* desc = nullptr;
-            if (slot >= 0 && slot < (int) def.slots.size())
-                desc = &def.slots[(size_t) slot].plugin;
-
             const auto& params = plugin->getParameters();
             total = (int) params.size();
+            const auto slotChosen = engine.getSlotPhoneControls (inputIndex, prog, slot);
 
             // Which entries are the "other channels" or "more of the same"?
             std::vector<bool> secondary ((size_t) total, false);
@@ -1077,7 +1111,8 @@ String RemoteServer::paramsJson (int inputIndex, int slot, int effect,
                 }
 
                 // Something already chosen always shows, so it can be unchosen.
-                const bool chosen = desc != nullptr && favourites.contains (*desc, info.id);
+                // Ticked for THIS slot.
+                const bool chosen = std::find (slotChosen.begin(), slotChosen.end(), info.id) != slotChosen.end();
 
                 if (secondary[i] && ! showSecondary && ! chosen) { ++hidden; continue; }
                 if (shown >= 300) { ++hidden; continue; }
@@ -1299,19 +1334,23 @@ void RemoteServer::handle (StreamingSocket& sock)
         const auto id    = URL::removeEscapeChars (path.fromFirstOccurrenceOf ("id=", false, false).upToFirstOccurrenceOf ("&", false, false));
         const bool on    = path.contains ("on=1");
 
-        const auto& setup = engine.getSetup();
-        if (input >= 0 && input < (int) setup.inputs.size())
+        /* Store against this slot, not this plugin type. Two Kontakts in a setup
+           are two instruments: choosing a cutoff on the strings must not put the
+           same control on the drums, which is what keying by plugin did.
+
+           On the message thread, because it edits the setup the audio thread is
+           reading, and every other engine call here does the same. */
+        MessageManager::callAsync ([this, input, slot, id, on]
         {
-            const auto& in = setup.inputs[(size_t) input];
-            const auto& def = in.programs[(size_t) in.currentProgram];
-            if (slot >= 0 && slot < (int) def.slots.size())
-            {
-                const auto& desc = def.slots[(size_t) slot].plugin;
-                if (on) favourites.add (desc, id);
-                else    favourites.remove (desc, id);
-                ++revision;
-            }
-        }
+            const auto& setup = engine.getSetup();
+            if (input < 0 || input >= (int) setup.inputs.size()) return;
+            const int prog = setup.inputs[(size_t) input].currentProgram;
+            const auto& def = setup.inputs[(size_t) input].programs[(size_t) prog];
+            if (slot < 0 || slot >= (int) def.slots.size()) return;
+
+            engine.setSlotPhoneControl (input, prog, slot, id, on);
+        });
+        ++revision;
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }

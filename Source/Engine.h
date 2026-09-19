@@ -152,6 +152,12 @@ public:
     static void panGains (float pan, float& left, float& right);
     void setSlotOutChannel(int inputIndex, int program, int slot, int);
 
+    /** The controls shown on the phone for one slot. Per instance: two Kontakts
+        in a setup are two instruments, and a control chosen on one should not
+        appear on the other. */
+    std::vector<juce::String> getSlotPhoneControls (int inputIndex, int program, int slot) const;
+    void setSlotPhoneControl (int inputIndex, int program, int slot, const juce::String& paramId, bool on);
+
     //==============================================================================
     // Effects. slot == -1 addresses the program-level chain.
     bool addEffect (int inputIndex, int program, int slot, const juce::PluginDescription&, juce::String& error);

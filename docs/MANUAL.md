@@ -312,11 +312,11 @@ is which, so Performer uses the number of positions the plugin reports rather
 than its claim about being a switch: Hammond B-3X calls every one of its
 parameters continuous, including the ones labelled Switch.
 
-Choices are remembered per plugin, not per program. Pick the drawbars on a
-Hammond B-3X once and they are there in every program that loads it, and in
-every setup. They are stored by the plugin's own parameter ID, so an updated
-plugin that renumbers things drops the control rather than quietly moving the
-wrong one.
+Choices belong to the slot you made them in, and are saved with the setup. Two
+Kontakts in one set are two instruments: a filter cutoff chosen on the strings
+does not appear on the drums. They are stored by the plugin's own parameter ID,
+so an updated plugin that renumbers things drops the control rather than quietly
+moving the wrong one.
 
 The picker hides the same things the desktop's parameter picker hides. Plugins
 publish far more than anyone wants to scroll -- Kontakt reports 4145 parameters,
