@@ -325,6 +325,13 @@ inside a scrollable area, so zooming magnifies actual pixels rather than
 stretching a shrunken picture. **Fit** in the corner squeezes the whole window
 onto the screen when you want to see all of it at once.
 
+**Full** next to it hides the browser's address bar, which is worth doing on a
+handset: it is a fifth of the screen on some phones, and a plugin window wants
+all of it. Android and desktop browsers have this. iPhones and iPads do not --
+Safari offers no way for a page to go fullscreen -- so on those, add Performer
+to the home screen and open plugin windows from there, which has the same
+effect and is described below.
+
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.
@@ -355,6 +362,11 @@ TCP 7777 for private networks.
 On Android, Chrome offers to install the page once it has loaded, and you can
 also use **Add to Home Screen** from its menu. It then opens fullscreen with its
 own icon, like an app.
+
+This is worth doing for the screen space alone. An address bar costs a fifth of
+the height on a small phone, and the installed shortcut has none -- for the
+program list and for the mirrored plugin windows it opens, which is where the
+space matters most.
 
 On an iPhone or iPad, use **Share** then **Add to Home Screen** in Safari. iOS
 does not offer an automatic prompt for this.

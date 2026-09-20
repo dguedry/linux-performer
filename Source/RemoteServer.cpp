@@ -339,16 +339,26 @@ RemoteServer::~RemoteServer()
 static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.2,maximum-scale=6,user-scalable=yes">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.2,maximum-scale=6,user-scalable=yes,viewport-fit=cover">
+<meta name="theme-color" content="#15161c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>Plugin</title>
 <style>
   :root { color-scheme: dark; }
   html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
               font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  #screen { width:100%; height:100vh; overflow:auto; -webkit-overflow-scrolling:touch; }
+  /* Dynamic viewport height: 100vh is the height with the browser's chrome
+     hidden, so on a phone it puts the bottom of the plugin permanently under
+     the address bar. 100dvh follows the bar as it comes and goes. The 100vh
+     line is the fallback for browsers that do not know dvh. */
+  #screen { width:100%; height:100vh; height:100dvh; overflow:auto; -webkit-overflow-scrolling:touch; }
   #msg { position:fixed; left:0; right:0; top:0; padding:10px 14px; font-size:14px;
          background:#26282f; border-bottom:1px solid #2b2d35; }
-  #bar { position:fixed; right:10px; bottom:10px; }
+  #bar { position:fixed; right:10px; bottom:10px; display:flex; gap:8px;
+         bottom:calc(10px + env(safe-area-inset-bottom)); }
   #bar button { background:#26282fdd; color:#d7dbe2; border:1px solid #3a3d47;
                 border-radius:10px; padding:10px 14px; font-size:13px; font-weight:700; }
   #bar button.on { background:#5aa9ff; color:#06121f; border-color:#5aa9ff; }
@@ -356,7 +366,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 </head><body>
 <div id="msg">Connecting...</div>
 <div id="screen"></div>
-<div id="bar"><button id="fit">Fit</button></div>
+<div id="bar"><button id="full">Full</button><button id="fit">Fit</button></div>
 <script type="module">
   import RFB from './core/rfb.js';
 
@@ -375,6 +385,25 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   rfb.clipViewport = true;
   rfb.scaleViewport = false;
   rfb.resizeSession = false;
+
+  /* Fullscreen: the address bar is a real cost on a handset, and a plugin
+     window is exactly the thing you want the whole screen for. Only offered
+     where the browser has the API -- iOS Safari does not, and there the way to
+     lose the bar is the home-screen shortcut, which the manual explains. */
+  const full = document.getElementById('full');
+  if (document.fullscreenEnabled) {
+    full.onclick = () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    };
+    document.addEventListener('fullscreenchange', () => {
+      const on = !!document.fullscreenElement;
+      full.className = on ? 'on' : '';
+      full.textContent = on ? 'Exit' : 'Full';
+    });
+  } else {
+    full.style.display = 'none';
+  }
 
   let fitting = false;
   const fit = document.getElementById('fit');
