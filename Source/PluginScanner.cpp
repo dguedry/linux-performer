@@ -52,6 +52,12 @@ bool PluginScanner::startScan (AudioPluginFormat& format, const FileSearchPath& 
         initiallyBlacklisted = host.getKnownPlugins().getBlacklistedFiles();
     }
 
+    /* Same reasoning as the loader pool in Engine: half the hardware threads,
+       4..12. A rig with seventeen Wine-bridged plugins spends the scan waiting
+       on seventeen subprocesses, four at a time, with the rest queued. */
+    numThreads = jlimit (1, 16, host.getSettings().getIntValue ("parallelScans",
+                                    jlimit (4, 12, SystemStats::getNumCpus() / 2)));
+
     currentFormat = &format;
     scanner = std::make_unique<PluginDirectoryScanner> (host.getKnownPlugins(), format, paths, true,
                                                         host.getDeadMansPedalFile(), false);

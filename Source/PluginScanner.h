@@ -57,7 +57,11 @@ private:
     juce::String currentFile, formatName;
     juce::StringArray initiallyBlacklisted, newlyBlacklisted, failedFiles, removedPlugins;
     juce::AudioPluginFormat* currentFormat = nullptr;
-    static constexpr int numThreads = 4;
+    /* How many plugins are probed at once. Set in startScan from the machine's
+       size, because probing is a subprocess that mostly waits -- Wine starting,
+       a plugin reading its own files -- so the useful number is how many can be
+       in flight, not how many cores are free. "parallelScans" overrides it. */
+    int numThreads = 4;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginScanner)
 };
