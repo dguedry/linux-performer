@@ -370,6 +370,17 @@ Safari offers no way for a page to go fullscreen -- so on those, add Performer
 to the home screen and open plugin windows from there, which has the same
 effect and is described below.
 
+**The plugin window has to be uncovered on the computer.** The tablet's taps
+are delivered to the computer's screen as real mouse clicks, and a click goes
+to whatever window is on top at that spot. If the browser, Performer's own
+window or anything else overlaps the plugin's editor, the pointer will visibly
+move to the right place and the click will land on the wrong window -- which
+looks like the plugin ignoring you. Performer brings the editor to the front
+each time you press GUI, but if you then click something else on the computer
+and it covers the editor, move it aside. Trying it from the computer's own
+browser is the classic case: the browser you are clicking in is exactly what is
+covering the plugin.
+
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.

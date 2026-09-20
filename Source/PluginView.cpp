@@ -78,6 +78,27 @@ unsigned long PluginView::findWindow (const String& title)
 }
 
 //==============================================================================
+/* Brings the editor to the front. x11vnc injects the tablet's clicks with
+   XTest at screen coordinates, so they land on whatever window is on top at
+   that spot -- if the browser, or Performer's own window, overlaps the editor,
+   the pointer visibly moves to the right place and the click goes to the wrong
+   window. Measured: a covered button never fires; uncover it and the same
+   click does. Raising the editor whenever the tablet asks for it is the most
+   that can be done from here; the manual says the rest. */
+static void raiseWindow (unsigned long windowId)
+{
+    auto xdotool = findTool ("xdotool");
+    if (xdotool == File() || windowId == 0) return;
+
+    for (const char* verb : { "windowactivate", "windowraise" })
+    {
+        ChildProcess p;
+        if (p.start (StringArray { xdotool.getFullPathName(), verb, String ((int64) windowId) }))
+            p.waitForProcessToFinish (1500);
+    }
+}
+
+//==============================================================================
 PluginView::Session PluginView::start (const String& title, String& error)
 {
     const ScopedLock sl (lock);
@@ -91,7 +112,10 @@ PluginView::Session PluginView::start (const String& title, String& error)
             if (findWindow (title) == r->session.windowId
                 && r->vnc != nullptr && r->vnc->isRunning()
                 && r->web != nullptr && r->web->isRunning())
+            {
+                raiseWindow (r->session.windowId);
                 return r->session;
+            }
 
             if (r->web != nullptr) r->web->kill();
             if (r->vnc != nullptr) r->vnc->kill();
@@ -107,6 +131,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
         error = "That plugin's window is not open. Open it with \"Edit GUI\" first.";
         return {};
     }
+    raiseWindow (window);
 
     // A free pair of ports: one per running session.
     int vncPort = kFirstVncPort, webPort = kFirstWebPort;

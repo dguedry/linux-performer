@@ -161,7 +161,9 @@ whatever the plugin shows is what you get.
 
 A touch holds for as long as your finger does, so the plugin's own keyboard
 plays properly -- one finger at a time, since the mirror is a single pointer. **+**/**-** and **Fit** handle zoom, **Move**
-switches to panning and pinching, and **Full** hides the browser's address bar. Each plugin gets its own tab, named after the
+switches to panning and pinching, and **Full** hides the browser's address bar.
+Taps arrive on the computer as real clicks, so the plugin window must not be
+covered by another window there -- Performer raises it each time you press GUI. Each plugin gets its own tab, named after the
 program. Needs `x11vnc`, `websockify` and `novnc`, and works on Wayland
 desktops as well as X11 ones -- Performer and plugin editors are X11 windows, so
 they run through XWayland, which `x11vnc` reads and writes normally.
