@@ -48,6 +48,12 @@ public:
 
     /** The sessions running right now. */
     static juce::Array<Session> active();
+
+    /** Drops any session whose window has gone. A plugin editor closes when its
+        program is swapped out, and a bridge left pointing at a dead window
+        answers connections and then sends nothing -- which looks exactly like a
+        broken stream rather than a stale one. */
+    static void dropDeadSessions();
 };
 
 } // namespace perf

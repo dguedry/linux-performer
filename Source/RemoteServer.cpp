@@ -348,14 +348,24 @@ async function loadSlots(i) {
         /* Through this same port: a stream on a port of its own would need its
            own hole in the firewall, which is precisely what left the tab
            loading forever the first time. */
-        /* vnc_lite rather than vnc.html: the full client opens its own settings
-           panel and a password box, which is a poor welcome when the server
-           has no password and the connection details are already known. Lite
-           connects straight through and is just the screen. It takes host and
-           port from the page's own address, which is this server. */
+        /* Name the tab after the sound, not the plugin: on a phone the tab strip
+           shows a few characters, and "Oye Como" says which one this is where
+           "Kontakt 8" does not when three programs all use Kontakt.
+
+           The name is also the window target, so pressing Window again for the
+           same slot brings that tab forward instead of opening another one.
+           Browsers key window targets by name, so this costs nothing. */
+        const state = lastState && lastState.inputs[i];
+        const label = state ? (state.currentName || ("Program " + state.current)) : sl.name;
+        const target = "performer-plugin-" + i + "-" + sl.slot;
+
         const base = "/view/" + r.port;
-        window.open(base + "/plugin.html?path="
-                    + encodeURIComponent(base.slice(1) + "/websockify"), "_blank");
+        const url = base + "/plugin.html?path="
+                  + encodeURIComponent(base.slice(1) + "/websockify")
+                  + "&title=" + encodeURIComponent(label);
+
+        const tab = window.open(url, target);
+        if (tab) tab.focus();
       } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
     };
 
@@ -706,9 +716,20 @@ bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& fir
     if (! upstream.connect ("127.0.0.1", webPort, 3000))
         return false;
 
-    // The request we already read has to go first, or the bridge sees a
-    // truncated request and hangs up.
-    const auto utf8 = firstChunk.toRawUTF8();
+    /* One request per connection. The browser would otherwise send several down
+       the same socket, and only the first carries a prefix this relay has
+       already stripped -- the rest reached the bridge as /view/6910/core/... and
+       404'd, which looked like a flaky module loader.
+
+       Asking the browser to close each connection sidesteps rewriting a stream
+       that turns into websocket frames partway through. It costs a connection
+       per file, on loopback, once per window opened. */
+    auto request = firstChunk;
+    if (! request.containsIgnoreCase ("upgrade: websocket"))
+        request = request.replace ("\r\nConnection: keep-alive", "\r\nConnection: close")
+                         .replace ("\r\nConnection: Keep-Alive", "\r\nConnection: close");
+
+    const auto utf8 = request.toRawUTF8();
     if (upstream.write (utf8, (int) strlen (utf8)) <= 0)
         return false;
 
@@ -777,6 +798,8 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 
   const q = new URLSearchParams(location.search);
   const path = q.get('path') || 'websockify';
+  const title = q.get('title');
+  if (title) document.title = title;
   const url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://'
             + location.hostname + (location.port ? ':' + location.port : '') + '/' + path;
 

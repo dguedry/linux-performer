@@ -2,6 +2,7 @@
 
 #include "Engine.h"
 #include "Favourites.h"
+#include "PluginView.h"
 #include <juce_core/juce_core.h>
 
 namespace perf
@@ -85,7 +86,13 @@ private:
     juce::String paramsJson (int inputIndex, int slot, int effect, const juce::String& search, bool allChannels) const;
     bool authorised (const juce::String& request) const;
 
-    void programChanged (int, int) override   { ++revision; }
+    void programChanged (int, int) override
+    {
+        ++revision;
+        /* The outgoing program's editor closes with it, so any bridge serving
+           that window is now pointing at nothing. */
+        PluginView::dropDeadSessions();
+    }
     void setupChanged() override              { ++revision; }
     void programContentChanged (int, int) override { ++revision; }
 

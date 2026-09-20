@@ -183,6 +183,20 @@ void PluginView::stopAll()
         }
 }
 
+void PluginView::dropDeadSessions()
+{
+    const ScopedLock sl (lock);
+    for (int i = sessions.size(); --i >= 0;)
+    {
+        auto* r = sessions.getUnchecked (i);
+        if (findWindow (r->session.title) == r->session.windowId) continue;
+
+        if (r->web != nullptr) r->web->kill();
+        if (r->vnc != nullptr) r->vnc->kill();
+        sessions.remove (i);
+    }
+}
+
 Array<PluginView::Session> PluginView::active()
 {
     const ScopedLock sl (lock);

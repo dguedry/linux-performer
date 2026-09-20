@@ -342,6 +342,10 @@ This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
 any are missing. The stream travels on the same port as the phone app, so
 nothing extra has to be opened in a firewall, and it stops when Performer does.
 
+The tab is named after the program, so several open plugin windows are told
+apart at a glance, and pressing **Window** again for the same slot brings its
+existing tab forward rather than opening another.
+
 Pinch to zoom, and drag to move around: the plugin is shown at its real size
 inside a scrollable area, so zooming magnifies actual pixels rather than
 stretching a shrunken picture. **Fit** in the corner squeezes the whole window
