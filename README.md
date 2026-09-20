@@ -159,8 +159,9 @@ organ but never follow it when you moved a drawbar in the plugin itself.
 Mirroring the real editor sidesteps that, and needs no setting up per plugin:
 whatever the plugin shows is what you get.
 
-Pinch to zoom, **Fit** scales the whole window onto the screen, and **Full**
-hides the browser's address bar. Each plugin gets its own tab, named after the
+A touch holds for as long as your finger does, so the plugin's own keyboard
+plays properly and chords work. **+**/**-** and **Fit** handle zoom, **Move**
+switches to panning and pinching, and **Full** hides the browser's address bar. Each plugin gets its own tab, named after the
 program. Needs `x11vnc`, `websockify` and `novnc`, and works on Wayland
 desktops as well as X11 ones -- Performer and plugin editors are X11 windows, so
 they run through XWayland, which `x11vnc` reads and writes normally.

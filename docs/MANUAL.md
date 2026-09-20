@@ -344,10 +344,20 @@ The tab is named after the program, so several open plugin windows are told
 apart at a glance, and pressing **GUI** again for the same instrument brings its
 existing tab forward rather than opening another.
 
-Pinch to zoom, and drag to move around: the plugin is shown at its real size
-inside a scrollable area, so zooming magnifies actual pixels rather than
-stretching a shrunken picture. **Fit** in the corner squeezes the whole window
-onto the screen when you want to see all of it at once.
+The page opens ready to play. A touch presses where you put it and holds for
+as long as you hold it, so the plugin's own keyboard sounds like a keyboard --
+several fingers make a chord, and sliding across the keys glissandos. The same
+applies to a drawbar or a knob: press it and drag.
+
+This is why the page handles touches itself rather than leaving them to noVNC,
+which reads them as gestures. A gesture has to be recognised before it can be
+acted on, so a tap arrived as a press and a release in the same instant -- a
+pop rather than a note -- and only after a wait to rule out a pinch.
+
+Because playing owns the touches, panning and zooming have their own controls:
+**+** and **-** zoom a step at a time, and **Fit** scales the whole window onto
+the screen. **Move** hands the touches back to the browser so you can pinch and
+drag the plugin around, and stops sending them to it; press it again to play.
 
 **Full** next to it hides the browser's address bar, which is worth doing on any
 screen: the bar costs a fifth of the height on a small one, and a plugin window

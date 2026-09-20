@@ -431,6 +431,23 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      the address bar. 100dvh follows the bar as it comes and goes. The 100vh
      line is the fallback for browsers that do not know dvh. */
   #screen { width:100%; height:100vh; height:100dvh; overflow:auto; -webkit-overflow-scrolling:touch; }
+
+  /* A plugin window is a control surface, not a document. Without this the
+     browser treats a press-and-hold as the start of a text selection: the
+     cursor turns into an I-beam, a long press pops up the selection handles,
+     and the drag never reaches the plugin as a held note. */
+  #screen, #screen * {
+    -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none;
+    -webkit-touch-callout:none;
+  }
+  /* A finger, because everything under it is something to press. */
+  #screen canvas { cursor:pointer; }
+
+  /* While playing, the canvas owns every touch: the browser must not steal one
+     to scroll or zoom, or a held key is cut short the moment the finger moves a
+     few pixels. Panning and pinching live on the Move button instead. */
+  body.playing #screen { touch-action:none; overscroll-behavior:contain; }
+  body.playing #screen canvas { touch-action:none; }
   #msg { position:fixed; left:0; right:0; top:0; padding:10px 14px; font-size:14px;
          background:#26282f; border-bottom:1px solid #2b2d35; }
   #bar { position:fixed; right:10px; bottom:10px; display:flex; gap:8px;
@@ -442,7 +459,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 </head><body>
 <div id="msg">Connecting...</div>
 <div id="screen"></div>
-<div id="bar"><button id="full">Full</button><button id="fit">Fit</button></div>
+<div id="bar"><button id="move">Move</button><button id="zoomout">-</button><button id="zoomin">+</button><button id="full">Full</button><button id="fit">Fit</button></div>
 <script type="module">
   import RFB from './core/rfb.js';
 
@@ -456,11 +473,138 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   const msg = document.getElementById('msg');
   const rfb = new RFB(document.getElementById('screen'), url, {});
 
-  /* Clipped rather than scaled: full size inside a scrollable box, so pinching
+  /* Clipped rather than scaled: full size inside a scrollable box, so zooming
      magnifies real pixels instead of stretching a shrunken picture. */
   rfb.clipViewport = true;
   rfb.scaleViewport = false;
   rfb.resizeSession = false;
+
+  /* ---------------------------------------------------------------------
+     Playing the plugin by touch.
+
+     noVNC reads touches as gestures, which is right for a desktop and wrong
+     for an instrument. A tap arrives as a press and a release sent one after
+     the other with nothing in between, so a key gets a note-on and a note-off
+     in the same instant: a pop rather than a note. It also waits 250ms before
+     deciding a touch is not the start of a pinch, so what does sound, sounds
+     late.
+
+     So while playing we handle pointers ourselves and send press, move and
+     release as they actually happen. The note lasts exactly as long as the
+     finger is down, and several fingers make a chord. Panning and zooming move
+     to the Move button and the +/- buttons, where they cannot be confused with
+     playing.
+     --------------------------------------------------------------------- */
+  const screen = document.getElementById('screen');
+  const fit = document.getElementById('fit');
+  let playing = true;            // start ready to play: that is what this is for
+  let zoom = 1;
+  let fitting = false;
+
+  function syncFit() {
+    fit.className = fitting ? 'on' : '';
+    fit.textContent = fitting ? 'Actual size' : 'Fit';
+  }
+
+  const canvasOf = () => screen.querySelector('canvas');
+
+  /* Where a touch landed, in the framebuffer's own pixels. The canvas may be
+     scaled by zoom, so a browser pixel is not a plugin pixel. */
+  function framebufferPos(ev) {
+    const c = canvasOf();
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: Math.round((ev.clientX - r.left) / r.width * c.width),
+             y: Math.round((ev.clientY - r.top) / r.height * c.height) };
+  }
+
+  /* Bypasses the gesture layer: this is the same call noVNC makes once it has
+     made up its mind about a gesture, minus the deciding. */
+  function sendPointer(pos, mask) {
+    if (!pos) return;
+    try { rfb._sendMouse(pos.x, pos.y, mask); } catch (e) { /* not connected yet */ }
+  }
+
+  /* One entry per finger, so a chord holds. The mask is a button bitmask:
+     1 = left, which is every press a plugin GUI cares about. */
+  const down = new Map();
+
+  function onDown(ev) {
+    if (!playing) return;
+    const pos = framebufferPos(ev);
+    if (!pos) return;
+    ev.preventDefault();
+    try { ev.target.setPointerCapture(ev.pointerId); } catch (e) {}
+    down.set(ev.pointerId, pos);
+    sendPointer(pos, 1);
+  }
+
+  function onMove(ev) {
+    if (!playing || !down.has(ev.pointerId)) return;
+    const pos = framebufferPos(ev);
+    if (!pos) return;
+    ev.preventDefault();
+    down.set(ev.pointerId, pos);
+    /* Held: a glissando across the keys, or a drawbar being dragged. */
+    sendPointer(pos, 1);
+  }
+
+  function onUp(ev) {
+    if (!down.has(ev.pointerId)) return;
+    const pos = framebufferPos(ev) || down.get(ev.pointerId);
+    ev.preventDefault();
+    down.delete(ev.pointerId);
+    sendPointer(pos, 0);
+  }
+
+  screen.addEventListener('pointerdown', onDown);
+  screen.addEventListener('pointermove', onMove);
+  screen.addEventListener('pointerup', onUp);
+  screen.addEventListener('pointercancel', onUp);
+  /* A finger leaving the window still has to lift the key, or the note hangs. */
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('blur', () => {
+    for (const [id, pos] of down) sendPointer(pos, 0);
+    down.clear();
+  });
+
+  /* Zoom by scaling the canvas itself, so the framebuffer stays 1:1 and text
+     inside the plugin stays as sharp as the plugin drew it. */
+  function applyZoom() {
+    const c = canvasOf();
+    if (!c) return;
+    c.style.transformOrigin = '0 0';
+    c.style.transform = zoom === 1 ? '' : 'scale(' + zoom + ')';
+    /* The scroll box has to grow with it, or half the plugin is unreachable. */
+    c.style.marginRight = zoom === 1 ? '' : ((c.width * (zoom - 1)) + 'px');
+    c.style.marginBottom = zoom === 1 ? '' : ((c.height * (zoom - 1)) + 'px');
+  }
+
+  function setZoom(z) {
+    zoom = Math.min(6, Math.max(0.25, z));
+    if (fitting) { fitting = false; rfb.scaleViewport = false; syncFit(); }
+    applyZoom();
+  }
+
+  document.getElementById('zoomin').onclick = () => setZoom(zoom * 1.25);
+  document.getElementById('zoomout').onclick = () => setZoom(zoom / 1.25);
+
+  /* Move: hands the touches back to the browser so the plugin can be panned and
+     pinched, and stops sending them to the plugin. Two modes rather than one
+     clever one, because guessing wrong mid-song is worse than pressing a
+     button. */
+  const move = document.getElementById('move');
+  function syncMode() {
+    document.body.classList.toggle('playing', playing);
+    move.className = playing ? '' : 'on';
+    move.textContent = playing ? 'Move' : 'Playing off';
+    move.title = playing ? 'Pan and pinch instead of playing'
+                         : 'Back to playing the plugin';
+    if (!playing) { for (const [id, pos] of down) sendPointer(pos, 0); down.clear(); }
+  }
+  move.onclick = () => { playing = !playing; syncMode(); };
+  syncMode();
 
   /* Fullscreen: the address bar is a real cost on a small screen, and a plugin
      window is exactly the thing you want the whole screen for. Only offered
@@ -481,13 +625,14 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
     full.style.display = 'none';
   }
 
-  let fitting = false;
-  const fit = document.getElementById('fit');
   fit.onclick = () => {
     fitting = !fitting;
+    /* Fit is noVNC's own scaling, which keeps the whole window on screen. It
+       and the +/- zoom are two ways of doing one thing, so turning on either
+       turns off the other. */
+    if (fitting) { zoom = 1; applyZoom(); }
     rfb.scaleViewport = fitting;
-    fit.className = fitting ? 'on' : '';
-    fit.textContent = fitting ? 'Actual size' : 'Fit';
+    syncFit();
   };
 
   rfb.addEventListener('connect', () => { msg.style.display = 'none'; });
