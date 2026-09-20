@@ -121,7 +121,7 @@ plugins, select an input and give it a MIDI device, click a program, press
 **Phone** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
-![The web app on a phone: group filters, the programs of one input, and the Hammond drawbars as upright faders](docs/images/phone-app.png)
+![The web app on a phone: group filters and the programs of one input](docs/images/phone-app.png)
 
 ![The Phone control dialog](docs/images/phone-control.png)
 
@@ -129,6 +129,10 @@ Scan the square code with the phone's camera, or type the address and the
 six-character code. The code survives a restart, so a home-screen shortcut keeps
 working, and **Print map** puts the same scannable code on the printed program
 sheet.
+
+**Window** on a slot mirrors that plugin's own interface to the phone, so a
+Kontakt library or a B-3X can be adjusted from the stand. Pinch to zoom; the tab
+is named after the program. Needs `x11vnc`, `websockify` and `novnc`.
 
 If the phone cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which

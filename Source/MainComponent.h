@@ -6,7 +6,6 @@
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "HelpWindow.h"
-#include "PhoneTemplate.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace perf
@@ -37,8 +36,6 @@ public:
 
     void openPluginEditor (int inputIndex, int program, int slot, int effect = -1);
 
-    /** Chooses and labels the controls one slot shows on the phone. */
-    void editPhoneControls (int inputIndex, int program, int slot);
     void showStatus (const juce::String&);
     /** Marks the setup as changed so the periodic autosave picks it up. */
     void markDirty()                        { dirty = true; }
@@ -102,8 +99,6 @@ private:
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;
     std::unique_ptr<RemoteServer> remote;
-    /** Shared sets of phone controls, for this plugin and for sharing. */
-    std::unique_ptr<PhoneTemplates> phoneTemplates;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
 

@@ -33,8 +33,7 @@ target_sources(Performer PRIVATE
     Source/RemotePlugin.cpp
     Source/LowLatency.cpp
     Source/HelpWindow.cpp
-    Source/PhoneControlsEditor.cpp
-    Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/Favourites.cpp Source/PhoneTemplate.cpp Source/PluginView.cpp
+    Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp
     Source/Engine.cpp
     Source/MainComponent.cpp)
 
@@ -125,7 +124,7 @@ add_custom_command(TARGET Performer POST_BUILD
 # Tests
 enable_testing()
 juce_add_console_app(ModelTest PRODUCT_NAME "ModelTest")
-target_sources(ModelTest PRIVATE Tests/ModelTest.cpp Source/Model.cpp Source/MappingSuggestions.cpp Source/QrCode.cpp Source/PhoneTemplate.cpp)
+target_sources(ModelTest PRIVATE Tests/ModelTest.cpp Source/Model.cpp Source/MappingSuggestions.cpp Source/QrCode.cpp)
 target_include_directories(ModelTest PRIVATE Source)
 target_compile_definitions(ModelTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
@@ -137,7 +136,7 @@ target_link_libraries(ModelTest PRIVATE
 add_test(NAME ModelTest COMMAND ModelTest)
 
 juce_add_console_app(RemoteTest PRODUCT_NAME "RemoteTest")
-target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/Favourites.cpp Source/PhoneTemplate.cpp Source/PluginView.cpp Source/PluginView.cpp Source/PhoneTemplate.cpp Source/Favourites.cpp Source/QrCode.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
+target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(RemoteTest PRIVATE Source)
 target_compile_definitions(RemoteTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
@@ -152,7 +151,7 @@ target_link_libraries(RemoteTest PRIVATE
 add_test(NAME RemoteTest COMMAND RemoteTest)
 
 juce_add_console_app(EngineTest PRODUCT_NAME "EngineTest")
-target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/QrCode.cpp Source/PhoneTemplate.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
+target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/QrCode.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(EngineTest PRIVATE Source)
 target_compile_definitions(EngineTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1

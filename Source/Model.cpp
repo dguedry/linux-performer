@@ -81,13 +81,6 @@ var SlotDef::toVar() const
     o->setProperty ("pan", pan);
     o->setProperty ("outChannel", outChannel);
     o->setProperty ("effects", effectsToVar (effects));
-    // Only written when chosen, so setups that never used the phone are unchanged.
-    if (! phoneControls.empty())
-    {
-        Array<var> arr;
-        for (const auto& c : phoneControls) arr.add (c.toVar());
-        o->setProperty ("phoneControls", arr);
-    }
     return var (o);
 }
 
@@ -108,20 +101,6 @@ SlotDef SlotDef::fromVar (const var& v)
     s.pan           = juce::jlimit (-1.0f, 1.0f, prop<float> (v, "pan", 0.0f));
     s.outChannel = prop<int>   (v, "outChannel", 0);
     s.effects    = effectsFromVar (v);
-    if (auto* o = v.getDynamicObject())
-        if (auto* arr = o->getProperty ("phoneControls").getArray())
-            for (const auto& c : *arr)
-            {
-                /* Written as bare ID strings before labels existed; accept both
-                   so a setup saved last week still loads. */
-                if (c.isString())
-                {
-                    if (c.toString().isNotEmpty())
-                        s.phoneControls.push_back ({ c.toString(), {}, {}, PhoneControl::Widget::automatic });
-                }
-                else if (auto ctl = PhoneControl::fromVar (c); ctl.paramId.isNotEmpty())
-                    s.phoneControls.push_back (ctl);
-            }
     return s;
 }
 

@@ -302,41 +302,6 @@ void Engine::resetTapTempo() { tapTimes.clear(); }
 
 void Engine::armTapTempoLearn (bool b) { tapLearnArmed.store (b); }
 
-std::vector<PhoneControl> Engine::getSlotPhoneControls (int inputIndex, int program, int slot) const
-{
-    if (! validInput (inputIndex) || ! validProgram (program)) return {};
-    const auto& slots = setup.inputs[(size_t) inputIndex].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size()) return {};
-    return slots[(size_t) slot].phoneControls;
-}
-
-void Engine::setSlotPhoneControl (int inputIndex, int program, int slot, const String& paramId, bool on)
-{
-    if (! validInput (inputIndex) || ! validProgram (program) || paramId.isEmpty()) return;
-    auto& slots = setup.inputs[(size_t) inputIndex].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size()) return;
-
-    auto& ids = slots[(size_t) slot].phoneControls;
-    const auto at = std::find_if (ids.begin(), ids.end(),
-                                  [&] (const PhoneControl& c) { return c.paramId == paramId; });
-
-    if (on && at == ids.end())        ids.push_back ({ paramId, {}, {}, PhoneControl::Widget::automatic });
-    else if (! on && at != ids.end()) ids.erase (at);
-    else                              return;          // already as asked
-
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
-}
-
-void Engine::setSlotPhoneControls (int inputIndex, int program, int slot, std::vector<PhoneControl> controls)
-{
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
-    auto& slots = setup.inputs[(size_t) inputIndex].programs[(size_t) program].slots;
-    if (slot < 0 || slot >= (int) slots.size()) return;
-
-    slots[(size_t) slot].phoneControls = std::move (controls);
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
-}
-
 void Engine::setTapTempoCC (int cc)
 {
     setup.tapTempoCC = jlimit (0, 127, cc);

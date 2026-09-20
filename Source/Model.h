@@ -1,7 +1,6 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
-#include "PhoneTemplate.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <vector>
 
@@ -35,14 +34,6 @@ struct SlotDef
     float pan = 0.0f;                 // -1 (left) .. 1 (right); a balance on the stereo output, unity at centre
     int outChannel = 0;               // 0 = keep incoming channel, 1..16 = force
     std::vector<EffectDef> effects;   // processed in order after the instrument
-
-    /** The controls shown on the phone for THIS instance, in the order they
-        should appear, with any custom labels.
-
-        Per instance rather than per plugin: two Kontakts in one setup are two
-        different instruments, and a filter cutoff chosen on the strings should
-        not appear on the drums. */
-    std::vector<PhoneControl> phoneControls;
 
     juce::var toVar() const;
     static SlotDef fromVar (const juce::var&);

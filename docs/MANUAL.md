@@ -261,7 +261,7 @@ input with its current program in large type and every program you have set up;
 tap one to switch to it. There is a PANIC button too. Nothing is installed on
 the phone: it is a web page.
 
-![The web app on a phone: group filters, the programs of one input, and the Hammond drawbars as upright faders](images/phone-app.png)
+![The web app on a phone: group filters and the programs of one input](images/phone-app.png)
 
 The current program for each input is highlighted, and the big number at the top
 of each block is what a keyboard would send as a Program Change. Tapping a
@@ -297,46 +297,20 @@ Anyone on your network who has the code can change your sounds, which is the
 right level of care for a stage tool and no more: do not expect it to be safe on
 an untrusted network.
 
-### Controls on the phone
-
-Under each input's programs, the phone shows the slots of the program you are
-on, labelled the way the desktop labels them, and a slider for each control you
-have chosen from that plugin. Press **Choose** on a slot to pick them: search by
-name, tap to add or remove, press **Done**.
-
-**Phone...** on a slot opens an editor for that instrument's controls: which
-parameters appear, what each is called on the phone, whether it is drawn as a
-fader or a switch, and what order they come in. A short label is worth setting
--- "Growl" fits where "CC 3" tells you nothing, and nine drawbars only fit side
-by side because their labels are one character.
-
-### Sharing controls as a template
-
-The same editor saves a set of controls as a **template**, and exports it as a
-file you can send to someone else.
-
-This matters most for Kontakt and its like. Kontakt's parameters are generic
-MIDI controllers, so a host can only ever call them "CC 3" and "CC 21"; what
-they actually do depends on the library loaded into it, which Performer cannot
-see. Someone who owns that library works out once that CC 21 is the bark, labels
-them, and shares it. Everyone else gets those labels without the detective work.
-
-Templates are chosen by name and never applied automatically. Two instances of
-one plugin look identical from outside, so there is nothing to detect, and a
-wrong guess applied silently would be worse than being asked. When you apply
-one, Performer says how well it fits: how many of its controls the plugin still
-has, and how many it now calls something else. That last number is what a Rhodes
-template landing on a drum kit looks like.
-
 ### Showing a plugin's own window
 
-**Window** on a slot opens that plugin's own interface on the phone, mirrored
-from the computer. Some plugins cannot be followed any other way. The parameters
-worth putting on a phone for a Kontakt library are its MIDI controller inputs:
-values go in, and nothing comes back. Asking Kontakt what CC 12 is set to
-returns whatever was last written to it, not where the drawbar actually sits, so
-a fader on the phone can drive that organ but can never follow it. Mirroring the
-window sidesteps that, because what you see is what the plugin is showing.
+Under each input's programs the phone lists the slots of the program you are on,
+labelled the way the desktop labels them. **Window** on a slot opens that
+plugin's own interface on the phone, mirrored from the computer.
+
+The plugin's own window rather than a set of faders built for it, because a
+plugin's controls often cannot be followed any other way. The parameters worth
+putting on a phone for a Kontakt library are its MIDI controller inputs: values
+go in, and nothing comes back. Asking Kontakt what CC 12 is set to returns
+whatever was last written to it, not where the drawbar actually sits, so a fader
+on the phone could drive that organ but never follow it. Mirroring the window
+sidesteps that, because what you see is what the plugin is showing -- and it
+needs no setting up for each plugin, which matters when a rig has a dozen.
 
 This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
 any are missing. The stream travels on the same port as the phone app, so
@@ -354,44 +328,6 @@ onto the screen when you want to see all of it at once.
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.
-
-While the phone page is open, Performer asks the loaded plugins what their
-chosen controls are set to, about once a second, so the sliders follow the
-plugin as well as drive it. Some plugins never volunteer that: the parameters
-worth putting on a phone for a Kontakt library are its MIDI controller inputs,
-and a plugin has no reason to report a value back out through an input. Asking
-is the only way to know. It stops a few seconds after the last phone goes away.
-
-A control that has two positions gets an ON/OFF button; one with a handful --
-a drawbar has nine -- gets a fader that snaps to them and reads out the
-position, rather than a percentage that can never land on a real setting.
-Anything else gets an ordinary fader. Plugins are unreliable about saying which
-is which, so Performer uses the number of positions the plugin reports rather
-than its claim about being a switch: Hammond B-3X calls every one of its
-parameters continuous, including the ones labelled Switch.
-
-Choices belong to the slot you made them in, and are saved with the setup. Two
-Kontakts in one set are two instruments: a filter cutoff chosen on the strings
-does not appear on the drums. They are stored by the plugin's own parameter ID,
-so an updated plugin that renumbers things drops the control rather than quietly
-moving the wrong one.
-
-The picker hides the same things the desktop's parameter picker hides. Plugins
-publish far more than anyone wants to scroll -- Kontakt reports 4145 parameters,
-most of them empty automation slots and per-channel copies of the same MIDI
-controller -- so the controls for the channel your input plays on come first,
-then the plugin's own named parameters, and the rest sit behind **Show more**.
-
-Some plugins publish nothing worth a slider. A plugin only offers controls it
-chooses to name, and not all of them do: Studiologic's Numa Player, for example,
-reports 2145 parameters of which 2048 are MIDI controller slots, 64 are marked
-unassigned and one is Bypass, so there is nothing to put on a fader. The picker
-says so rather than showing a page of blanks. Use that plugin's own window
-instead.
-
-A control can only be chosen while its plugin is loaded, which means the program
-you are on. Turn on **Preload all programs** in the toolbar if you want to set
-up controls for programs you are not currently playing.
 
 ### If the phone cannot connect
 

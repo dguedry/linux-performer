@@ -1,6 +1,5 @@
 #include "MainComponent.h"
 #include "QrCode.h"
-#include "PhoneControlsEditor.h"
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
 #include "AudioSettingsComponent.h"
@@ -705,10 +704,6 @@ public:
             outCh.onChange    = [this, &e, &o] { e.setSlotOutChannel (o.getSelectedInput(), o.getEditedProgram(), index, outCh.getSelectedId() - 1); o.markDirty(); };
             guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), index, -1);
                                                  else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), index, -1); };
-            addAndMakeVisible (phoneBtn);
-            phoneBtn.setTooltip ("Choose and label the controls this instrument shows on the phone, "
-                                 "and share them as a template");
-            phoneBtn.onClick  = [this, &o] { o.editPhoneControls (o.getSelectedInput(), o.getEditedProgram(), index); };
             removeBtn.onClick = [this, &e, &o] { e.removeSlot (o.getSelectedInput(), o.getEditedProgram(), index); };
         }
 
@@ -765,8 +760,6 @@ public:
             removeBtn.setBounds (top.removeFromRight (28));
             top.removeFromRight (4);
             guiBtn.setBounds (top.removeFromRight (64));
-            top.removeFromRight (4);
-            phoneBtn.setBounds (top.removeFromRight (64));
             name.setBounds (top);
 
             r.removeFromTop (2);
@@ -806,7 +799,7 @@ public:
         Slider gain, transpose, pan, velCurve, keyRange { Slider::TwoValueHorizontal, Slider::NoTextBox }, velRange { Slider::TwoValueHorizontal, Slider::NoTextBox };
         Label gainCap, transposeCap, keysCap, chCap, panCap, velCap, curveCap;
         ComboBox outCh;
-        TextButton guiBtn { "Edit GUI" }, phoneBtn { "Phone..." }, removeBtn { "X" };
+        TextButton guiBtn { "Edit GUI" }, removeBtn { "X" };
         EffectChainComponent chain;
     };
 
@@ -2045,15 +2038,6 @@ void MainComponent::updateTempoLabel()
 
 /** Typing a tempo, and choosing what taps it. Behind a right-click because
     neither is something you do mid-song: on stage you tap. */
-void MainComponent::editPhoneControls (int inputIndex, int program, int slot)
-{
-    if (phoneTemplates == nullptr)
-        phoneTemplates = std::make_unique<PhoneTemplates> (
-            settings.getFile().getSiblingFile ("phone-templates.json"));
-
-    PhoneControlsEditor::show (engine, *phoneTemplates, inputIndex, program, slot, bgPanel);
-}
-
 void MainComponent::showTempoMenu()
 {
     PopupMenu m;
