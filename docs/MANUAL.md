@@ -309,9 +309,15 @@ which. Programs with no plugins have no button at all.
 
 ![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](images/tablet-plugin-gui.png)
 
-That is the plugin itself, not a drawing of it. Performer used to offer faders
-you picked per plugin and labelled by hand, and they are gone: what you get now
-is whatever the plugin shows, with nothing to set up first.
+That is the plugin itself, not a drawing of it, and it is fully interactive:
+drag those drawbars, browse the library, open a menu, load a different patch.
+Input travels back to the plugin, so the tablet works as a second screen and
+mouse rather than a remote with a fixed set of buttons -- and a laptop or phone
+on the same network does the same, because it is only a web page.
+
+Performer used to offer faders you picked per plugin and labelled by hand, and
+they are gone: what you get now is whatever the plugin shows, with nothing to
+set up first.
 
 The reason is that the faders could never be trusted to tell the truth. A
 plugin's controls often cannot be followed any other way. The parameters worth

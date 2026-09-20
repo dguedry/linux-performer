@@ -85,8 +85,16 @@ PluginView::Session PluginView::start (const String& title, String& error)
     for (auto* r : sessions)
         if (r->session.title == title)
         {
-            // Already serving, unless the window has gone since.
-            if (findWindow (title) == r->session.windowId) return r->session;
+            /* Already serving, unless the window has gone since -- or either
+               helper has. A half-dead session is worse than none: the port
+               answers, so the tab opens and then hangs. */
+            if (findWindow (title) == r->session.windowId
+                && r->vnc != nullptr && r->vnc->isRunning()
+                && r->web != nullptr && r->web->isRunning())
+                return r->session;
+
+            if (r->web != nullptr) r->web->kill();
+            if (r->vnc != nullptr) r->vnc->kill();
             sessions.removeObject (r);
             break;
         }
@@ -189,7 +197,10 @@ void PluginView::dropDeadSessions()
     for (int i = sessions.size(); --i >= 0;)
     {
         auto* r = sessions.getUnchecked (i);
-        if (findWindow (r->session.title) == r->session.windowId) continue;
+        if (findWindow (r->session.title) == r->session.windowId
+            && r->vnc != nullptr && r->vnc->isRunning()
+            && r->web != nullptr && r->web->isRunning())
+            continue;
 
         if (r->web != nullptr) r->web->kill();
         if (r->vnc != nullptr) r->vnc->kill();

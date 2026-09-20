@@ -4,6 +4,11 @@
 a program for each sound in your set, and change sounds from the keyboard while
 you play -- or from a tablet on a music stand, with no app to install.
 
+And not just the sounds: any plugin you have loaded can be opened and **fully
+operated** from that tablet, laptop or phone -- its own interface, mirrored,
+with every knob, drawbar and menu live under your finger. Pull a drawbar on the
+tablet and the organ on stage moves.
+
 <p align="center">
   <img src="docs/images/performer.png" alt="Performer: two keyboards as inputs, a program list grouped by kind, a Hammond B-3X loaded with its key and velocity ranges, and MIDI mappings for vibrato and Leslie speed" width="900">
 </p>
@@ -28,11 +33,13 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 - **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a set without a controller attached.
-- **Tablet control**: a built-in web app for changing programs from a music
-  stand, and for opening any loaded plugin's own interface on the tablet.
-  Nothing to install -- scan the code or type a short one, and add it to the
-  home screen if you like. Performer can serve its own wifi network when the
-  venue has none.
+- **Tablet control -- the whole plugin, not a remote control for it.** A
+  built-in web app changes programs from a music stand, and opens any loaded
+  plugin's own interface on the tablet, laptop or phone: the real editor,
+  mirrored and fully interactive, so you can reach a Kontakt library's every
+  page or a B-3X's drawbars without walking back to the computer. Nothing to
+  install -- scan the code or type a short one, and add it to the home screen if
+  you like. Performer can serve its own wifi network when the venue has none.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
 in the toolbar to read the same manual inside the app. The rest of this
@@ -131,19 +138,30 @@ six-character code. The code survives a restart, so a home-screen shortcut keeps
 working, and **Print map** puts the same scannable code on the printed program
 sheet.
 
-**GUI** beside each input's program mirrors that plugin's own interface to the
-tablet, so a Kontakt library or a B-3X can be adjusted from the stand:
+### The plugin itself, on the stand
+
+**GUI** beside each input's program puts that plugin's own interface on the
+tablet -- not a picture of it, but the working editor:
 
 ![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](docs/images/tablet-plugin-gui.png)
 
-That is the plugin itself rather than a set of faders standing in for it, which
-is what Performer used to offer. Kontakt's host-visible parameters are MIDI
-controller inputs -- values go in and nothing comes back -- so a fader on the
-tablet could drive an organ but never follow it when you moved a drawbar in the
-plugin. Mirroring the window sidesteps that, and needs no setting up per plugin.
+Everything works: drag those drawbars, browse Kontakt's library, open a menu,
+load a different patch. Input travels back to the plugin, so the tablet is a
+second screen and mouse for it rather than a remote with a fixed set of buttons.
+A laptop or phone on the same network does the same job -- it is a web page, so
+whatever you point at it is a full editor for every plugin in the rig.
+
+That matters most for plugins nothing else can reach. Performer used to offer
+faders you picked and labelled per plugin; they are gone, because they could not
+tell the truth. Kontakt's host-visible parameters are MIDI controller inputs --
+values go in and nothing comes back -- so a fader on the tablet could drive an
+organ but never follow it when you moved a drawbar in the plugin itself.
+Mirroring the real editor sidesteps that, and needs no setting up per plugin:
+whatever the plugin shows is what you get.
 
 Pinch to zoom, **Fit** scales the whole window onto the screen, and **Full**
-hides the browser's address bar. Needs `x11vnc`, `websockify` and `novnc`.
+hides the browser's address bar. Each plugin gets its own tab, named after the
+program. Needs `x11vnc`, `websockify` and `novnc`.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
