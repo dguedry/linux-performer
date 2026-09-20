@@ -342,6 +342,11 @@ This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
 any are missing. The stream travels on the same port as the phone app, so
 nothing extra has to be opened in a firewall, and it stops when Performer does.
 
+Pinch to zoom, and drag to move around: the plugin is shown at its real size
+inside a scrollable area, so zooming magnifies actual pixels rather than
+stretching a shrunken picture. **Fit** in the corner squeezes the whole window
+onto the screen when you want to see all of it at once.
+
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.

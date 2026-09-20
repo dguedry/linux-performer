@@ -354,7 +354,7 @@ async function loadSlots(i) {
            connects straight through and is just the screen. It takes host and
            port from the page's own address, which is this server. */
         const base = "/view/" + r.port;
-        window.open(base + "/vnc_lite.html?scale=true&path="
+        window.open(base + "/plugin.html?path="
                     + encodeURIComponent(base.slice(1) + "/websockify"), "_blank");
       } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
     };
@@ -740,6 +740,72 @@ bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& fir
     upstream.close();
     return true;
 }
+
+/* Our own page for a plugin window, rather than noVNC's.
+
+   Its vnc_lite has no viewport meta tag, so a phone lays the page out at
+   desktop width and pinch does nothing; and it can only scale-to-fit, which
+   makes a 1010px Kontakt window unreadable on a handset. This sets the viewport
+   so the browser's own pinch-zoom works, and shows the plugin at full size in a
+   scrollable box so there is something to zoom into.
+
+   Served from here rather than patched into /usr/share/novnc, which belongs to
+   the distribution and would be overwritten by an update. */
+static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=0.2,maximum-scale=6,user-scalable=yes">
+<title>Plugin</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
+              font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #screen { width:100%; height:100vh; overflow:auto; -webkit-overflow-scrolling:touch; }
+  #msg { position:fixed; left:0; right:0; top:0; padding:10px 14px; font-size:14px;
+         background:#26282f; border-bottom:1px solid #2b2d35; }
+  #bar { position:fixed; right:10px; bottom:10px; }
+  #bar button { background:#26282fdd; color:#d7dbe2; border:1px solid #3a3d47;
+                border-radius:10px; padding:10px 14px; font-size:13px; font-weight:700; }
+  #bar button.on { background:#5aa9ff; color:#06121f; border-color:#5aa9ff; }
+</style>
+</head><body>
+<div id="msg">Connecting...</div>
+<div id="screen"></div>
+<div id="bar"><button id="fit">Fit</button></div>
+<script type="module">
+  import RFB from './core/rfb.js';
+
+  const q = new URLSearchParams(location.search);
+  const path = q.get('path') || 'websockify';
+  const url = (location.protocol === 'https:' ? 'wss' : 'ws') + '://'
+            + location.hostname + (location.port ? ':' + location.port : '') + '/' + path;
+
+  const msg = document.getElementById('msg');
+  const rfb = new RFB(document.getElementById('screen'), url, {});
+
+  /* Clipped rather than scaled: full size inside a scrollable box, so pinching
+     magnifies real pixels instead of stretching a shrunken picture. */
+  rfb.clipViewport = true;
+  rfb.scaleViewport = false;
+  rfb.resizeSession = false;
+
+  let fitting = false;
+  const fit = document.getElementById('fit');
+  fit.onclick = () => {
+    fitting = !fitting;
+    rfb.scaleViewport = fitting;
+    fit.className = fitting ? 'on' : '';
+    fit.textContent = fitting ? 'Actual size' : 'Fit';
+  };
+
+  rfb.addEventListener('connect', () => { msg.style.display = 'none'; });
+  rfb.addEventListener('disconnect', e => {
+    msg.style.display = 'block';
+    msg.textContent = e.detail.clean ? 'The plugin window was closed.'
+                                     : 'Lost the connection to the plugin.';
+  });
+</script>
+</body></html>)HTML";
 
 void RemoteServer::timerCallback()
 {
@@ -1439,6 +1505,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (! known)
         {
             sendResponse (sock, "404 Not Found", "text/plain", "No plugin window is being shown.");
+            return;
+        }
+
+        // Our own page; everything else goes to the bridge untouched.
+        if (rest.fromFirstOccurrenceOf ("/", false, false).startsWith ("plugin.html"))
+        {
+            sendBytes (sock, "200 OK", "text/html; charset=utf-8",
+                       kPluginViewHtml, (int) strlen (kPluginViewHtml));
             return;
         }
 
