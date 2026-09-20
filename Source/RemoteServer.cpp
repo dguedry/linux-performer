@@ -508,15 +508,19 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 
   const canvasOf = () => screen.querySelector('canvas');
 
-  /* Where a touch landed, in the framebuffer's own pixels. The canvas may be
-     scaled by zoom, so a browser pixel is not a plugin pixel. */
-  function framebufferPos(ev) {
+  /* Where a touch landed, in CSS pixels relative to the canvas -- which is what
+     _sendMouse wants. It applies the scale and the viewport offset itself
+     (Display.absX/absY), so converting to framebuffer pixels here would apply
+     both twice and put every click in the wrong place. Clipped to the canvas
+     the way noVNC's own clientToElement does. */
+  function elementPos(ev) {
     const c = canvasOf();
     if (!c) return null;
     const r = c.getBoundingClientRect();
     if (!r.width || !r.height) return null;
-    return { x: Math.round((ev.clientX - r.left) / r.width * c.width),
-             y: Math.round((ev.clientY - r.top) / r.height * c.height) };
+    const clamp = (v, hi) => v < 0 ? 0 : (v >= hi ? hi - 1 : v);
+    return { x: clamp(ev.clientX - r.left, r.width),
+             y: clamp(ev.clientY - r.top, r.height) };
   }
 
   /* Bypasses the gesture layer: this is the same call noVNC makes once it has
@@ -531,8 +535,8 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   const down = new Map();
 
   function onDown(ev) {
-    if (!playing) return;
-    const pos = framebufferPos(ev);
+    if (!playing || ev.pointerType === 'mouse') return;
+    const pos = elementPos(ev);
     if (!pos) return;
     ev.preventDefault();
     try { ev.target.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -541,8 +545,8 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   }
 
   function onMove(ev) {
-    if (!playing || !down.has(ev.pointerId)) return;
-    const pos = framebufferPos(ev);
+    if (!playing || ev.pointerType === 'mouse' || !down.has(ev.pointerId)) return;
+    const pos = elementPos(ev);
     if (!pos) return;
     ev.preventDefault();
     down.set(ev.pointerId, pos);
@@ -551,8 +555,8 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   }
 
   function onUp(ev) {
-    if (!down.has(ev.pointerId)) return;
-    const pos = framebufferPos(ev) || down.get(ev.pointerId);
+    if (ev.pointerType === 'mouse' || !down.has(ev.pointerId)) return;
+    const pos = elementPos(ev) || down.get(ev.pointerId);
     ev.preventDefault();
     down.delete(ev.pointerId);
     sendPointer(pos, 0);
