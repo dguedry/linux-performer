@@ -21,6 +21,7 @@ namespace
        can be open at once without fighting over a port. */
     constexpr int kFirstVncPort = 5910;
     constexpr int kFirstWebPort = 6910;
+    constexpr int kMaxSessions  = 10;      // ports 5910-5919 and 6910-6919 are ours
 
     File findTool (const String& name)
     {
@@ -64,8 +65,20 @@ unsigned long PluginView::findWindow (const String& title)
     auto xdotool = findTool ("xdotool");
     if (xdotool == File()) return 0;
 
+    /* xdotool reads --name as a regular expression. A program called
+       "Strings (Pad)" would then be looking for "Strings Pad" and never find
+       its own window, so every character that means something to a regex is
+       escaped first. */
+    String pattern;
+    for (auto c : title)
+    {
+        if (c < 128 && String ("\\^$.|?*+()[]{}").containsChar (c))
+            pattern << '\\';
+        pattern << c;
+    }
+
     ChildProcess p;
-    if (! p.start (StringArray { xdotool.getFullPathName(), "search", "--name", title }))
+    if (! p.start (StringArray { xdotool.getFullPathName(), "search", "--name", pattern }))
         return 0;
 
     const auto out = p.readAllProcessOutput();
@@ -133,12 +146,36 @@ PluginView::Session PluginView::start (const String& title, String& error)
     }
     raiseWindow (window);
 
-    // A free pair of ports: one per running session.
-    int vncPort = kFirstVncPort, webPort = kFirstWebPort;
-    for (auto* r : sessions)
+    /* A free pair of ports. Probed, not assumed: a stray from a crash, or
+       anything else on the machine, may be sitting on one, and starting x11vnc
+       on a busy port fails silently from here -- the session looks fine and
+       the tablet connects to nothing. */
+    auto portFree = [] (int port)
     {
-        vncPort = jmax (vncPort, r->session.vncPort + 1);
-        webPort = jmax (webPort, r->session.webPort + 1);
+        StreamingSocket probe;
+        const bool ok = probe.createListener (port, "127.0.0.1");
+        probe.close();
+        return ok;
+    };
+    auto inUse = [] (int vnc, int web)
+    {
+        for (auto* r : sessions)
+            if (r->session.vncPort == vnc || r->session.webPort == web) return true;
+        return false;
+    };
+
+    int vncPort = 0, webPort = 0;
+    for (int i = 0; i < kMaxSessions; ++i)
+    {
+        const int v = kFirstVncPort + i, w = kFirstWebPort + i;
+        if (inUse (v, w) || ! portFree (v) || ! portFree (w)) continue;
+        vncPort = v; webPort = w;
+        break;
+    }
+    if (vncPort == 0)
+    {
+        error = "No free port for the plugin window.";
+        return {};
     }
 
     auto running = std::make_unique<Running>();
@@ -194,26 +231,48 @@ void PluginView::stop (const String& title)
 
 void PluginView::stopAll()
 {
-    const ScopedLock sl (lock);
-    for (auto* r : sessions)
     {
-        if (r->web != nullptr) r->web->kill();
-        if (r->vnc != nullptr) r->vnc->kill();
-    }
-    sessions.clear();
-
-    /* Belt and braces: anything of ours still holding a port after its
-       ChildProcess has gone. A websockify that outlived Performer once kept
-       port 7777 bound, so the next run could not start its tablet server at
-       all -- and nothing about that failure pointed at the real cause. */
-    if (auto pkill = findTool ("pkill"); pkill != File())
-        for (int port = kFirstVncPort; port < kFirstVncPort + 10; ++port)
+        const ScopedLock sl (lock);
+        for (auto* r : sessions)
         {
-            ChildProcess p;
-            p.start (StringArray { pkill.getFullPathName(), "-f",
-                                   "x11vnc .*-rfbport " + String (port) });
-            p.waitForProcessToFinish (1500);
+            if (r->web != nullptr) r->web->kill();
+            if (r->vnc != nullptr) r->vnc->kill();
         }
+        sessions.clear();
+    }
+    sweepStrays();
+}
+
+void PluginView::sweepStrays()
+{
+    /* Anything of ours still holding a port after its ChildProcess has gone --
+       after a crash, or a websockify that outlived Performer, which once kept
+       port 7777 bound so the next run could not start its tablet server at
+       all. The patterns are the exact argument shapes this file launches, on
+       our port range only, so nothing else on the machine can match: a VNC
+       server someone runs for their own desktop is on other ports and has
+       other arguments. */
+    auto pkill = findTool ("pkill");
+    if (pkill == File()) return;
+
+    /* Anchored at both ends to the exact command lines start() builds. pkill
+       -f matches anywhere in a process's whole command line, so an unanchored
+       pattern also matches a terminal, an editor or a script that merely
+       mentions those words -- which is how a test shell got killed while this
+       was being checked. With ^ and $ only a process that IS one of ours fits.
+       websockify is a Python script, so its argv[0] is the interpreter. */
+    const String vncRange = "59[1][0-9]";        // 5910-5919
+    const String webRange = "69[1][0-9]";        // 6910-6919
+    for (const String pattern : {
+            "^\\S*x11vnc -id [0-9]+ -localhost -rfbport " + vncRange
+                + " -nopw -forever -shared -quiet -noxdamage$",
+            "^(\\S+ )?\\S*websockify --web=\\S+ 127\\.0\\.0\\.1:" + webRange
+                + " 127\\.0\\.0\\.1:" + vncRange + "$" })
+    {
+        ChildProcess p;
+        if (p.start (StringArray { pkill.getFullPathName(), "-f", pattern }))
+            p.waitForProcessToFinish (2000);
+    }
 }
 
 void PluginView::dropDeadSessions()

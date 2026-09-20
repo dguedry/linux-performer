@@ -46,6 +46,12 @@ public:
     static void stop (const juce::String& title);
     static void stopAll();
 
+    /** Kills any x11vnc or websockify of ours left over from an earlier run --
+        after a crash they keep their ports, and every GUI press would fail until
+        someone killed them by hand. Matches only our own argument shapes on our
+        own port range. */
+    static void sweepStrays();
+
     /** The sessions running right now. */
     static juce::Array<Session> active();
 

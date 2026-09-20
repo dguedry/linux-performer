@@ -475,16 +475,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
             + location.hostname + (location.port ? ':' + location.port : '') + '/' + path;
 
   const msg = document.getElementById('msg');
-  const rfb = new RFB(document.getElementById('screen'), url, {});
-
-  /* Full size inside a scrollable box, so zooming magnifies real pixels
-     instead of stretching a shrunken picture. clipViewport must be FALSE for
-     that: true sizes the canvas to the container and hides the rest of the
-     plugin, and with nothing set up to drag the viewport, a tablet narrower
-     than the plugin could never reach the far side. */
-  rfb.clipViewport = false;
-  rfb.scaleViewport = false;
-  rfb.resizeSession = false;
+  let rfb = null;              // the current connection; replaced on reconnect
 
   /* ---------------------------------------------------------------------
      Playing the plugin by touch.
@@ -687,12 +678,41 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
     applyZoom();
   };
 
-  rfb.addEventListener('connect', () => { msg.style.display = 'none'; reapplyZoomLater(); });
-  rfb.addEventListener('disconnect', e => {
-    msg.style.display = 'block';
-    msg.textContent = e.detail.clean ? 'The plugin window was closed.'
-                                     : 'Lost the connection to the plugin.';
-  });
+  /* Connect, and keep connecting. A wifi blip on a stand must not leave the
+     page saying "lost the connection" until someone walks over and presses
+     GUI again; it retries by itself, backing off to five seconds, and only
+     gives up after a couple of minutes -- by which point the window really has
+     gone, and the main page's GUI button is the way back. */
+  let retries = 0;
+  function connect() {
+    releaseAll();
+    /* Full size inside a scrollable box, so zooming magnifies real pixels
+       instead of stretching a shrunken picture. clipViewport must be FALSE for
+       that: true sizes the canvas to the container and hides the rest of the
+       plugin, and with nothing set up to drag the viewport, a tablet narrower
+       than the plugin could never reach the far side. */
+    screen.innerHTML = '';                 // a previous connection's canvas
+    rfb = new RFB(screen, url, {});
+    rfb.clipViewport = false;
+    rfb.scaleViewport = fitting;
+    rfb.resizeSession = false;
+
+    rfb.addEventListener('connect', () => { retries = 0; msg.style.display = 'none'; reapplyZoomLater(); });
+    rfb.addEventListener('disconnect', e => {
+      releaseAll();
+      msg.style.display = 'block';
+      if (retries < 30) {
+        retries++;
+        msg.textContent = 'Reconnecting to the plugin...';
+        setTimeout(connect, Math.min(5000, 1000 * retries));
+      } else {
+        msg.textContent = (e.detail && e.detail.clean)
+          ? 'The plugin window was closed. Press GUI on the main page to open it again.'
+          : 'Lost the connection to the plugin. Press GUI on the main page to try again.';
+      }
+    });
+  }
+  connect();
 </script>
 </body></html>)HTML";
 
@@ -756,6 +776,13 @@ bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& fir
 
 bool RemoteServer::start (int p)
 {
+    /* Anything of ours left over from a crash. x11vnc runs with -forever and
+       websockify never exits on its own, so after Performer dies they keep the
+       ports, and every GUI press on the tablet would fail until someone found
+       and killed them by hand. That must not be the state of things on stage
+       after a relaunch. */
+    PluginView::sweepStrays();
+
     stop();
     // A short code you can read off the screen and type on a tablet, kept across
     // restarts so a home-screen shortcut keeps working: a token regenerated every
@@ -882,6 +909,33 @@ bool RemoteServer::authorised (const String& request) const
     // Matched case-insensitively: the code is shown in capitals but a tablet keyboard
     // will happily offer lower case, and being fussy about that on stage is unkind.
     return token.isNotEmpty() && request.containsIgnoreCase ("t=" + token);
+}
+
+//==============================================================================
+/* Produces a string on the message thread and waits for it. The setup is
+   edited there -- a name being typed, a group changed, a file opened -- and
+   reading it from a request thread at the same moment is a race with a torn
+   String at the end of it. The tablet polls once a second, so any edit on the
+   laptop mid-set would be rolling that dice.
+
+   Results travel in shared_ptrs rather than stack references: if the wait
+   times out (a modal dialog holding the message thread, say) the lambda still
+   runs later, and must not write into a frame that has gone. */
+static bool produceOnMessageThread (std::function<String()> produce, String& out, int timeoutMs)
+{
+    if (MessageManager::getInstance()->isThisTheMessageThread()) { out = produce(); return true; }
+
+    auto result = std::make_shared<String>();
+    auto done   = std::make_shared<WaitableEvent>();
+    MessageManager::callAsync ([produce, result, done] { *result = produce(); done->signal(); });
+    if (! done->wait (timeoutMs)) return false;
+    out = *result;
+    return true;
+}
+
+static void sendBusy (StreamingSocket& sock, void (*send) (StreamingSocket&, const String&, const String&, const String&))
+{
+    send (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
 }
 
 String RemoteServer::stateJson() const
@@ -1135,7 +1189,11 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     if (path.startsWith ("/api/state"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
-        sendResponse (sock, "200 OK", "application/json", stateJson());
+        String body;
+        if (produceOnMessageThread ([this] { return stateJson(); }, body, 2000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
         return;
     }
     if (path.startsWith ("/api/select"))
@@ -1152,7 +1210,11 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
         const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
-        sendResponse (sock, "200 OK", "application/json", slotsJson (input));
+        String body;
+        if (produceOnMessageThread ([this, input] { return slotsJson (input); }, body, 2000))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
         return;
     }
     if (path.startsWith ("/api/tap"))
@@ -1164,19 +1226,23 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
            on a local network, far below the precision of a human finger. What
            would ruin it is waiting for the next poll, so this answers with the
            new tempo rather than making the page wait a second to see it. */
-        double bpm = 0.0;
-        WaitableEvent done;
-        MessageManager::callAsync ([this, &bpm, &done]
+        auto bpm  = std::make_shared<double> (0.0);
+        auto done = std::make_shared<WaitableEvent>();
+        MessageManager::callAsync ([this, bpm, done]
         {
-            bpm = engine.tapTempo();
-            if (bpm <= 0.0) bpm = engine.getTempoBpm();
-            done.signal();
+            *bpm = engine.tapTempo();
+            if (*bpm <= 0.0) *bpm = engine.getTempoBpm();
+            done->signal();
         });
-        done.wait (500);
+        if (! done->wait (500))
+        {
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
+            return;
+        }
         ++revision;
 
         DynamicObject::Ptr o (new DynamicObject());
-        o->setProperty ("tempo", bpm);
+        o->setProperty ("tempo", *bpm);
         sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
         return;
     }
@@ -1199,9 +1265,10 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
            followed any other way: Kontakt's host-visible parameters are MIDI
            controller inputs, so reading one back gives what was last written to
            it, never where the drawbar actually is. */
-        String title, error;
-        WaitableEvent ready;
-        MessageManager::callAsync ([this, input, slot, &title, &error, &ready]
+        auto title = std::make_shared<String>();
+        auto error = std::make_shared<String>();
+        auto ready = std::make_shared<WaitableEvent>();
+        MessageManager::callAsync ([this, input, slot, title, error, ready]
         {
             const auto& setup = engine.getSetup();
             if (input >= 0 && input < (int) setup.inputs.size())
@@ -1213,33 +1280,37 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 {
                     auto* plugin = engine.getPlugin (input, prog, slot, -1);
                     if (plugin == nullptr || ! plugin->isAlive())
-                        error = "That plugin is not running.";
+                        *error = "That plugin is not running.";
                     else if (! plugin->isEditorOpen() && ! plugin->showEditor (
                                  in.name + " / " + String (prog).paddedLeft ('0', 3)
                                  + "  " + def.name + " / " + plugin->getName()))
-                        error = "Could not open that plugin's window.";
+                        *error = "Could not open that plugin's window.";
                     else
-                        title = in.name + " / " + String (prog).paddedLeft ('0', 3)
+                        *title = in.name + " / " + String (prog).paddedLeft ('0', 3)
                               + "  " + def.name + " / " + plugin->getName();
                 }
             }
-            ready.signal();
+            ready->signal();
         });
-        ready.wait (20000);
+        const bool got = ready->wait (20000);
 
         DynamicObject::Ptr o (new DynamicObject());
-        if (error.isNotEmpty() || title.isEmpty())
+        if (! got)
         {
-            o->setProperty ("error", error.isNotEmpty() ? error : String ("No plugin in that slot."));
+            o->setProperty ("error", "Performer is busy; try again.");
+        }
+        else if (error->isNotEmpty() || title->isEmpty())
+        {
+            o->setProperty ("error", error->isNotEmpty() ? *error : String ("No plugin in that slot."));
         }
         else
         {
             String startError;
             // Give the window a moment to appear before looking for it.
-            for (int i = 0; i < 20 && PluginView::findWindow (title) == 0; ++i)
+            for (int i = 0; i < 20 && PluginView::findWindow (*title) == 0; ++i)
                 Thread::sleep (100);
 
-            const auto session = PluginView::start (title, startError);
+            const auto session = PluginView::start (*title, startError);
             if (! session.isValid()) o->setProperty ("error", startError);
             else                     o->setProperty ("port", session.webPort);
         }
@@ -1262,7 +1333,10 @@ void RemoteServer::run()
     {
         if (listener == nullptr) break;
         std::unique_ptr<StreamingSocket> conn (listener->waitForNextConnection());
-        if (conn == nullptr) continue;
+        /* Null means the listener failed, not that nobody called. Without a
+           pause this would spin a whole core if, say, file descriptors ran
+           out -- mid-set, with the audio thread competing for the machine. */
+        if (conn == nullptr) { Thread::sleep (50); continue; }
 
         // A relayed plugin stream takes the socket with it and closes it itself.
         bool takenOver = false;
