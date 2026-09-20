@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 # Version: CI passes the tag (v1.2.3 -> 1.2.3); local builds use the default.
-set(PERFORMER_VERSION "0.1.22" CACHE STRING "Performer version")
+set(PERFORMER_VERSION "0.1.23" CACHE STRING "Performer version")
 project(Performer VERSION ${PERFORMER_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
