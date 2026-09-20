@@ -339,8 +339,8 @@ a fader on the phone can drive that organ but can never follow it. Mirroring the
 window sidesteps that, because what you see is what the plugin is showing.
 
 This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
-any are missing. The stream stays on your own machine until the phone asks for
-it, and stops when Performer does.
+any are missing. The stream travels on the same port as the phone app, so
+nothing extra has to be opened in a firewall, and it stops when Performer does.
 
 It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap

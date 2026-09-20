@@ -58,7 +58,9 @@ public:
 
 private:
     void run() override;
-    void handle (juce::StreamingSocket&);
+    /** `takeOver` is set when the connection has been handed to a relay
+        thread, which then owns and closes it. */
+    void handle (juce::StreamingSocket&, bool& takeOver);
     /* Some plugins never tell the host when their own controls move. Kontakt is
        the case that forced this: the parameters worth putting on a phone are its
        MIDI controller inputs, and a plugin has no reason to push a value back
@@ -68,6 +70,12 @@ private:
        Only the controls actually on the phone, and only while someone is
        looking: a readback is well under a millisecond, but doing it for
        thousands of parameters nobody is watching would be waste. */
+    /** Relays a connection to a plugin window's local web bridge, so the whole
+        feature travels on the one port the phone already uses. Without this,
+        every plugin window would need its own hole in the firewall -- which is
+        exactly what stopped the first version working. */
+    bool relayToPluginView (juce::StreamingSocket&, const juce::String& firstChunk, int webPort);
+
     void timerCallback() override;
     void pollVisibleControls();
 

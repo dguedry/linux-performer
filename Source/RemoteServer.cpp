@@ -1,6 +1,8 @@
 #include "RemoteServer.h"
 #include "MappingSuggestions.h"
 #include "PluginView.h"
+#include <thread>
+#include <fcntl.h>
 #include "BinaryData.h"
 #include <juce_graphics/juce_graphics.h>
 
@@ -343,8 +345,12 @@ async function loadSlots(i) {
         const r = await api("/api/pluginview?input=" + i + "&slot=" + sl.slot, { method: "POST" });
         win.textContent = "Window";
         if (r.error) { show(r.error); return; }
-        window.open(location.protocol + "//" + location.hostname + ":" + r.port
-                    + "/vnc.html?autoconnect=1&resize=scale&path=websockify", "_blank");
+        /* Through this same port: a stream on a port of its own would need its
+           own hole in the firewall, which is precisely what left the tab
+           loading forever the first time. */
+        const base = "/view/" + r.port;
+        window.open(base + "/vnc.html?autoconnect=1&resize=scale&path="
+                    + encodeURIComponent(base.slice(1) + "/websockify"), "_blank");
       } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
     };
 
@@ -683,6 +689,53 @@ RemoteServer::~RemoteServer()
     after an update and find them gone -- the data is still on disk, just keyed
     by plugin rather than by slot. Runs once per slot: a slot that has anything
     of its own is left alone. */
+/** Copies bytes both ways until one end goes quiet.
+
+    A websocket is long-lived and either side may speak at any time, so this
+    cannot be request-then-response like the rest of the server: it has to sit
+    on the connection and pump. One thread per open plugin window is acceptable
+    -- there is one window, occasionally two. */
+bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& firstChunk, int webPort)
+{
+    StreamingSocket upstream;
+    if (! upstream.connect ("127.0.0.1", webPort, 3000))
+        return false;
+
+    // The request we already read has to go first, or the bridge sees a
+    // truncated request and hangs up.
+    const auto utf8 = firstChunk.toRawUTF8();
+    if (upstream.write (utf8, (int) strlen (utf8)) <= 0)
+        return false;
+
+    char buf[16384];
+    for (;;)
+    {
+        bool moved = false;
+
+        if (upstream.waitUntilReady (true, 20) == 1)
+        {
+            const int n = upstream.read (buf, sizeof (buf), false);
+            if (n <= 0) break;
+            if (client.write (buf, n) <= 0) break;
+            moved = true;
+        }
+
+        if (client.waitUntilReady (true, 20) == 1)
+        {
+            const int n = client.read (buf, sizeof (buf), false);
+            if (n <= 0) break;
+            if (upstream.write (buf, n) <= 0) break;
+            moved = true;
+        }
+
+        if (! moved && (! client.isConnected() || ! upstream.isConnected()))
+            break;
+    }
+
+    upstream.close();
+    return true;
+}
+
 void RemoteServer::timerCallback()
 {
     /* Stop once nobody is looking. The page polls every second, so a few
@@ -782,11 +835,18 @@ bool RemoteServer::start (int p)
         settings.saveIfNeeded();
     }
     listener = std::make_unique<StreamingSocket>();
+    /* Close this on exec, or every child we start inherits it. An orphaned
+       websockify held port 7777 open after Performer had gone, so the next
+       start could not bind and the phone was unreachable until the stray
+       process was found by hand. */
     if (! listener->createListener (p))
     {
         listener.reset();
         return false;
     }
+    if (const int fd = listener->getRawSocketHandle(); fd >= 0)
+        ::fcntl (fd, F_SETFD, FD_CLOEXEC);
+
     port = p;
     migrateFavouritesToSlots();
     lastPageRequest.store (Time::getMillisecondCounterHiRes());
@@ -1299,8 +1359,9 @@ self.addEventListener('fetch', e => {
 });
 )JS";
 
-void RemoteServer::handle (StreamingSocket& sock)
+void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
 {
+    takeOver = false;
     char buf[4096] = {};
     const int got = sock.read (buf, sizeof (buf) - 1, false);
     if (got <= 0) return;
@@ -1356,6 +1417,43 @@ void RemoteServer::handle (StreamingSocket& sock)
     {
         // The page itself is harmless without a token; the API is not.
         if (path.startsWith ("/api/")) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+    }
+
+    /* A plugin window's stream, relayed so it uses this port rather than one of
+       its own. The port is in the path because the phone has no other way to
+       say which window it wants. */
+    if (path.startsWith ("/view/"))
+    {
+        const auto rest = path.fromFirstOccurrenceOf ("/view/", false, false);
+        const int wanted = rest.upToFirstOccurrenceOf ("/", false, false).getIntValue();
+
+        bool known = false;
+        for (const auto& s : PluginView::active())
+            if (s.webPort == wanted) known = true;
+
+        if (! known)
+        {
+            sendResponse (sock, "404 Not Found", "text/plain", "No plugin window is being shown.");
+            return;
+        }
+
+        // Strip the /view/<port> prefix so the bridge sees the path it expects.
+        auto forwarded = request;
+        const auto prefix = "/view/" + String (wanted);
+        forwarded = forwarded.replaceFirstOccurrenceOf (prefix, String());
+
+        /* Hand the socket to its own thread. A websocket stays open for as long
+           as someone is looking at the plugin, and this server accepts one
+           connection at a time: relaying inline wedged everything, the page's
+           own polling included, the moment a window was opened. */
+        takeOver = true;
+        std::thread ([this, sockPtr = &sock, forwarded, wanted]
+        {
+            relayToPluginView (*sockPtr, forwarded, wanted);
+            sockPtr->close();
+            delete sockPtr;
+        }).detach();
+        return;
     }
 
     // Any request means a page is watching, which is what keeps polling alive.
@@ -1595,8 +1693,13 @@ void RemoteServer::run()
         if (listener == nullptr) break;
         std::unique_ptr<StreamingSocket> conn (listener->waitForNextConnection());
         if (conn == nullptr) continue;
+
+        // A relayed plugin stream takes the socket with it and closes it itself.
+        bool takenOver = false;
         if (conn->waitUntilReady (true, 2000) == 1)
-            handle (*conn);
+            handle (*conn, takenOver);
+
+        if (takenOver) { conn.release(); continue; }
         conn->close();
     }
 }

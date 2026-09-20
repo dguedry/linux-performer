@@ -131,7 +131,9 @@ PluginView::Session PluginView::start (const String& title, String& error)
     if (! running->web->start (StringArray {
             findTool ("websockify").getFullPathName(),
             "--web=" + findNoVncRoot().getFullPathName(),
-            "0.0.0.0:" + String (webPort),
+            // Loopback only: the phone reaches this through Performer's own
+            // port, so the bridge itself never needs to be on the network.
+            "127.0.0.1:" + String (webPort),
             "127.0.0.1:" + String (vncPort) }))
     {
         running->vnc->kill();
@@ -166,6 +168,19 @@ void PluginView::stopAll()
         if (r->vnc != nullptr) r->vnc->kill();
     }
     sessions.clear();
+
+    /* Belt and braces: anything of ours still holding a port after its
+       ChildProcess has gone. A websockify that outlived Performer once kept
+       port 7777 bound, so the next run could not start its phone server at
+       all -- and nothing about that failure pointed at the real cause. */
+    if (auto pkill = findTool ("pkill"); pkill != File())
+        for (int port = kFirstVncPort; port < kFirstVncPort + 10; ++port)
+        {
+            ChildProcess p;
+            p.start (StringArray { pkill.getFullPathName(), "-f",
+                                   "x11vnc .*-rfbport " + String (port) });
+            p.waitForProcessToFinish (1500);
+        }
 }
 
 Array<PluginView::Session> PluginView::active()
