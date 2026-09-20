@@ -160,7 +160,7 @@ Mirroring the real editor sidesteps that, and needs no setting up per plugin:
 whatever the plugin shows is what you get.
 
 A touch holds for as long as your finger does, so the plugin's own keyboard
-plays properly and chords work. **+**/**-** and **Fit** handle zoom, **Move**
+plays properly -- one finger at a time, since the mirror is a single pointer. **+**/**-** and **Fit** handle zoom, **Move**
 switches to panning and pinching, and **Full** hides the browser's address bar. Each plugin gets its own tab, named after the
 program. Needs `x11vnc`, `websockify` and `novnc`, and works on Wayland
 desktops as well as X11 ones -- Performer and plugin editors are X11 windows, so

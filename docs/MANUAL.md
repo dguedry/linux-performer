@@ -345,9 +345,13 @@ apart at a glance, and pressing **GUI** again for the same instrument brings its
 existing tab forward rather than opening another.
 
 The page opens ready to play. A touch presses where you put it and holds for
-as long as you hold it, so the plugin's own keyboard sounds like a keyboard --
-several fingers make a chord, and sliding across the keys glissandos. The same
+as long as you hold it, so a key on the plugin's own keyboard sounds for as long
+as your finger is on it, and sliding across the keys glissandos. The same
 applies to a drawbar or a knob: press it and drag.
+
+One finger at a time, though. The mirror carries a single pointer -- it is a
+mouse, as far as the plugin knows -- so a second finger cannot be a second
+note, and is ignored while the first is down. Chords come from the keyboard.
 
 This is why the page handles touches itself rather than leaving them to noVNC,
 which reads them as gestures. A gesture has to be recognised before it can be
