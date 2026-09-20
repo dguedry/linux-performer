@@ -154,7 +154,15 @@ Engine::Engine (PluginHost& h, PropertiesFile& s, bool startAudioDevice) : host 
     }
     deviceManager.addMidiInputDeviceCallback ({}, this);
 
-    loaderThreadCount = jlimit (1, 16, settings.getIntValue ("parallelLoads", 4));
+    /* Default from the machine rather than a fixed 4. Loading is mostly waiting
+       -- Wine starting, a plugin reading its own files -- so the useful number
+       is "how many can be in flight", not "how many cores are free". Measured
+       on a 16-core/32-thread machine with 7 bridged plugins: at 4, the fifth
+       waited 11 s for a slot; at 8 and at 12 they all started at once and the
+       last was ready in the time the slowest single plugin took. Half the
+       hardware threads, so a 4-core laptop still gets 4 and does not thrash. */
+    const int defaultLoads = jlimit (4, 12, SystemStats::getNumCpus() / 2);
+    loaderThreadCount = jlimit (1, 16, settings.getIntValue ("parallelLoads", defaultLoads));
     bridgedParallel   = jlimit (1, 16, settings.getIntValue ("parallelBridgedLoads", loaderThreadCount));
     // Measured: two Kontakts starting together on a cold prefix both come up in the time
     // one takes (11 s for the pair instead of 19 s), so bridged loads run in parallel by

@@ -453,6 +453,22 @@ Pick a network name and password you are happy to reuse, because the tablet then
 reconnects on its own at the next gig. Use **Stop the wifi network** in the same
 dialog to return this computer to its normal network.
 
+### How long loading takes
+
+Plugins load in parallel, as many at once as the machine can usefully manage --
+half its hardware threads, between four and twelve. Loading is mostly waiting:
+for Wine to start, for a plugin to read its own files. `parallelLoads` in the
+settings overrides the number if you want to.
+
+What parallelism cannot shorten is one slow plugin. Hammond B-3X takes about
+seven seconds to initialise itself under Wine whatever else is happening, so a
+program using it is ready in about seven seconds, and a rig of eight plugins is
+ready in about the same -- they are all starting at once.
+
+Closing a plugin's window hides it rather than destroying it, so opening it
+again is immediate: a quarter of a second instead of five. Building the editor
+is most of what opening a GUI costs, and it is the same editor each time.
+
 ## Tempo
 
 Plugins with a tempo-synced delay, tremolo or arpeggiator ask the host what the

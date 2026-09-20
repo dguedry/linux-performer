@@ -264,7 +264,16 @@ private:
             {
                 if (instance == nullptr) return fail ("no plugin");
                 const auto title = in.readString();
-                if (editorWindow != nullptr) { editorWindow->toFront (true); return ok(); }
+                /* Already built: show it again rather than building it afresh.
+                   Making the editor is the expensive part of opening a GUI --
+                   1.9 s of the 2.5 s for Hammond B-3X, measured -- and it is
+                   the same editor either way. */
+                if (editorWindow != nullptr)
+                {
+                    editorWindow->setVisible (true);
+                    editorWindow->toFront (true);
+                    return ok();
+                }
                 editorWindow = std::make_unique<EditorWindow> (*this, title);
                 {
                     MemoryOutputStream log;
@@ -279,7 +288,11 @@ private:
             }
 
             case ipc::Msg::hideEditor:
-                editorWindow.reset();
+                /* Hidden, not destroyed: destroying it takes the plugin's editor
+                   with it (the window owns it), so the next open would pay the
+                   whole cost again. A hidden window costs some memory and no
+                   CPU -- plugins stop drawing when they are not visible. */
+                if (editorWindow != nullptr) editorWindow->setVisible (false);
                 return ok();
 
             case ipc::Msg::quit:
@@ -474,8 +487,14 @@ private:
 
         void closeButtonPressed() override
         {
+            /* Hidden rather than deleted, so reopening is instant. Performer is
+               told it closed either way: as far as the rest of the app is
+               concerned the editor is shut. */
             server.notify (ipc::Msg::notifyEditorClosed, MemoryOutputStream());
-            MessageManager::callAsync ([&s = server] { s.editorWindow.reset(); });
+            MessageManager::callAsync ([&s = server]
+            {
+                if (s.editorWindow != nullptr) s.editorWindow->setVisible (false);
+            });
         }
 
         bool keyPressed (const KeyPress& key) override
