@@ -307,7 +307,13 @@ If the program is a split or a layer with more than one instrument, GUI asks
 which one you meant -- an organ over a pad has two interfaces and only you know
 which. Programs with no plugins have no button at all.
 
-The plugin's own window rather than a set of faders built for it, because a
+![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](images/tablet-plugin-gui.png)
+
+That is the plugin itself, not a drawing of it. Performer used to offer faders
+you picked per plugin and labelled by hand, and they are gone: what you get now
+is whatever the plugin shows, with nothing to set up first.
+
+The reason is that the faders could never be trusted to tell the truth. A
 plugin's controls often cannot be followed any other way. The parameters worth
 putting on a tablet for a Kontakt library are its MIDI controller inputs: values
 go in, and nothing comes back. Asking Kontakt what CC 12 is set to returns

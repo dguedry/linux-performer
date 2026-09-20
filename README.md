@@ -28,10 +28,11 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 - **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a set without a controller attached.
-- **Tablet control**: a built-in web app for changing programs and
-  turning a few chosen plugin controls from a music stand. Nothing to install --
-  scan the code or type a short one, and add it to the home screen if you like.
-  Performer can serve its own wifi network when the venue has none.
+- **Tablet control**: a built-in web app for changing programs from a music
+  stand, and for opening any loaded plugin's own interface on the tablet.
+  Nothing to install -- scan the code or type a short one, and add it to the
+  home screen if you like. Performer can serve its own wifi network when the
+  venue has none.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
 in the toolbar to read the same manual inside the app. The rest of this
@@ -131,9 +132,18 @@ working, and **Print map** puts the same scannable code on the printed program
 sheet.
 
 **GUI** beside each input's program mirrors that plugin's own interface to the
-tablet, so a Kontakt library or a B-3X can be adjusted from the stand. Pinch to
-zoom, and **Full** hides the browser's address bar. Needs `x11vnc`, `websockify`
-and `novnc`.
+tablet, so a Kontakt library or a B-3X can be adjusted from the stand:
+
+![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](docs/images/tablet-plugin-gui.png)
+
+That is the plugin itself rather than a set of faders standing in for it, which
+is what Performer used to offer. Kontakt's host-visible parameters are MIDI
+controller inputs -- values go in and nothing comes back -- so a fader on the
+tablet could drive an organ but never follow it when you moved a drawbar in the
+plugin. Mirroring the window sidesteps that, and needs no setting up per plugin.
+
+Pinch to zoom, **Fit** scales the whole window onto the screen, and **Full**
+hides the browser's address bar. Needs `x11vnc`, `websockify` and `novnc`.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
