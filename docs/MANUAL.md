@@ -329,8 +329,16 @@ sidesteps that, because what you see is what the plugin is showing -- and it
 needs no setting up for each plugin, which matters when a rig has a dozen.
 
 This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
-any are missing. The stream travels on the same port as the tablet app, so
-nothing extra has to be opened in a firewall, and it stops when Performer does.
+any are missing.
+
+It works on a Wayland desktop as well as an X11 one. Performer is an X11
+application and plugin editors are X11 windows, so both run through XWayland,
+which every Wayland desktop provides and which `x11vnc` can read and write like
+any other X display. What does not work is a Wayland session with XWayland
+switched off: Performer will not start there at all, mirroring or no.
+
+The stream travels on the same port as the tablet app, so nothing extra has to
+be opened in a firewall, and it stops when Performer does.
 
 The tab is named after the program, so several open plugin windows are told
 apart at a glance, and pressing **GUI** again for the same instrument brings its

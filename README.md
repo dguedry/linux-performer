@@ -161,7 +161,9 @@ whatever the plugin shows is what you get.
 
 Pinch to zoom, **Fit** scales the whole window onto the screen, and **Full**
 hides the browser's address bar. Each plugin gets its own tab, named after the
-program. Needs `x11vnc`, `websockify` and `novnc`.
+program. Needs `x11vnc`, `websockify` and `novnc`, and works on Wayland
+desktops as well as X11 ones -- Performer and plugin editors are X11 windows, so
+they run through XWayland, which `x11vnc` reads and writes normally.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
