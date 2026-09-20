@@ -376,7 +376,7 @@ private:
            never happen mid-block.
 
            This used to require the MESSAGE thread, which was too strict, and is
-           why a plugin changing its own program left the phone showing stale
+           why a plugin changing its own program left the tablet showing stale
            drawbars: Hammond B-3X reports a program change from one of its own
            worker threads, so every one of those updates was thrown away. */
         const bool suppressed = suppressNotifications.load (std::memory_order_relaxed);
@@ -401,7 +401,7 @@ private:
     }
     void audioProcessorParameterChangeGestureBegin (AudioProcessor*, int index) override
     {
-        /* Logged because "my plugin's own edits do not reach the phone" is
+        /* Logged because "my plugin's own edits do not reach the tablet" is
            otherwise indistinguishable from "this plugin never tells the host".
            PERFORMER_REPORT_PARAMS=1. */
         if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)

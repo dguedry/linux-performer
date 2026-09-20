@@ -2,7 +2,7 @@
 
 **A live-performance plugin host for Linux.** Point your keyboards at it, build
 a program for each sound in your set, and change sounds from the keyboard while
-you play -- or from a phone or tablet on a music stand, with no app to install.
+you play -- or from a tablet on a music stand, with no app to install.
 
 <p align="center">
   <img src="docs/images/performer.png" alt="Performer: two keyboards as inputs, a program list grouped by kind, a Hammond B-3X loaded with its key and velocity ranges, and MIDI mappings for vibrato and Leslie speed" width="900">
@@ -28,7 +28,7 @@ Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 - **A global tempo with tap tempo**, so tempo-synced delays and arpeggiators
   have something to sync to. Tap it in the toolbar or from a footswitch.
 - **An on-screen keyboard** for building a set without a controller attached.
-- **Phone or tablet control**: a built-in web app for changing programs and
+- **Tablet control**: a built-in web app for changing programs and
   turning a few chosen plugin controls from a music stand. Nothing to install --
   scan the code or type a short one, and add it to the home screen if you like.
   Performer can serve its own wifi network when the venue has none.
@@ -116,27 +116,28 @@ The short version: **Audio...** to pick an output, **Plugins...** to scan for
 plugins, select an input and give it a MIDI device, click a program, press
 **+ Add instrument...**, then **Save As...**.
 
-## Phone and tablet control
+## Tablet control
 
-**Phone** in the toolbar starts a small web app on your network, for picking
+**Tablet** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
-![The web app on a phone: group filters and the programs of one input](docs/images/phone-app.png)
+![The web app on a tablet: group filters and the programs of one input](docs/images/tablet-app.png)
 
-![The Phone control dialog](docs/images/phone-control.png)
+![The Tablet control dialog](docs/images/tablet-control.png)
 
-Scan the square code with the phone's camera, or type the address and the
+Scan the square code with the tablet's camera, or type the address and the
 six-character code. The code survives a restart, so a home-screen shortcut keeps
 working, and **Print map** puts the same scannable code on the printed program
 sheet.
 
-**Window** on a slot mirrors that plugin's own interface to the phone, so a
-Kontakt library or a B-3X can be adjusted from the stand. Pinch to zoom; the tab
-is named after the program. Needs `x11vnc`, `websockify` and `novnc`.
+**GUI** beside each input's program mirrors that plugin's own interface to the
+tablet, so a Kontakt library or a B-3X can be adjusted from the stand. Pinch to
+zoom, and **Full** hides the browser's address bar. Needs `x11vnc`, `websockify`
+and `novnc`.
 
-If the phone cannot connect, the usual cause is a firewall on the computer
+If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
-makes it look like the phone is at fault. Open the port for private networks
+makes it look like the tablet is at fault. Open the port for private networks
 only:
 
 ```
@@ -146,7 +147,7 @@ sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
 ```
 
 No wifi at the venue? **Create a wifi network** makes the computer serve its
-own, which the phone joins directly. Performer asks once which wifi adapter to
+own, which the tablet joins directly. Performer asks once which wifi adapter to
 use and remembers it; a spare USB adapter lets the machine stay on its normal
 network at the same time. See the [manual](docs/MANUAL.md) for the details.
 

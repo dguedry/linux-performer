@@ -280,7 +280,7 @@ public:
     }
 
     /** Scrolls so `heading` is at the top. Matched loosely so callers can pass
-        something human ("phone") rather than an exact title. */
+        something human ("tablet") rather than an exact title. */
     int findHeadingY (const String& heading) const
     {
         for (const auto& b : visible)

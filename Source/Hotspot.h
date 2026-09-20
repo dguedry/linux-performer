@@ -5,16 +5,16 @@
 namespace perf
 {
 
-/** Serving our own wifi network so phones can reach us.
+/** Serving our own wifi network so tablets can reach us.
 
     A venue's wifi is often absent, locked down, or on a guest network that
-    blocks devices from seeing each other -- all of which break phone control.
+    blocks devices from seeing each other -- all of which break tablet control.
     Making the laptop its own access point removes that dependency entirely.
 
     NetworkManager does the real work: "shared" mode runs a DHCP server and NAT
-    on the interface, so a phone that joins gets an address automatically and
+    on the interface, so a tablet that joins gets an address automatically and
     still has internet through whatever the laptop is connected to. There is
-    nothing to configure on the phone beyond the wifi password.
+    nothing to configure on the tablet beyond the wifi password.
 
     The one machine-specific question is which wifi adapter to use, because a
     single radio usually cannot be a client and an access point at the same
@@ -62,7 +62,7 @@ public:
     static juce::String stop();
 
     /** Remembered across runs: which adapter to use, and the network name and
-        password, so the phone reconnects on its own at the next gig. */
+        password, so the tablet reconnects on its own at the next gig. */
     static Config load (juce::PropertiesFile&);
     static void save (juce::PropertiesFile&, const Config&);
 
@@ -71,7 +71,7 @@ public:
 
         Worth checking because the failure is silent and misleading: the server
         binds fine, the address is right, the desktop can even load the page
-        because local traffic bypasses the rules -- and the phone just times out
+        because local traffic bypasses the rules -- and the tablet just times out
         with nothing anywhere to say why. */
     static juce::String firewallWarning (int port);
 

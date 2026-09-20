@@ -8,7 +8,7 @@ namespace perf
 
     The manual is embedded from docs/MANUAL.md, so there is one source of truth
     and the help can never drift from the file in the repository. That matters
-    most for the parts people need on stage -- a phone that will not connect, a
+    most for the parts people need on stage -- a tablet that will not connect, a
     venue with no wifi -- where going and finding a web page is exactly what
     nobody can do at that moment.
 

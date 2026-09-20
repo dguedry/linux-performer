@@ -5,13 +5,13 @@
 namespace perf
 {
 
-/** A plugin's own window, shown on the phone.
+/** A plugin's own window, shown on the tablet.
 
     Some plugins cannot be controlled any other way. Kontakt's host-visible
     parameters are its MIDI controller INPUTS: values go in, and nothing comes
     back out -- asking it what CC 12 is set to returns whatever was last written,
     not where the drawbar actually sits. Measured, not assumed. So a set of
-    faders on the phone can drive that organ but can never follow it.
+    faders on the tablet can drive that organ but can never follow it.
 
     Mirroring the plugin's own window sidesteps that entirely: what you see is
     what the plugin is showing, because it IS what the plugin is showing.

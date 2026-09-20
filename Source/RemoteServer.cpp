@@ -44,7 +44,29 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .now .name { font-size:12px; color:var(--dim); letter-spacing:.08em; font-weight:700; }
   .now .prog { display:flex; align-items:baseline; gap:12px; margin-top:4px; }
   .now .num { font-size:34px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
-  .now .title { font-size:22px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .now .title { font-size:22px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+                flex:1; min-width:0; }
+  /* The plugin's interface, reachable from the header rather than from the slot
+     rows further down: this is the one you want mid-set. Pushed to the right so
+     it never crowds the program name, which is what the eye comes here for. */
+  .now .gui { margin-left:auto; flex:none; background:var(--row); color:#fff; border:0;
+              border-radius:10px; padding:10px 16px; font-size:13px; font-weight:800;
+              letter-spacing:.04em; align-self:center; }
+  .now .gui:active { background:var(--accent); color:#06121f; }
+  .now .gui:disabled { opacity:.6; }
+
+  /* Choosing between the instruments of a split. A sheet, not a dropdown: this
+     is hit with a thumb on a stand. */
+  .sheet { position:fixed; inset:0; background:#000a; display:flex; align-items:flex-end;
+           justify-content:center; z-index:10; padding:16px;
+           padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
+  .sheet .card { background:var(--panel); border-radius:16px; padding:14px; width:100%;
+                 max-width:420px; display:flex; flex-direction:column; gap:8px; }
+  .sheet .sheet-title { color:var(--dim); font-size:12px; font-weight:700;
+                        letter-spacing:.08em; text-transform:uppercase; padding:4px 4px 6px; }
+  .sheet button { background:var(--row); color:#fff; border:0; border-radius:12px;
+                  padding:16px; font-size:16px; font-weight:700; text-align:left; }
+  .sheet button.cancel { background:none; color:var(--dim); text-align:center; font-size:15px; }
   .loading { color:#d8a657; font-size:14px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
   button.p { background:var(--row); color:#fff; border:0; border-radius:10px; padding:14px 12px; text-align:left;
@@ -170,6 +192,28 @@ function render(s) {
     now.querySelector(".name").textContent = inp.name.toUpperCase();
     now.querySelector(".num").textContent = String(inp.current).padStart(3, "0");
     now.querySelector(".title").textContent = inp.currentName || "(empty)";
+
+    /* Straight to the plugin's interface from the input's own header. This is
+       the thing you reach for mid-set -- the slot rows below are further down
+       the page, and on a tablet on a stand that is a scroll you do not want to
+       be doing between songs.
+
+       One slot opens it directly; several offer a choice, because a split with
+       an organ over a pad has two interfaces and only you know which one you
+       meant. Hidden entirely when the program has no plugins to show. */
+    const gui = document.createElement("button");
+    gui.className = "gui"; gui.textContent = "GUI";
+    gui.style.display = "none";
+    gui.onclick = () => {
+      const list = slotCache[i] || [];
+      if (!list.length) return;
+      if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].name, gui, "GUI"); return; }
+      pickSlot(i, list, gui);
+    };
+    now.querySelector(".prog").appendChild(gui);
+    guiButtons[i] = gui;
+    syncGuiButton(i);
+
     if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "loading…"; now.appendChild(l); }
     wrap.appendChild(now);
     /* Which group is being shown, per input. Kept across refreshes so a poll
@@ -222,6 +266,88 @@ function render(s) {
 // ---- controls ---------------------------------------------------------------
 // Fetched separately from the program list: the programs change rarely, the
 // parameter values change while you are touching them.
+/* What each input's current program has in it, so the header button knows
+   whether to open a window, offer a choice, or stay hidden. Filled by
+   loadSlots, which the page already calls for every input on each render. */
+const slotCache = {};
+const guiButtons = {};
+
+function syncGuiButton(i) {
+  const b = guiButtons[i];
+  if (!b) return;
+  const n = (slotCache[i] || []).length;
+  b.style.display = n ? "" : "none";
+  b.textContent = "GUI";
+}
+
+/* Which instrument's window, when a program has more than one. A small sheet
+   rather than a dropdown: it is chosen with a thumb, at arm's length. */
+function pickSlot(i, list, btn) {
+  const back = document.createElement("div"); back.className = "sheet";
+  const card = document.createElement("div"); card.className = "card";
+  const t = document.createElement("div"); t.className = "sheet-title";
+  t.textContent = "Which instrument?";
+  card.appendChild(t);
+
+  list.forEach(sl => {
+    const b = document.createElement("button");
+    b.textContent = sl.name;
+    b.onclick = () => { back.remove(); openPluginWindow(i, sl.slot, sl.name, btn, "GUI"); };
+    card.appendChild(b);
+  });
+
+  const cancel = document.createElement("button");
+  cancel.className = "cancel"; cancel.textContent = "Cancel";
+  cancel.onclick = () => back.remove();
+  card.appendChild(cancel);
+
+  back.appendChild(card);
+  back.onclick = e => { if (e.target === back) back.remove(); };
+  document.body.appendChild(back);
+}
+
+/* Opens a plugin's own window, mirrored. Some plugins cannot be followed any
+   other way -- Kontakt reports nothing when you move a drawbar in it -- so this
+   shows the real thing rather than a guess at its state.
+
+   Shared by the button in each input's header and the one on each slot, so both
+   land on the same tab for the same plugin. */
+async function openPluginWindow(i, slot, fallbackName, btn, restore) {
+  const was = btn.textContent;
+  btn.textContent = "...";
+  btn.disabled = true;
+  try {
+    const r = await api("/api/pluginview?input=" + i + "&slot=" + slot, { method: "POST" });
+    if (r.error) { show(r.error); return; }
+    /* Through this same port: a stream on a port of its own would need its own
+       hole in the firewall, which is precisely what left the tab loading
+       forever the first time. */
+    /* Name the tab after the sound, not the plugin: on a tablet the tab strip
+       shows a few characters, and "Oye Como" says which one this is where
+       "Kontakt 8" does not when three programs all use Kontakt.
+
+       The name is also the window target, so pressing it again for the same
+       slot brings that tab forward instead of opening another one. Browsers key
+       window targets by name, so this costs nothing. */
+    const state = lastState && lastState.inputs && lastState.inputs[i];
+    const label = state ? (state.currentName || ("Program " + state.current)) : fallbackName;
+    const target = "performer-plugin-" + i + "-" + slot;
+
+    const base = "/view/" + r.port;
+    const url = base + "/plugin.html?path="
+              + encodeURIComponent(base.slice(1) + "/websockify")
+              + "&title=" + encodeURIComponent(label);
+
+    const tab = window.open(url, target);
+    if (tab) tab.focus();
+  } catch (e) {
+    if (!e.gate) show(e.message);
+  } finally {
+    btn.textContent = restore || was;
+    btn.disabled = false;
+  }
+}
+
 async function loadSlots(i) {
   const host = document.getElementById("slots" + i);
   if (!host) return;
@@ -230,45 +356,16 @@ async function loadSlots(i) {
   catch (e) { if (e.gate) throw e; return; }
 
   host.innerHTML = "";
+  slotCache[i] = data.slots;
+  syncGuiButton(i);
 
   data.slots.forEach(sl => {
     const box = document.createElement("div"); box.className = "slot";
 
     const h = document.createElement("h2");
     const nm = document.createElement("span"); nm.textContent = sl.name;
-    /* The plugin's own window, mirrored. Some plugins cannot be followed any
-       other way -- Kontakt reports nothing when you move a drawbar in it -- so
-       this shows the real thing rather than a guess at its state. */
     const win = document.createElement("button"); win.textContent = "Window";
-    win.onclick = async () => {
-      win.textContent = "...";
-      try {
-        const r = await api("/api/pluginview?input=" + i + "&slot=" + sl.slot, { method: "POST" });
-        win.textContent = "Window";
-        if (r.error) { show(r.error); return; }
-        /* Through this same port: a stream on a port of its own would need its
-           own hole in the firewall, which is precisely what left the tab
-           loading forever the first time. */
-        /* Name the tab after the sound, not the plugin: on a phone the tab strip
-           shows a few characters, and "Oye Como" says which one this is where
-           "Kontakt 8" does not when three programs all use Kontakt.
-
-           The name is also the window target, so pressing Window again for the
-           same slot brings that tab forward instead of opening another one.
-           Browsers key window targets by name, so this costs nothing. */
-        const state = lastState && lastState.inputs[i];
-        const label = state ? (state.currentName || ("Program " + state.current)) : sl.name;
-        const target = "performer-plugin-" + i + "-" + sl.slot;
-
-        const base = "/view/" + r.port;
-        const url = base + "/plugin.html?path="
-                  + encodeURIComponent(base.slice(1) + "/websockify")
-                  + "&title=" + encodeURIComponent(label);
-
-        const tab = window.open(url, target);
-        if (tab) tab.focus();
-      } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
-    };
+    win.onclick = () => openPluginWindow(i, sl.slot, sl.name, win, "Window");
 
     h.appendChild(nm); h.appendChild(win);
     box.appendChild(h);
@@ -328,9 +425,9 @@ RemoteServer::~RemoteServer()
 
 /* Our own page for a plugin window, rather than noVNC's.
 
-   Its vnc_lite has no viewport meta tag, so a phone lays the page out at
+   Its vnc_lite has no viewport meta tag, so a tablet lays the page out at
    desktop width and pinch does nothing; and it can only scale-to-fit, which
-   makes a 1010px Kontakt window unreadable on a handset. This sets the viewport
+   makes a 1010px Kontakt window unreadable on a tablet. This sets the viewport
    so the browser's own pinch-zoom works, and shows the plugin at full size in a
    scrollable box so there is something to zoom into.
 
@@ -351,7 +448,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
               font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   /* Dynamic viewport height: 100vh is the height with the browser's chrome
-     hidden, so on a phone it puts the bottom of the plugin permanently under
+     hidden, so on a tablet it puts the bottom of the plugin permanently under
      the address bar. 100dvh follows the bar as it comes and goes. The 100vh
      line is the fallback for browsers that do not know dvh. */
   #screen { width:100%; height:100vh; height:100dvh; overflow:auto; -webkit-overflow-scrolling:touch; }
@@ -386,7 +483,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   rfb.scaleViewport = false;
   rfb.resizeSession = false;
 
-  /* Fullscreen: the address bar is a real cost on a handset, and a plugin
+  /* Fullscreen: the address bar is a real cost on a small screen, and a plugin
      window is exactly the thing you want the whole screen for. Only offered
      where the browser has the API -- iOS Safari does not, and there the way to
      lose the bar is the home-screen shortcut, which the manual explains. */
@@ -484,7 +581,7 @@ bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& fir
 bool RemoteServer::start (int p)
 {
     stop();
-    // A short code you can read off the screen and type on a phone, kept across
+    // A short code you can read off the screen and type on a tablet, kept across
     // restarts so a home-screen shortcut keeps working: a token regenerated every
     // run would break the bookmark exactly when you least want to re-pair, on stage.
     // Letters that misread (O/0, I/1/l) are excluded.
@@ -501,7 +598,7 @@ bool RemoteServer::start (int p)
     listener = std::make_unique<StreamingSocket>();
     /* Close this on exec, or every child we start inherits it. An orphaned
        websockify held port 7777 open after Performer had gone, so the next
-       start could not bind and the phone was unreachable until the stray
+       start could not bind and the tablet was unreachable until the stray
        process was found by hand. */
     if (! listener->createListener (p))
     {
@@ -527,10 +624,10 @@ void RemoteServer::stop()
     port = 0;
 }
 
-/** Which address should we print for the phone to type?
+/** Which address should we print for the tablet to type?
 
     A developer machine can easily have a dozen IPv4 addresses -- Docker and LXD
-    bridges, libvirt networks, one per container network -- and a phone can reach
+    bridges, libvirt networks, one per container network -- and a tablet can reach
     none of them. Picking the first non-loopback address, as this used to, hands
     the user something like 172.17.0.1 and looks like the feature is broken.
 
@@ -538,7 +635,7 @@ void RemoteServer::stop()
     either the venue's network or our own hotspot), then wired, then anything
     else we do not recognise as virtual, and only then give up. Within wireless
     we prefer a hotspot-shaped address, because if the laptop is serving its own
-    network that is certainly the one the phone is on. */
+    network that is certainly the one the tablet is on. */
 static int addressRank (const String& iface, const String& addr)
 {
     // Virtual interfaces: nothing external is ever on the other side of these.
@@ -606,7 +703,7 @@ String RemoteServer::getHostAddress()
 //==============================================================================
 bool RemoteServer::authorised (const String& request) const
 {
-    // Matched case-insensitively: the code is shown in capitals but a phone keyboard
+    // Matched case-insensitively: the code is shown in capitals but a tablet keyboard
     // will happily offer lower case, and being fussy about that on stage is unkind.
     return token.isNotEmpty() && request.containsIgnoreCase ("t=" + token);
 }
@@ -648,7 +745,7 @@ String RemoteServer::stateJson() const
     return JSON::toString (var (root.get()), true);
 }
 
-/** The current program's slots, so the phone can offer a window onto each one.
+/** The current program's slots, so the tablet can offer a window onto each one.
 
     Grouped by slot because that is how the setup is built and how the desktop
     labels things: "1: Kontakt 8" is the same slot in both views. */
@@ -719,7 +816,7 @@ static void sendResponse (StreamingSocket& s, const String& status, const String
 
 /* Chrome refuses to offer "install" unless the page registers a service worker
    with a fetch handler, so there has to be one -- but caching a stage tool's
-   pages would be actively harmful: a phone showing a stale program list is worse
+   pages would be actively harmful: a tablet showing a stale program list is worse
    than one showing none. This worker therefore always goes to the network and
    only falls back to a cached shell when the network is gone, which is the
    honest behaviour for something whose whole job is to reflect live state. */
@@ -814,7 +911,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
 
     /* A plugin window's stream, relayed so it uses this port rather than one of
-       its own. The port is in the path because the phone has no other way to
+       its own. The port is in the path because the tablet has no other way to
        say which window it wants. */
     if (path.startsWith ("/view/"))
     {
@@ -886,7 +983,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
 
-        /* Tapped on the phone. The tap has to be timed where it happens, and it
+        /* Tapped on the tablet. The tap has to be timed where it happens, and it
            happens here: the round trip from a music stand is a few milliseconds
            on a local network, far below the precision of a human finger. What
            would ruin it is waiting for the next poll, so this answers with the

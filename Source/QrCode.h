@@ -4,7 +4,7 @@
 namespace perf
 {
 
-/** A small QR encoder, so a phone can reach Performer without anyone typing.
+/** A small QR encoder, so a tablet can reach Performer without anyone typing.
 
     Written out rather than pulled in because this has to work on a stage with no
     network and no extra packages installed, and because the job is narrow: we

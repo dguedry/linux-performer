@@ -295,7 +295,7 @@ public:
         addAndMakeVisible (groupEditor);
         groupEditor.setTextToShowWhenEmpty ("Group", textDim);
         groupEditor.setTooltip ("Optional category -- Organs, Strings, Brass. Used to group this list "
-                                "and the phone app; it never changes a program's number.");
+                                "and the tablet app; it never changes a program's number.");
         groupEditor.onTextChange = [this]
         {
             engine.setProgramGroup (owner.getSelectedInput(), owner.getEditedProgram(), groupEditor.getText());
@@ -1496,7 +1496,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     addAndMakeVisible (remoteBtn);
     remoteBtn.setClickingTogglesState (true);
     remoteBtn.setColour (TextButton::buttonOnColourId, accentDim);
-    remoteBtn.setTooltip ("Select programs from a phone or tablet on the same network");
+    remoteBtn.setTooltip ("Select programs from a tablet on the same network");
     remoteBtn.onClick = [this] { showRemote(); };
 
     /* Tempo. Tapping is the point -- you set it between songs by ear, not by
@@ -1546,15 +1546,15 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     else if (getAutosaveFile().existsAsFile())  loadSetupFile (getAutosaveFile());
     else                                        refreshAll();
 
-    /* Restore phone control if it was on when we last quit. Someone who set up a
-       phone on a stand expects it to still work after a restart, and discovering
+    /* Restore tablet control if it was on when we last quit. Someone who set up a
+       tablet on a stand expects it to still work after a restart, and discovering
        otherwise mid-set is exactly when they can least afford to go and fix it.
        Started after the setup is loaded so the page has programs to show. */
     if (settings.getBoolValue ("remoteOn", false))
     {
         remoteBtn.setToggleState (true, dontSendNotification);
         if (startRemote())
-            showStatus ("Phone control on: " + remote->getUrl() + "  code " + remote->getToken());
+            showStatus ("Tablet control on: " + remote->getUrl() + "  code " + remote->getToken());
     }
 
     updateTempoLabel();
@@ -1679,7 +1679,7 @@ void MainComponent::timerCallback()
 
        This also writes the open setup file, not just the recovery copy. Picking
        a program is a real change to the setup, and someone who picks one from a
-       phone mid-set has no way to reach Ctrl+S -- if the machine is then killed
+       tablet mid-set has no way to reach Ctrl+S -- if the machine is then killed
        rather than quit, saveOnQuit() never runs and the choice is silently gone.
        Writing the file the user actually opened is what they expect "it saved"
        to mean. */
@@ -1748,7 +1748,7 @@ void MainComponent::programChanged (int inputIndex, int)
 {
     markDirty();
     /* Picking a program is the one change someone makes constantly on stage and
-       never thinks to save -- and from a phone, the laptop may be across the
+       never thinks to save -- and from a tablet, the laptop may be across the
        room with no chance to. Bring the next autosave forward instead of making
        them wait out the full interval. */
     lastAutosaveTime = jmin (lastAutosaveTime,
@@ -1950,7 +1950,7 @@ void MainComponent::chooseHotspotAdapter (std::function<void (bool)> done)
     // A real choice. Spell out the consequence rather than the hardware, since
     // "this one will drop your internet" is the part that matters.
     auto* w = new AlertWindow ("Which wifi adapter should serve the network?",
-                              "Phones will join a wifi network created by this computer.",
+                              "Tablets will join a wifi network created by this computer.",
                               MessageBoxIconType::NoIcon);
     StringArray choices;
     for (auto& a : usable)
@@ -1988,7 +1988,7 @@ void MainComponent::chooseHotspotAdapter (std::function<void (bool)> done)
         }), false);
 }
 
-/** Bring up our own network, then show the phone dialog against it. */
+/** Bring up our own network, then show the tablet dialog against it. */
 void MainComponent::startHotspot()
 {
     chooseHotspotAdapter ([this] (bool ok)
@@ -2116,7 +2116,7 @@ void MainComponent::showRemote()
         if (remote != nullptr) remote->stop();
         settings.setValue ("remoteOn", false);
         settings.saveIfNeeded();
-        showStatus ("Phone control off.");
+        showStatus ("Tablet control off.");
         return;
     }
 
@@ -2149,7 +2149,7 @@ void MainComponent::showRemote()
 
             g.setColour (Colour (0xff9aa0ab));
             g.setFont (FontOptions (13.0f, Font::bold));
-            g.drawFittedText ("1.  OPEN THIS ON YOUR PHONE", r.removeFromTop (20), Justification::centredLeft, 1);
+            g.drawFittedText ("1.  OPEN THIS ON YOUR TABLET", r.removeFromTop (20), Justification::centredLeft, 1);
             g.setColour (Colours::white);
             g.setFont (FontOptions (20.0f, Font::bold));
             g.drawFittedText (url, r.removeFromTop (34), Justification::centredLeft, 1);
@@ -2170,14 +2170,14 @@ void MainComponent::showRemote()
             g.setFont (FontOptions (12.5f));
 
             const auto note = network.isNotEmpty()
-                ? "The phone must join this computer's wifi network, \"" + network + "\". It remembers "
+                ? "The tablet must join this computer's wifi network, \"" + network + "\". It remembers "
                   "the code, and the code does not change when Performer restarts, so \"Add to Home "
                   "Screen\" gives you a one-tap program selector.\n\n"
                   "Anyone on that network who has the code can change your sounds."
-                : "The phone must be on the same wifi as this computer. It remembers the code, "
+                : "The tablet must be on the same wifi as this computer. It remembers the code, "
                   "and the code does not change when Performer restarts, so \"Add to Home Screen\" "
                   "gives you a one-tap program selector.\n\n"
-                  "No wifi at the venue? Use \"Create a wifi network\" below and the phone joins this "
+                  "No wifi at the venue? Use \"Create a wifi network\" below and the tablet joins this "
                   "computer directly.";
             g.drawFittedText (note, r.removeFromBottom (r.getHeight() - 4), Justification::topLeft, 7);
         }
@@ -2229,19 +2229,19 @@ void MainComponent::showRemote()
 
     DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
-    o.dialogTitle = "Phone control";
+    o.dialogTitle = "Tablet control";
     o.dialogBackgroundColour = bgPanel;
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;
     o.launchAsync();
-    showStatus ("Phone control on: " + url + "  code " + remote->getToken());
+    showStatus ("Tablet control on: " + url + "  code " + remote->getToken());
 
-    /* A blocked port looks exactly like a broken app from the phone's side: the
+    /* A blocked port looks exactly like a broken app from the tablet's side: the
        address is right, the server is listening, and the desktop can load the
        page because local traffic never passes the firewall. Say so here rather
        than leaving someone to discover it at a gig. */
     if (const auto warn = Hotspot::firewallWarning (remote->getPort()); warn.isNotEmpty())
-        AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Phone control", warn, "OK");
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Tablet control", warn, "OK");
 }
 
 void MainComponent::printProgramMap()
@@ -2251,10 +2251,10 @@ void MainComponent::printProgramMap()
     // JUCE cannot print on Linux; write HTML styled for paper and let the browser print it.
     auto out = File::getSpecialLocation (File::tempDirectory)
                    .getChildFile ("performer-program-map-" + String (Time::currentTimeMillis()) + ".html");
-    // Include the phone address only while the server is actually running: a
+    // Include the tablet address only while the server is actually running: a
     // printed code pointing at a closed port would be worse than none.
-    const auto phoneUrl = (remote != nullptr && remote->isRunning()) ? remote->getUrl() : String();
-    if (! out.replaceWithText (ProgramMap::toHtml (setup, title, phoneUrl)))
+    const auto tabletUrl = (remote != nullptr && remote->isRunning()) ? remote->getUrl() : String();
+    if (! out.replaceWithText (ProgramMap::toHtml (setup, title, tabletUrl)))
     {
         showStatus ("Could not write the program map to " + out.getFullPathName());
         return;

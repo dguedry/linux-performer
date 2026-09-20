@@ -30,11 +30,11 @@ struct ProgramMap
         return names.joinIntoString (" + ");
     }
 
-    /** `phoneUrl`, when given, adds a scannable code to the sheet: tape it to the
-        keyboard and a phone reaches the program selector without anyone typing an
+    /** `tabletUrl`, when given, adds a scannable code to the sheet: tape it to the
+        keyboard and a tablet reaches the program selector without anyone typing an
         address. */
     static juce::String toHtml (const Setup& setup, const juce::String& title,
-                                const juce::String& phoneUrl = {})
+                                const juce::String& tabletUrl = {})
     {
         juce::String h;
         h << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n"
@@ -59,11 +59,11 @@ struct ProgramMap
         h << " &middot; send these numbers as MIDI Program Change</div>\n";
 
         // A scannable code, so the sheet taped to the keyboard is also the way
-        // in to the phone selector: no address to read out or type.
-        if (phoneUrl.isNotEmpty())
-            if (const auto qr = QrCode::encode (phoneUrl); qr.isValid())
+        // in to the tablet selector: no address to read out or type.
+        if (tabletUrl.isNotEmpty())
+            if (const auto qr = QrCode::encode (tabletUrl); qr.isValid())
                 h << "<div class=\"qr\">" << qr.toSvg (28)
-                  << "<div class=\"qrcap\">Scan to pick programs<br>from a phone</div></div>\n";
+                  << "<div class=\"qrcap\">Scan to pick programs<br>from a tablet</div></div>\n";
 
         for (const auto& in : setup.inputs)
         {

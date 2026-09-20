@@ -58,7 +58,7 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
 6. Play. Press **Save As...** when the set is worth keeping.
 
 **Help** in the toolbar opens this manual inside Performer, so the answer to
-"why won't the phone connect" is reachable from the stage without finding a
+"why won't the tablet connect" is reachable from the stage without finding a
 browser. The list on the left jumps to a section, and the search box narrows to
 whichever section answers what you typed.
 
@@ -66,7 +66,7 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Phone**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Tablet**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -132,7 +132,7 @@ button beside it to pick a group already in use on that input.
 
 A group is a label, not a folder. A program's number is fixed, because that is
 what your keyboard sends as a Program Change, so grouping never moves or
-renumbers anything. What it does is make 128 programs findable: the phone shows
+renumbers anything. What it does is make 128 programs findable: the tablet shows
 a row of group buttons to filter by, and the printed map prints each group as
 its own section.
 
@@ -254,14 +254,14 @@ your confirmation that the right sound loaded. A program still loading is marked
 *...loading*, which explains a keyboard that is briefly silent, and an empty
 program is greyed.
 
-## Selecting programs from a phone or tablet
+## Selecting programs from a tablet
 
-**Phone** in the toolbar starts a small web app on your network. It lists each
+**Tablet** in the toolbar starts a small web app on your network. It lists each
 input with its current program in large type and every program you have set up;
 tap one to switch to it. There is a PANIC button too. Nothing is installed on
-the phone: it is a web page.
+the tablet: it is a web page.
 
-![The web app on a phone: group filters and the programs of one input](images/phone-app.png)
+![The web app on a tablet: group filters and the programs of one input](images/tablet-app.png)
 
 The current program for each input is highlighted, and the big number at the top
 of each block is what a keyboard would send as a Program Change. Tapping a
@@ -270,25 +270,25 @@ programs at the laptop instead.
 
 Performer shows the address and code to get here:
 
-![The Phone control dialog](images/phone-control.png)
+![The Tablet control dialog](images/tablet-control.png)
 
-There are two ways in, and the fast one is the square code. Point the phone's
+There are two ways in, and the fast one is the square code. Point the tablet's
 camera at it and it opens Performer directly, with no address to read off a
 screen. **Print map** puts the same code on the printed sheet, so a page taped
 to the keyboard is also the way in.
 
 To type it instead, enter the address once, then the six-character code. The
-phone remembers the code, and it does not change when Performer restarts, so a
+tablet remembers the code, and it does not change when Performer restarts, so a
 home-screen shortcut keeps working. It is case-insensitive and avoids characters
 that misread, so `0`/`O` and `1`/`I` never appear.
 
-![Entering the code on the phone](images/phone-code.png)
+![Entering the code on the tablet](images/tablet-code.png)
 
-Phone control stays on across restarts. If it was on when you quit, Performer
-starts the web app again at launch, so a phone on a stand keeps working without
+Tablet control stays on across restarts. If it was on when you quit, Performer
+starts the web app again at launch, so a tablet on a stand keeps working without
 anyone going back to the laptop. Turning it off is remembered the same way.
 
-A program picked from the phone is a real change to the setup, exactly like
+A program picked from the tablet is a real change to the setup, exactly like
 picking one on the laptop. It is written to the setup file you have open, within
 a couple of seconds rather than waiting for the next periodic save, because
 someone who changes a program from a music stand has no way to reach Ctrl+S.
@@ -299,21 +299,29 @@ an untrusted network.
 
 ### Showing a plugin's own window
 
-Under each input's programs the phone lists the slots of the program you are on,
-labelled the way the desktop labels them. **Window** on a slot opens that
-plugin's own interface on the phone, mirrored from the computer.
+**GUI** at the right of each input's header opens the current program's plugin
+interface on the tablet, mirrored from the computer. That is the one to reach
+for mid-set: it is level with the program name, so it needs no scrolling.
+
+If the program is a split or a layer with more than one instrument, GUI asks
+which one you meant -- an organ over a pad has two interfaces and only you know
+which. Programs with no plugins have no button at all.
+
+The tablet also lists the program's slots below, labelled the way the desktop
+labels them, each with its own **Window** button. Same thing, reached by name
+rather than by which instrument is first.
 
 The plugin's own window rather than a set of faders built for it, because a
 plugin's controls often cannot be followed any other way. The parameters worth
-putting on a phone for a Kontakt library are its MIDI controller inputs: values
+putting on a tablet for a Kontakt library are its MIDI controller inputs: values
 go in, and nothing comes back. Asking Kontakt what CC 12 is set to returns
 whatever was last written to it, not where the drawbar actually sits, so a fader
-on the phone could drive that organ but never follow it. Mirroring the window
+on the tablet could drive that organ but never follow it. Mirroring the window
 sidesteps that, because what you see is what the plugin is showing -- and it
 needs no setting up for each plugin, which matters when a rig has a dozen.
 
 This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
-any are missing. The stream travels on the same port as the phone app, so
+any are missing. The stream travels on the same port as the tablet app, so
 nothing extra has to be opened in a firewall, and it stops when Performer does.
 
 The tab is named after the program, so several open plugin windows are told
@@ -325,9 +333,9 @@ inside a scrollable area, so zooming magnifies actual pixels rather than
 stretching a shrunken picture. **Fit** in the corner squeezes the whole window
 onto the screen when you want to see all of it at once.
 
-**Full** next to it hides the browser's address bar, which is worth doing on a
-handset: it is a fifth of the screen on some phones, and a plugin window wants
-all of it. Android and desktop browsers have this. iPhones and iPads do not --
+**Full** next to it hides the browser's address bar, which is worth doing on any
+screen: the bar costs a fifth of the height on a small one, and a plugin window
+wants all of it. Android and desktop browsers have this. iPhones and iPads do not --
 Safari offers no way for a page to go fullscreen -- so on those, add Performer
 to the home screen and open plugin windows from there, which has the same
 effect and is described below.
@@ -336,12 +344,12 @@ It is for setting up and adjusting rather than playing. A plugin window on a
 tablet is a picture of an interface built for a mouse, so expect to tap
 precisely and to miss sometimes.
 
-### If the phone cannot connect
+### If the tablet cannot connect
 
 The most common cause is a firewall on the computer, not anything wrong with
-Performer or the phone. The symptom is confusing, because the desktop can open
-the address itself perfectly well while the phone just times out: traffic from
-the same machine never passes the firewall, so only the phone is blocked.
+Performer or the tablet. The symptom is confusing, because the desktop can open
+the address itself perfectly well while the tablet just times out: traffic from
+the same machine never passes the firewall, so only the tablet is blocked.
 
 Performer warns about this when it can detect it. To allow the port from your
 own networks only, and not from the internet:
@@ -364,7 +372,7 @@ also use **Add to Home Screen** from its menu. It then opens fullscreen with its
 own icon, like an app.
 
 This is worth doing for the screen space alone. An address bar costs a fifth of
-the height on a small phone, and the installed shortcut has none -- for the
+the height on a small screen, and the installed shortcut has none -- for the
 program list and for the mirrored plugin windows it opens, which is where the
 space matters most.
 
@@ -381,15 +389,15 @@ installed shortcut behaves identically.
 ### When the venue has no usable wifi
 
 Guest networks often stop devices from seeing each other, and plenty of stages
-have no wifi at all. **Create a wifi network** in the Phone dialog makes this
-computer serve its own network instead, so the phone joins the laptop directly
+have no wifi at all. **Create a wifi network** in the Tablet dialog makes this
+computer serve its own network instead, so the tablet joins the laptop directly
 and needs nothing from the venue.
 
-![Serving our own wifi network](images/phone-control-hotspot.png)
+![Serving our own wifi network](images/tablet-control-hotspot.png)
 
 The first time, Performer asks which wifi adapter to use and remembers the
 answer, along with the network name and password. There is nothing to set up on
-the phone: it gets an address automatically when it joins, exactly like joining
+the tablet: it gets an address automatically when it joins, exactly like joining
 any other wifi, and it still has internet through whatever this computer is
 connected to.
 
@@ -400,7 +408,7 @@ both, a cheap USB wifi adapter gives you a second radio, and Performer prefers
 whichever adapter is free. The adapter list marks which is which, so the choice
 is not a guess.
 
-Pick a network name and password you are happy to reuse, because the phone then
+Pick a network name and password you are happy to reuse, because the tablet then
 reconnects on its own at the next gig. Use **Stop the wifi network** in the same
 dialog to return this computer to its normal network.
 
@@ -421,9 +429,9 @@ A footswitch is the usual choice; most send CC 64 or CC 80. That controller
 works on any input and in any program, so it taps the tempo whatever you happen
 to be playing, and only the press counts, not the release.
 
-The phone app shows the tempo and a TAP button in its header, beside PANIC, so
+The tablet app shows the tempo and a TAP button in its header, beside PANIC, so
 you can set it from the music stand without giving up screen space to it. Tapping there is as accurate as tapping on the laptop:
-the timing is measured where the tempo lives rather than on the phone, and a
+the timing is measured where the tempo lives rather than on the tablet, and a
 local network adds about three milliseconds, far below what a finger can
 control.
 
@@ -446,9 +454,9 @@ are listed, with each program's number, its name and the instruments in it,
 grouped by input with the MIDI device and channel. Tape it to the keyboard and
 you never have to remember that the Rhodes is 001.
 
-If phone control is running when you print, the sheet also carries the square
-code from the Phone dialog, so the page on the keyboard doubles as the way onto
-the phone selector.
+If tablet control is running when you print, the sheet also carries the square
+code from the Tablet dialog, so the page on the keyboard doubles as the way onto
+the tablet selector.
 
 ![The code as printed](images/qr-example.png)
 

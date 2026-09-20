@@ -1,10 +1,10 @@
-/*  Tests for the phone-control server: address choice, the code, and the gate.
+/*  Tests for the tablet-control server: address choice, the code, and the gate.
 
     The address test is the reason this file exists. A machine with Docker, LXD
-    or libvirt has a dozen IPv4 addresses and a phone can reach almost none of
+    or libvirt has a dozen IPv4 addresses and a tablet can reach almost none of
     them, so "which address do we print" is real logic that can regress
     silently -- the feature still looks like it works until someone tries a
-    phone at a gig.
+    tablet at a gig.
 */
 #include <juce_core/juce_core.h>
 #include "RemoteServer.h"
@@ -46,12 +46,12 @@ int main()
     // in the kernel's list on a developer machine.
     const auto hasDocker = mine.contains ("172.17.0.1");
     if (hasDocker)
-        check (host != "172.17.0.1", "docker0 is not offered to the phone");
+        check (host != "172.17.0.1", "docker0 is not offered to the tablet");
     else
         std::cout << "skip docker0 check (no docker bridge on this machine)" << std::endl;
 
     // ---- Hotspot -------------------------------------------------------------
-    // Serving our own network is how phone control survives a venue with no
+    // Serving our own network is how tablet control survives a venue with no
     // usable wifi, so the adapter list and the remembered choice are worth
     // guarding. These assert shape, not specific hardware: CI has no wifi.
     std::cout << "\nnetwork manager present: " << (perf::Hotspot::available() ? "yes" : "no") << std::endl;
@@ -131,7 +131,7 @@ int main()
     }
 
     // ---- QR code -------------------------------------------------------------
-    /* A hand-written encoder is worthless if a phone cannot read what it makes,
+    /* A hand-written encoder is worthless if a tablet cannot read what it makes,
        and "it looks like a QR code" is not evidence. These check the structural
        invariants a scanner depends on; the module output was also verified
        against an independent decoder, which read back every address shape and
@@ -189,8 +189,8 @@ int main()
         check (! perf::QrCode::encode ("").isValid() || true, "empty text does not crash");
     }
 
-    // ---- a program picked from the phone reaches the setup ---------------------
-    /* The phone is often the only thing in reach mid-set, so a choice made there
+    // ---- a program picked from the tablet reaches the setup ---------------------
+    /* The tablet is often the only thing in reach mid-set, so a choice made there
        has to be as real as one made on the laptop: it must change the engine AND
        survive being written out and read back. */
     {
@@ -231,10 +231,10 @@ int main()
         dir.deleteRecursively();
     }
 
-    // ---- phone control is remembered across a restart --------------------------
-    /* Someone who sets a phone on a stand expects it to still work after a
+    // ---- tablet control is remembered across a restart --------------------------
+    /* Someone who sets a tablet on a stand expects it to still work after a
        restart. The toggle itself has to persist, not just the code: without this
-       the app always came up with the server off, which looks like the phone has
+       the app always came up with the server off, which looks like the tablet has
        broken rather than like a setting was forgotten. */
     {
         auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-remoteon.settings");
@@ -244,14 +244,14 @@ int main()
 
         {
             PropertiesFile pf (tmp, o);
-            check (! pf.getBoolValue ("remoteOn", false), "phone control is off until it is turned on");
+            check (! pf.getBoolValue ("remoteOn", false), "tablet control is off until it is turned on");
             pf.setValue ("remoteOn", true);
             pf.setValue ("remotePort", 7777);
             pf.saveIfNeeded();
         }
         {
             PropertiesFile pf (tmp, o);
-            check (pf.getBoolValue ("remoteOn", false), "phone control being on survives a restart");
+            check (pf.getBoolValue ("remoteOn", false), "tablet control being on survives a restart");
             check (pf.getIntValue ("remotePort", 0) == 7777, "the port survives a restart");
             pf.setValue ("remoteOn", false);
             pf.saveIfNeeded();
@@ -274,7 +274,7 @@ int main()
         check (manual.contains ("# Performer user manual"), "the manual starts with its title");
 
         // The sections someone needs when something is wrong at a venue.
-        check (manual.contains ("If the phone cannot connect"), "the firewall section is present");
+        check (manual.contains ("If the tablet cannot connect"), "the firewall section is present");
         check (manual.contains ("sudo ufw allow from"), "the firewall commands are present");
         check (manual.contains ("When the venue has no usable wifi"), "the hotspot section is present");
         check (manual.contains ("## When something goes wrong"), "the troubleshooting section is present");

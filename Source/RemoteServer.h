@@ -7,7 +7,7 @@
 namespace perf
 {
 
-/** A phone or tablet as a program selector.
+/** A tablet as a program selector.
 
     Serves a small web app on the local network: each input with its current
     program, the list of programs that have something in them, and a tap to
@@ -31,11 +31,11 @@ public:
     void stop();
     bool isRunning() const                 { return running.load(); }
     int getPort() const                    { return port; }
-    /** The address to open on the phone, or empty when stopped. The code is not
+    /** The address to open on the tablet, or empty when stopped. The code is not
         in the URL: the page asks for it, so a shortcut survives a restart. */
     juce::String getUrl() const;
 
-    /** The address a phone should use to reach this machine, chosen over
+    /** The address a tablet should use to reach this machine, chosen over
         container and virtual-machine bridges. Public so tests can check it. */
     static juce::String getHostAddress();
 
@@ -49,7 +49,7 @@ private:
     void handle (juce::StreamingSocket&, bool& takeOver);
 
     /** Relays a connection to a plugin window's local web bridge, so the whole
-        feature travels on the one port the phone already uses. Without this,
+        feature travels on the one port the tablet already uses. Without this,
         every plugin window would need its own hole in the firewall. */
     bool relayToPluginView (juce::StreamingSocket&, const juce::String& firstChunk, int webPort);
 

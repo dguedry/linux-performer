@@ -73,7 +73,7 @@ private:
     void updateTempoLabel();
     void showRemote();
 
-    /** Starts the phone-control server, without showing the dialog. Returns true
+    /** Starts the tablet-control server, without showing the dialog. Returns true
         when it is listening. Used at startup to restore the previous session's
         choice, where a dialog would be an unwanted interruption. */
     bool startRemote();
@@ -94,7 +94,7 @@ private:
     juce::TextButton keyboardBtn { "Keyboard" };
     juce::TextButton stageBtn { "Stage" };
     juce::TextButton printBtn { "Print map" };
-    juce::TextButton remoteBtn { "Phone" };
+    juce::TextButton remoteBtn { "Tablet" };
     juce::TextButton helpBtn { "Help" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;

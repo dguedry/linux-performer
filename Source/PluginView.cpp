@@ -17,7 +17,7 @@ namespace
     CriticalSection lock;
     OwnedArray<Running> sessions;
 
-    /* Ports above the phone's own. One pair per window, so two plugin windows
+    /* Ports above the tablet's own. One pair per window, so two plugin windows
        can be open at once without fighting over a port. */
     constexpr int kFirstVncPort = 5910;
     constexpr int kFirstWebPort = 6910;
@@ -50,7 +50,7 @@ bool PluginView::available (String& whatIsMissing)
 
     if (missing.isEmpty()) return true;
 
-    whatIsMissing = "Showing a plugin's window on the phone needs "
+    whatIsMissing = "Showing a plugin's window on the tablet needs "
                   + missing.joinIntoString (", ") + ". Install "
                   + (missing.size() == 1 ? "it" : "them") + " and try again.";
     return false;
@@ -111,7 +111,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
     auto running = std::make_unique<Running>();
     running->session = { title, window, vncPort, webPort };
 
-    /* -localhost: the stream itself never leaves this machine. The phone talks
+    /* -localhost: the stream itself never leaves this machine. The tablet talks
        to websockify, which is what we expose, so there is one door rather than
        two. -nopw is safe for the same reason. */
     running->vnc = std::make_unique<ChildProcess>();
@@ -131,7 +131,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
     if (! running->web->start (StringArray {
             findTool ("websockify").getFullPathName(),
             "--web=" + findNoVncRoot().getFullPathName(),
-            // Loopback only: the phone reaches this through Performer's own
+            // Loopback only: the tablet reaches this through Performer's own
             // port, so the bridge itself never needs to be on the network.
             "127.0.0.1:" + String (webPort),
             "127.0.0.1:" + String (vncPort) }))
@@ -171,7 +171,7 @@ void PluginView::stopAll()
 
     /* Belt and braces: anything of ours still holding a port after its
        ChildProcess has gone. A websockify that outlived Performer once kept
-       port 7777 bound, so the next run could not start its phone server at
+       port 7777 bound, so the next run could not start its tablet server at
        all -- and nothing about that failure pointed at the real cause. */
     if (auto pkill = findTool ("pkill"); pkill != File())
         for (int port = kFirstVncPort; port < kFirstVncPort + 10; ++port)

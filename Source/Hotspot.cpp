@@ -167,7 +167,7 @@ String Hotspot::start (const Config& c)
         return "Could not create the hotspot: " + add.trim();
 
     // band bg = 2.4GHz: shorter range than 5GHz in theory, but it goes through
-    // people and walls, every phone has it, and no country locks channel 6
+    // people and walls, every tablet has it, and no country locks channel 6
     // behind radar detection the way it does parts of the 5GHz band.
     const auto mod = run ({ "nmcli", "connection", "modify", kProfileName,
                             "802-11-wireless.mode", "ap",
@@ -225,8 +225,8 @@ void Hotspot::save (PropertiesFile& settings, const Config& c)
 
 String Hotspot::suggestPassword()
 {
-    // Typed once per phone, off a screen, in bad light: no characters that
-    // misread and no punctuation to hunt for on a phone keyboard.
+    // Typed once per tablet, off a screen, in bad light: no characters that
+    // misread and no punctuation to hunt for on a tablet keyboard.
     static const char* words[] = { "stage", "encore", "chorus", "bridge", "tempo", "reverb", "octave", "cadence" };
     auto& rng = Random::getSystemRandom();
     String s (words[rng.nextInt (8)]);
@@ -253,7 +253,7 @@ String Hotspot::firewallWarning (int port)
     // thought about this.
     if (status.contains (String (port))) return {};
 
-    return "Your firewall (ufw) is on and does not list port " + String (port) + ", so a phone will "
+    return "Your firewall (ufw) is on and does not list port " + String (port) + ", so a tablet will "
            "not be able to connect. To allow it from your own networks only:\n\n"
            "    sudo ufw allow from 192.168.0.0/16 to any port " + String (port) + " proto tcp\n"
            "    sudo ufw allow from 10.0.0.0/8 to any port " + String (port) + " proto tcp";

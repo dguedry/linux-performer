@@ -90,7 +90,7 @@ public:
     void resetTapTempo();
 
     /** Announces a parameter change as a plugin's own callback would, so the
-        path from "a plugin moved something" to "the phone notices" can be
+        path from "a plugin moved something" to "the tablet notices" can be
         tested without a plugin. */
     void notifyParameterTouchedForTesting (int inputIndex, int program, int slot, int effect, int paramIndex)
     { noteParameterTouched (inputIndex, program, slot, effect, paramIndex); }
