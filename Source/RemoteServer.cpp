@@ -348,8 +348,13 @@ async function loadSlots(i) {
         /* Through this same port: a stream on a port of its own would need its
            own hole in the firewall, which is precisely what left the tab
            loading forever the first time. */
+        /* vnc_lite rather than vnc.html: the full client opens its own settings
+           panel and a password box, which is a poor welcome when the server
+           has no password and the connection details are already known. Lite
+           connects straight through and is just the screen. It takes host and
+           port from the page's own address, which is this server. */
         const base = "/view/" + r.port;
-        window.open(base + "/vnc.html?autoconnect=1&resize=scale&path="
+        window.open(base + "/vnc_lite.html?scale=true&path="
                     + encodeURIComponent(base.slice(1) + "/websockify"), "_blank");
       } catch (e) { win.textContent = "Window"; if (!e.gate) show(e.message); }
     };
