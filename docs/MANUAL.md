@@ -460,11 +460,15 @@ tempo is. The toolbar shows it, and **Tap** sets it: tap four times in time and
 it follows. One tempo serves the whole rig, because a band plays a song at a
 tempo rather than an instrument at one, and it is saved with the setup.
 
-Right-click **Tap** to type an exact tempo, or to set a MIDI controller that
-taps it. Choose **Learn** and press the pedal or button you want to use: that is
-easier than looking up what your keyboard sends, and it works even if something
-is already assigned. Typing a controller number by hand is still there if you
-prefer it.
+When you already know the tempo, type it: click the number beside **Tap** and it
+becomes a text box. Type, press Return, and that is the tempo; Escape leaves it
+alone. Anything outside 20 to 300 is pulled to the nearer end rather than
+refused, and fractions are kept, so 97.5 stays 97.5.
+
+Right-click **Tap** to set a MIDI controller that taps it. Choose **Learn** and
+press the pedal or button you want to use: that is easier than looking up what
+your keyboard sends, and it works even if something is already assigned. Typing
+a controller number by hand is still there if you prefer it.
 
 A footswitch is the usual choice; most send CC 64 or CC 80. That controller
 works on any input and in any program, so it taps the tempo whatever you happen

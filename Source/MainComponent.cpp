@@ -91,9 +91,6 @@ public:
             list.repaintRow (sel);
         };
 
-        addAndMakeVisible (pcChannelLabel);
-        pcChannelLabel.setColour (Label::textColourId, textDim);
-        pcChannelLabel.setFont (FontOptions (11.0f));
         addAndMakeVisible (pcChannelBox);
         // Ids: 1 = same as notes, 2 = any, 3.. = channel 1..16
         pcChannelBox.addItem ("Same as notes", 1);
@@ -129,7 +126,7 @@ public:
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
-        for (auto* l : { &deviceLabel, &channelLabel })
+        for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel })
         {
             addAndMakeVisible (l);
             l->setColour (Label::textColourId, textDim);
@@ -189,7 +186,11 @@ public:
     {
         auto r = getLocalBounds().reduced (6);
         header.setBounds (r.removeFromTop (22));
-        auto editor = r.removeFromBottom (150);
+        /* Tall enough for what is actually in it: name, device, channel, the
+           Program Change toggle and its channel -- 164px of rows and padding.
+           It was 150, so the last row was being clipped, which is why the PC
+           channel selector looked squeezed. */
+        auto editor = r.removeFromBottom (170);
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -208,8 +209,10 @@ public:
         channelBox.setBounds (chRow.removeFromLeft (90));
         editor.removeFromTop (6);
         pcToggle.setBounds (editor.removeFromTop (22));
-        editor.removeFromTop (4);
-        auto pcRow = editor.removeFromTop (22);
+        editor.removeFromTop (6);
+        /* The same height and label column as the Channel row above: this is
+           the same kind of control, and it was the only one a size smaller. */
+        auto pcRow = editor.removeFromTop (24);
         pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
         pcChannelBox.setBounds (pcRow.removeFromLeft (130));
     }
@@ -1499,16 +1502,60 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     remoteBtn.setTooltip ("Select programs from a tablet on the same network");
     remoteBtn.onClick = [this] { showRemote(); };
 
-    /* Tempo. Tapping is the point -- you set it between songs by ear, not by
-       typing a number -- but the reading has to be visible or nobody trusts it.
-       Right-click for the number and the tap controller. */
+    /* Tempo. Tapping is the point -- between songs you set it by ear -- but a
+       tempo you already know is faster typed than tapped, so the reading is
+       also the text box: click it and type. Right-click still has the tap
+       controller.
+
+       One click, not two: on stage, a number you have to double-click is a
+       number you cannot change. */
     addAndMakeVisible (tempoLabel);
     tempoLabel.setColour (Label::textColourId, Colours::white);
     tempoLabel.setJustificationType (Justification::centredRight);
-    tempoLabel.setTooltip ("The tempo every plugin is told, for tempo-synced delays and arpeggiators");
+    tempoLabel.setTooltip ("The tempo every plugin is told. Click to type one; right-click to assign a footswitch.");
+    tempoLabel.setEditable (true, true, false);
+
+    /* Editing shows a box round the number, so it is obvious it can be typed
+       in. Until then it reads as a plain label, which is what it was. */
+    tempoLabel.setColour (Label::outlineWhenEditingColourId, accent);
+
+    tempoLabel.onEditorShow = [this]
+    {
+        /* Just the number while editing: "120.0 bpm" would have to be retyped
+           in full, and the unit is not in question. */
+        if (auto* ed = tempoLabel.getCurrentTextEditor())
+        {
+            ed->setText (String (engine.getTempoBpm(), 1), false);
+            ed->setJustification (Justification::centredRight);
+            ed->setInputRestrictions (6, "0123456789.");
+            ed->selectAll();
+        }
+    };
+
+    tempoLabel.onTextChange = [this]
+    {
+        const auto typed = tempoLabel.getText().retainCharacters ("0123456789.").getDoubleValue();
+        if (typed <= 0.0)
+        {
+            // Not a tempo: put the old one back rather than leaving a blank.
+            showStatus ("That is not a tempo.");
+            updateTempoLabel();
+            return;
+        }
+
+        engine.setTempoBpm (typed);
+        engine.resetTapTempo();          // a typed tempo ends the tapping
+        updateTempoLabel();              // shows what the engine clamped it to
+        showStatus ("Tempo " + String (engine.getTempoBpm(), 1) + " bpm");
+        markDirty();
+    };
+
+    /* The tempo lives in the setup, and someone who types one at a music stand
+       has no way to reach Ctrl+S -- same reason a program picked from the
+       tablet is saved promptly. */
 
     addAndMakeVisible (tapButton);
-    tapButton.setTooltip ("Tap four times in time. Right-click to type a tempo or assign a footswitch.");
+    tapButton.setTooltip ("Tap four times in time. Click the number to type a tempo; right-click for a footswitch.");
     tapButton.onClick = [this]
     {
         // A right-click arrives here too; treat it as "configure", not a tap,
@@ -1609,7 +1656,7 @@ void MainComponent::resized()
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
-    tempoLabel.setBounds (toolbar.removeFromRight (58));    toolbar.removeFromRight (6);
+    tempoLabel.setBounds (toolbar.removeFromRight (66));    toolbar.removeFromRight (6);
 
     /* Whatever is left goes to the preload checkbox, and it is hidden rather
        than squashed when there is nothing left. Taking a fixed 170 here is what
@@ -2036,14 +2083,13 @@ void MainComponent::updateTempoLabel()
     tempoLabel.setText (String (engine.getTempoBpm(), 1) + " bpm", dontSendNotification);
 }
 
-/** Typing a tempo, and choosing what taps it. Behind a right-click because
-    neither is something you do mid-song: on stage you tap. */
+/** Choosing what taps the tempo. Behind a right-click because it is set up
+    once and then left alone: on stage you tap, or type into the readout. */
 void MainComponent::showTempoMenu()
 {
     PopupMenu m;
-    m.addSectionHeader ("Tempo");
-    m.addItem (1, "Type a tempo...");
-
+    /* No "Type a tempo..." here any more: the readout itself is the text box,
+       which is one click instead of three. */
     const int tapCC = engine.getTapTempoCC();
     m.addSectionHeader ("Tap from a MIDI controller");
     // Pressing the pedal beats looking up what it sends, so that comes first.
@@ -2055,26 +2101,7 @@ void MainComponent::showTempoMenu()
 
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (tapButton), [this] (int choice)
     {
-        if (choice == 1)
-        {
-            auto* w = new AlertWindow ("Tempo", "Beats per minute (20 to 300).", MessageBoxIconType::NoIcon);
-            w->addTextEditor ("bpm", String (engine.getTempoBpm(), 1));
-            w->addButton ("Set", 1, KeyPress (KeyPress::returnKey));
-            w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
-            w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
-            {
-                std::unique_ptr<AlertWindow> owned (w);
-                if (r == 0) return;
-                const auto typed = w->getTextEditorContents ("bpm").getDoubleValue();
-                if (typed <= 0.0) { showStatus ("That is not a tempo."); return; }
-                engine.setTempoBpm (typed);
-                engine.resetTapTempo();          // a typed tempo ends the tapping
-                updateTempoLabel();
-                showStatus ("Tempo " + String (engine.getTempoBpm(), 1) + " bpm");
-                markDirty();
-            }), false);
-        }
-        else if (choice == 2)
+        if (choice == 2)
         {
             auto* w = new AlertWindow ("Tap tempo",
                                        "Which controller taps the tempo? A footswitch usually sends "
