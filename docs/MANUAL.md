@@ -307,10 +307,6 @@ If the program is a split or a layer with more than one instrument, GUI asks
 which one you meant -- an organ over a pad has two interfaces and only you know
 which. Programs with no plugins have no button at all.
 
-The tablet also lists the program's slots below, labelled the way the desktop
-labels them, each with its own **Window** button. Same thing, reached by name
-rather than by which instrument is first.
-
 The plugin's own window rather than a set of faders built for it, because a
 plugin's controls often cannot be followed any other way. The parameters worth
 putting on a tablet for a Kontakt library are its MIDI controller inputs: values
@@ -325,7 +321,7 @@ any are missing. The stream travels on the same port as the tablet app, so
 nothing extra has to be opened in a firewall, and it stops when Performer does.
 
 The tab is named after the program, so several open plugin windows are told
-apart at a glance, and pressing **Window** again for the same slot brings its
+apart at a glance, and pressing **GUI** again for the same instrument brings its
 existing tab forward rather than opening another.
 
 Pinch to zoom, and drag to move around: the plugin is shown at its real size

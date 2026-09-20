@@ -91,12 +91,6 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                    padding:9px 16px; font-size:13px; font-weight:700; letter-spacing:.02em; }
   .groups button.on { background:var(--accent); color:#06121f; }
 
-  .slots { margin-top:14px; }
-  .slot { background:var(--panel); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
-  .slot h2 { font-size:13px; color:var(--dim); letter-spacing:.06em; margin:0 0 10px; text-transform:uppercase;
-             display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .slot h2 button { background:none; border:1px solid #3a3d47; color:var(--dim); border-radius:8px;
-                    padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:.04em; }
   #err { display:none; background:#a3282d; padding:10px 16px; font-size:14px; }
   #gate { display:none; align-items:center; justify-content:center; min-height:70vh; padding:20px; }
   #gate form { text-align:center; max-width:320px; width:100%; }
@@ -254,10 +248,6 @@ function render(s) {
     });
     wrap.appendChild(grid);
 
-    const slots = document.createElement("div");
-    slots.className = "slots"; slots.id = "slots" + i;
-    wrap.appendChild(slots);
-
     root.appendChild(wrap);
     loadSlots(i);
   });
@@ -348,29 +338,18 @@ async function openPluginWindow(i, slot, fallbackName, btn, restore) {
   }
 }
 
+/* What this input's current program has loaded. Nothing is drawn for it: the
+   only thing that needs to know is the GUI button in the header, which uses it
+   to decide between opening a window, asking which instrument, and hiding. */
 async function loadSlots(i) {
-  const host = document.getElementById("slots" + i);
-  if (!host) return;
-  let data;
-  try { data = await api("/api/slots?input=" + i); }
-  catch (e) { if (e.gate) throw e; return; }
-
-  host.innerHTML = "";
-  slotCache[i] = data.slots;
+  try {
+    const data = await api("/api/slots?input=" + i);
+    slotCache[i] = data.slots;
+  } catch (e) {
+    if (e.gate) throw e;
+    slotCache[i] = [];
+  }
   syncGuiButton(i);
-
-  data.slots.forEach(sl => {
-    const box = document.createElement("div"); box.className = "slot";
-
-    const h = document.createElement("h2");
-    const nm = document.createElement("span"); nm.textContent = sl.name;
-    const win = document.createElement("button"); win.textContent = "Window";
-    win.onclick = () => openPluginWindow(i, sl.slot, sl.name, win, "Window");
-
-    h.appendChild(nm); h.appendChild(win);
-    box.appendChild(h);
-    host.appendChild(box);
-  });
 }
 
 /* The plugin's own window is where its controls live now, so the page only has
