@@ -1047,6 +1047,121 @@ int main()
         CHECK (legacy.tapTempoCC == 0);
     }
 
+    // ---- songs and sets ---------------------------------------------------
+    /* A song sets every keyboard at once and brings its own tempo; a set is the
+       order they are played in. The footswitch path matters most: on stage that
+       is how the set is driven, and it runs through the MIDI thread. */
+    {
+        std::printf ("  songs and sets\n");
+
+        while ((int) engine.getSetup().inputs.size() < 2) engine.addInput ("Lower");
+        CHECK (engine.getSetup().inputs.size() >= 2);
+
+        engine.setProgramName (0, 4, "Oye Como");
+        engine.setProgramName (1, 1, "FM EP");
+        engine.setProgramName (0, 2, "B3");
+
+        // A song captured from what is loaded right now.
+        engine.selectProgram (0, 4);
+        engine.selectProgram (1, 1);
+        engine.setTempoBpm (116.0);
+        const int oye = engine.addSong ("Oye Como Va");
+        engine.captureSong (oye);
+        CHECK (engine.getSongs()[(size_t) oye].programFor (0) == 4);
+        CHECK (engine.getSongs()[(size_t) oye].programFor (1) == 1);
+        CHECK (std::abs (engine.getSongs()[(size_t) oye].tempoBpm - 116.0) < 0.001);
+
+        // A second song, built by hand, that leaves Lower alone.
+        const int onions = engine.addSong ("Green Onions");
+        engine.setSongProgram (onions, 0, 2);
+        engine.setSongProgram (onions, 1, -1);
+        engine.setSongTempo (onions, 132.0);
+
+        // Selecting a song moves every input it names, and only those.
+        engine.selectProgram (0, 0);
+        engine.selectProgram (1, 1);
+        engine.setTempoBpm (90.0);
+        engine.selectSong (onions);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 2);
+        CHECK (engine.getSetup().inputs[1].currentProgram == 1);      // untouched
+        CHECK (std::abs (engine.getTempoBpm() - 132.0) < 0.001);
+
+        // A song with no tempo of its own leaves the tempo where it is.
+        const int quiet = engine.addSong ("No tempo");
+        engine.setSongProgram (quiet, 0, 4);
+        engine.setTempoBpm (101.0);
+        engine.selectSong (quiet);
+        CHECK (std::abs (engine.getTempoBpm() - 101.0) < 0.001);
+
+        // A set orders songs, and stepping through it stops at the end.
+        const int first = engine.addSet ("First set");
+        engine.setSetSongs (first, { oye, onions, quiet });
+        engine.selectSet (first);
+        CHECK (engine.getCurrentSet() == first);
+        CHECK (engine.getCurrentSongInSet() == -1);      // chosen, not started
+
+        engine.nextSong();
+        CHECK (engine.getCurrentSongInSet() == 0);
+        CHECK (engine.getSetup().inputs[0].currentProgram == 4);
+        engine.nextSong();
+        CHECK (engine.getCurrentSongInSet() == 1);
+        engine.nextSong();
+        CHECK (engine.getCurrentSongInSet() == 2);
+        engine.nextSong();                                // past the end
+        CHECK (engine.getCurrentSongInSet() == 2);        // stays put, does not wrap
+        engine.previousSong();
+        CHECK (engine.getCurrentSongInSet() == 1);
+        while (engine.getCurrentSongInSet() > 0) engine.previousSong();
+        engine.previousSong();
+        CHECK (engine.getCurrentSongInSet() == 0);        // and does not run off the front
+
+        /* The footswitch: a CC steps the set whatever is loaded. This goes
+           through the MIDI thread and the event queue, like the real thing. */
+        engine.setNextSongCC (80);
+        engine.setPrevSongCC (81);
+        engine.selectSongInSet (0);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (engine.getCurrentSongInSet() == 1);
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 81, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (engine.getCurrentSongInSet() == 0);
+
+        // The release half must not step again.
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 80, 0));
+        MessageManager::getInstance()->runDispatchLoopUntil (40);
+        CHECK (engine.getCurrentSongInSet() == 0);
+
+        // Learning a footswitch, like the tap.
+        engine.setNextSongCC (0);
+        engine.armSongLearn (true);
+        CHECK (engine.isSongLearnArmed());
+        engine.injectMidi (0, MidiMessage::controllerEvent (1, 67, 127));
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (! engine.isSongLearnArmed());
+        CHECK (engine.getNextSongCC() == 67);
+
+        /* Deleting a song must not leave a set playing the wrong one: the
+           indices after it shift, and any set using it drops it. */
+        const int before = (int) engine.getSets()[(size_t) first].songs.size();
+        engine.removeSong (onions);                       // the middle song
+        const auto& songs = engine.getSets()[(size_t) first].songs;
+        CHECK ((int) songs.size() == before - 1);
+        for (int i : songs) CHECK (i >= 0 && i < (int) engine.getSongs().size());
+        CHECK (engine.getSongs()[(size_t) songs[0]].name == "Oye Como Va");
+        CHECK (engine.getSongs()[(size_t) songs[1]].name == "No tempo");
+
+        // All of it survives a save and load.
+        engine.setNextSongCC (80);
+        engine.setPrevSongCC (81);
+        const auto saved = Setup::fromVar (engine.captureSetup().toVar());
+        CHECK (saved.songs.size() == engine.getSongs().size());
+        CHECK (saved.sets.size() == engine.getSets().size());
+        CHECK (saved.nextSongCC == 80 && saved.prevSongCC == 81);
+        CHECK (saved.songs[0].name == "Oye Como Va");
+        CHECK (std::abs (saved.songs[0].tempoBpm - 116.0) < 0.001);
+    }
+
     std::printf (failures == 0 ? "EngineTest: all checks passed\n" : "EngineTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

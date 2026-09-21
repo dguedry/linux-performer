@@ -259,6 +259,70 @@ int main()
         CHECK (html.contains ("Other"));            // the ungrouped run is labelled
     }
 
+    // ---- songs and sets -------------------------------------------------
+    /* A song names one program per input plus a tempo; a set orders songs.
+       What matters on disk is that a setup made before any of this existed
+       still loads, and that deleting a song cannot leave a set pointing at
+       the wrong one. */
+    {
+        Setup s;
+        s.inputs.resize (2);
+        s.inputs[0].name = "Upper";
+        s.inputs[1].name = "Lower";
+
+        SongDef a; a.name = "Oye Como Va"; a.programs = { 4, 1 }; a.tempoBpm = 116.0; a.notes = "Am";
+        SongDef b; b.name = "Green Onions"; b.programs = { 2, -1 };       // Lower left alone
+        SongDef c; c.name = "Encore";       c.programs = { 0, 0 };
+        s.songs = { a, b, c };
+
+        SetDef first; first.name = "First set"; first.songs = { 0, 1, 2 };
+        SetDef enc;   enc.name   = "Encores";   enc.songs = { 2, 0 };      // a song may repeat
+        s.sets = { first, enc };
+        s.currentSet = 0; s.currentSongInSet = 1;
+        s.nextSongCC = 80; s.prevSongCC = 81;
+
+        const auto back = Setup::fromVar (s.toVar());
+        CHECK (back.songs.size() == 3 && back.sets.size() == 2);
+        CHECK (back.songs[0].name == "Oye Como Va");
+        CHECK (back.songs[0].programFor (0) == 4 && back.songs[0].programFor (1) == 1);
+        CHECK (std::abs (back.songs[0].tempoBpm - 116.0) < 0.001);
+        CHECK (back.songs[0].notes == "Am");
+        CHECK (back.songs[1].programFor (1) == -1);          // "leave that keyboard alone"
+        CHECK (std::abs (back.songs[1].tempoBpm) < 0.001);   // no tempo of its own
+        CHECK (back.sets[0].songs.size() == 3 && back.sets[1].songs == std::vector<int> ({ 2, 0 }));
+        CHECK (back.currentSet == 0 && back.currentSongInSet == 1);
+        CHECK (back.nextSongCC == 80 && back.prevSongCC == 81);
+
+        // An input the song never knew about reads as "leave it alone".
+        CHECK (back.songs[0].programFor (5) == -1);
+        CHECK (back.songs[0].programFor (-1) == -1);
+
+        /* A setup from before songs existed has no songs/sets keys at all, and
+           must load as an ordinary setup rather than anything surprising. */
+        Setup plain;
+        plain.inputs.resize (1);
+        auto older = plain.toVar();
+        CHECK (older.getDynamicObject()->getProperty ("songs").isVoid());
+        CHECK (older.getDynamicObject()->getProperty ("sets").isVoid());
+        const auto loadedPlain = Setup::fromVar (older);
+        CHECK (loadedPlain.songs.empty() && loadedPlain.sets.empty());
+        CHECK (loadedPlain.currentSet == -1 && loadedPlain.currentSongInSet == -1);
+
+        /* A hand-edited file pointing a set at a song that is not there must
+           not survive into a gig. */
+        auto broken = s.toVar();
+        if (auto* root = broken.getDynamicObject())
+        {
+            if (auto* setsArr = root->getProperty ("sets").getArray())
+                if (auto* s0 = (*setsArr)[0].getDynamicObject())
+                    s0->setProperty ("songs", juce::Array<juce::var> { juce::var (0), juce::var (99), juce::var (-3) });
+            root->setProperty ("currentSet", 7);
+        }
+        const auto fixed = Setup::fromVar (broken);
+        CHECK (fixed.sets[0].songs == std::vector<int> ({ 0 }));   // 99 and -3 dropped
+        CHECK (fixed.currentSet == -1 && fixed.currentSongInSet == -1);
+    }
+
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

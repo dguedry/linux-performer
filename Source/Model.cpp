@@ -226,6 +226,60 @@ InputDef InputDef::fromVar (const var& v)
 }
 
 //==============================================================================
+//==============================================================================
+var SongDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("name", name);
+    Array<var> progArr;
+    for (int p : programs) progArr.add (p);
+    o->setProperty ("programs", progArr);
+    // Only written when set, so a setup without songs stays byte-identical.
+    if (tempoBpm > 0.0)    o->setProperty ("tempoBpm", tempoBpm);
+    if (notes.isNotEmpty()) o->setProperty ("notes", notes);
+    return var (o);
+}
+
+SongDef SongDef::fromVar (const var& v)
+{
+    SongDef s;
+    if (auto* o = v.getDynamicObject())
+    {
+        s.name     = o->getProperty ("name").toString();
+        s.tempoBpm = (double) o->getProperty ("tempoBpm");
+        s.notes    = o->getProperty ("notes").toString();
+        if (auto* arr = o->getProperty ("programs").getArray())
+            for (auto& p : *arr)
+                s.programs.push_back ((int) p);
+    }
+    return s;
+}
+
+//==============================================================================
+var SetDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("name", name);
+    Array<var> songArr;
+    for (int i : songs) songArr.add (i);
+    o->setProperty ("songs", songArr);
+    return var (o);
+}
+
+SetDef SetDef::fromVar (const var& v)
+{
+    SetDef s;
+    if (auto* o = v.getDynamicObject())
+    {
+        s.name = o->getProperty ("name").toString();
+        if (auto* arr = o->getProperty ("songs").getArray())
+            for (auto& i : *arr)
+                s.songs.push_back ((int) i);
+    }
+    return s;
+}
+
+//==============================================================================
 var Setup::toVar() const
 {
     auto* o = new DynamicObject();
@@ -238,6 +292,25 @@ var Setup::toVar() const
     Array<var> arr;
     for (auto& i : inputs) arr.add (i.toVar());
     o->setProperty ("inputs", arr);
+
+    /* Songs and sets are only written when there are any, so every setup made
+       before this existed still saves and loads byte-identically. */
+    if (! songs.empty())
+    {
+        Array<var> songArr;
+        for (auto& sg : songs) songArr.add (sg.toVar());
+        o->setProperty ("songs", songArr);
+    }
+    if (! sets.empty())
+    {
+        Array<var> setArr;
+        for (auto& st : sets) setArr.add (st.toVar());
+        o->setProperty ("sets", setArr);
+        o->setProperty ("currentSet", currentSet);
+        o->setProperty ("currentSongInSet", currentSongInSet);
+    }
+    if (nextSongCC > 0) o->setProperty ("nextSongCC", nextSongCC);
+    if (prevSongCC > 0) o->setProperty ("prevSongCC", prevSongCC);
     return var (o);
 }
 
@@ -250,6 +323,26 @@ Setup Setup::fromVar (const var& v)
     s.tapTempoCC         = prop<int>    (v, "tapTempoCC", 0);
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("inputs").getArray() : nullptr)
         for (auto& iv : *arr) s.inputs.push_back (InputDef::fromVar (iv));
+
+    s.nextSongCC = prop<int> (v, "nextSongCC", 0);
+    s.prevSongCC = prop<int> (v, "prevSongCC", 0);
+    if (auto* o = obj (v))
+    {
+        if (auto* arr = o->getProperty ("songs").getArray())
+            for (auto& sv : *arr) s.songs.push_back (SongDef::fromVar (sv));
+        if (auto* arr = o->getProperty ("sets").getArray())
+            for (auto& sv : *arr) s.sets.push_back (SetDef::fromVar (sv));
+    }
+    s.currentSet       = prop<int> (v, "currentSet", -1);
+    s.currentSongInSet = prop<int> (v, "currentSongInSet", -1);
+
+    /* A set or song index that no longer exists -- a setup hand-edited, or a
+       song deleted by an older build -- must not be able to crash a gig. */
+    if (s.currentSet >= (int) s.sets.size()) { s.currentSet = -1; s.currentSongInSet = -1; }
+    for (auto& st : s.sets)
+        st.songs.erase (std::remove_if (st.songs.begin(), st.songs.end(),
+                                        [&] (int i) { return i < 0 || i >= (int) s.songs.size(); }),
+                        st.songs.end());
     return s;
 }
 

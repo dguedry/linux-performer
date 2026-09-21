@@ -122,6 +122,53 @@ public:
     //==============================================================================
     // Programs
     void selectProgram (int inputIndex, int program);
+
+    //==============================================================================
+    // Songs and sets
+    //
+    // A program is a sound; a song is the moment the band starts playing. One
+    // song sets every keyboard at once and brings its own tempo, because that
+    // is what "the next number" means on stage.
+
+    const std::vector<SongDef>& getSongs() const { return setup.songs; }
+    const std::vector<SetDef>&  getSets()  const { return setup.sets; }
+
+    int addSong (const juce::String& name);            // returns its index
+    void removeSong (int songIndex);
+    void setSongName (int songIndex, const juce::String&);
+    void setSongNotes (int songIndex, const juce::String&);
+    void setSongTempo (int songIndex, double bpm);     // 0 = leave the tempo alone
+    void setSongProgram (int songIndex, int inputIndex, int program);   // -1 = leave that input alone
+
+    /** Fills a song from what is loaded right now: every input's current
+        program, and the current tempo. Building a set is then "get the sound
+        right, press Capture". */
+    void captureSong (int songIndex);
+
+    /** Selects every input's program for this song and applies its tempo.
+        Inputs the song leaves at -1 are not touched. */
+    void selectSong (int songIndex);
+
+    int addSet (const juce::String& name);
+    void removeSet (int setIndex);
+    void setSetName (int setIndex, const juce::String&);
+    void setSetSongs (int setIndex, const std::vector<int>& songIndices);
+
+    /** Which set is being played and how far into it. -1 = none. */
+    int getCurrentSet() const        { return setup.currentSet; }
+    int getCurrentSongInSet() const  { return setup.currentSongInSet; }
+    void selectSet (int setIndex);
+    void selectSongInSet (int position);
+    void nextSong();
+    void previousSong();
+
+    /** Footswitches that step through the set. 0 = none. */
+    int getNextSongCC() const { return setup.nextSongCC; }
+    int getPrevSongCC() const { return setup.prevSongCC; }
+    void setNextSongCC (int cc);
+    void setPrevSongCC (int cc);
+    void armSongLearn (bool forNext);
+    bool isSongLearnArmed() const { return songLearnArmed.load(); }
     void setProgramName (int inputIndex, int program, const juce::String&);
 
     /** The program's category ("Organs", "Strings"), or empty for ungrouped. */
@@ -227,7 +274,8 @@ private:
 
     struct Event
     {
-        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn };
+        enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
+                    songStep, songLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -340,6 +388,10 @@ private:
     // prefix's wineserver and services boot on that first start; concurrent Wine
     // start-ups stall), then at most kBridgedParallel at once.
     int bridgedParallel = 2;                      // settings "parallelBridgedLoads"
+    std::atomic<int> nextCC { 0 }, prevCC { 0 };   // read on the MIDI thread
+    std::atomic<bool> songLearnArmed { false };
+    bool songLearnForNext = true;
+
     int loaderThreadCount = 4;                    // settings "parallelLoads"
     std::vector<std::thread> loaderThreads;
     std::mutex loaderMutex;

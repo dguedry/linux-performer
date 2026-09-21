@@ -118,9 +118,79 @@ struct InputDef
 };
 
 //==============================================================================
+/** One song in a set: what every keyboard plays, and at what tempo.
+
+    A program is a sound; a song is the moment the band starts playing. On
+    stage you do not want to pick Upper 004 and Lower 001 and then set 116 bpm
+    -- you want to say "Oye Como Va" and have the rig be ready.
+
+    Programs are stored per input and numbered 0..127 each, so a song holds one
+    number per input rather than a single program. -1 means "leave that
+    keyboard alone", which is what you want for an input you are not using in
+    this song, or a pad you keep set up between numbers. */
+struct SongDef
+{
+    juce::String name;
+
+    /** One program per input, by index into Setup::inputs. Shorter than the
+        input list if a song predates an input being added; missing entries are
+        treated as -1. */
+    std::vector<int> programs;
+
+    /** Tempo for this song, or 0 to keep whatever the tempo already is. Zero
+        rather than a default, so a song that does not care about tempo does not
+        silently reset one you tapped. */
+    double tempoBpm = 0.0;
+
+    /** Free text: a key, a count-in, "capo 2", whatever helps on stage. Shown
+        on the tablet under the song name. */
+    juce::String notes;
+
+    int programFor (int inputIndex) const
+    {
+        return inputIndex >= 0 && inputIndex < (int) programs.size()
+                 ? programs[(size_t) inputIndex] : -1;
+    }
+
+    juce::var toVar() const;
+    static SongDef fromVar (const juce::var&);
+};
+
+//==============================================================================
+/** An ordered list of songs: one gig, one rehearsal, one support slot.
+
+    Sets hold song indices rather than copies, so the same song can appear in
+    several sets and fixing its tempo once fixes it everywhere. */
+struct SetDef
+{
+    juce::String name;
+    std::vector<int> songs;          // indices into Setup::songs
+
+    juce::var toVar() const;
+    static SetDef fromVar (const juce::var&);
+};
+
+//==============================================================================
 struct Setup
 {
     std::vector<InputDef> inputs;
+
+    /** Every song this setup knows, in no particular order: the sets decide
+        the order they are played in. */
+    std::vector<SongDef> songs;
+    std::vector<SetDef> sets;
+
+    /** Which set is being played, and how far into it, so picking up where you
+        left off survives a restart. -1 = no set chosen. */
+    int currentSet = -1;
+    int currentSongInSet = -1;
+
+    /** Controller that steps to the next song, and to the previous one, or 0
+        for none. Global like the tap tempo controller, and for the same reason:
+        a footswitch has to work whatever is loaded. */
+    int nextSongCC = 0;
+    int prevSongCC = 0;
+
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding
 

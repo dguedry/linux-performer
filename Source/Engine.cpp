@@ -229,6 +229,8 @@ void Engine::loadSetup (Setup newSetup)
     setup = std::move (newSetup);
     // The audio thread reads the tap controller from its own copy.
     tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
+    nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
+    prevCC.store (jlimit (0, 127, setup.prevSongCC), std::memory_order_relaxed);
     tapTimes.clear();
     rebuildRuntimes();
     listeners.call ([] (Listener& l) { l.setupChanged(); });
@@ -505,6 +507,201 @@ bool Engine::isProgramLoaded (int inputIndex, int program) const
     return getLoaded (inputIndex, program) != nullptr;
 }
 
+//==============================================================================
+// Songs and sets
+//==============================================================================
+int Engine::addSong (const String& name)
+{
+    SongDef s;
+    s.name = name.isNotEmpty() ? name : "Song " + String ((int) setup.songs.size() + 1);
+    s.programs.assign (setup.inputs.size(), -1);
+    setup.songs.push_back (std::move (s));
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return (int) setup.songs.size() - 1;
+}
+
+void Engine::removeSong (int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs.erase (setup.songs.begin() + songIndex);
+
+    /* Sets hold indices, so everything after the hole shifts down and any set
+       that used this song drops it. Doing this here rather than leaving
+       dangling indices about is the difference between a deleted song and a
+       set that silently plays the wrong number. */
+    for (auto& st : setup.sets)
+    {
+        auto& v = st.songs;
+        v.erase (std::remove (v.begin(), v.end(), songIndex), v.end());
+        for (auto& i : v) if (i > songIndex) --i;
+    }
+    if (setup.currentSet >= 0 && setup.currentSongInSet >= (int) setup.sets[(size_t) setup.currentSet].songs.size())
+        setup.currentSongInSet = -1;
+
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongName (int songIndex, const String& name)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].name = name;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongNotes (int songIndex, const String& notes)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    setup.songs[(size_t) songIndex].notes = notes;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongTempo (int songIndex, double bpm)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    // 0 means "leave the tempo alone"; anything else is clamped like the global one.
+    setup.songs[(size_t) songIndex].tempoBpm = bpm <= 0.0 ? 0.0 : jlimit (20.0, 300.0, bpm);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSongProgram (int songIndex, int inputIndex, int program)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    if (! validInput (inputIndex)) return;
+
+    auto& s = setup.songs[(size_t) songIndex];
+    if (s.programs.size() < setup.inputs.size()) s.programs.resize (setup.inputs.size(), -1);
+    s.programs[(size_t) inputIndex] = (program >= 0 && program < InputDef::numPrograms) ? program : -1;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::captureSong (int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+
+    auto& s = setup.songs[(size_t) songIndex];
+    s.programs.assign (setup.inputs.size(), -1);
+    for (size_t i = 0; i < setup.inputs.size(); ++i)
+        s.programs[i] = setup.inputs[i].currentProgram;
+    s.tempoBpm = setup.tempoBpm;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::selectSong (int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+
+    const auto& s = setup.songs[(size_t) songIndex];
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+        if (const int p = s.programFor (i); p >= 0)
+            selectProgram (i, p);
+
+    // Tempo after the programs: a plugin that has just loaded is told the tempo
+    // by setTempoBpm, so doing it in this order means no program starts at the
+    // old one.
+    if (s.tempoBpm > 0.0)
+    {
+        setTempoBpm (s.tempoBpm);
+        resetTapTempo();
+    }
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::addSet (const String& name)
+{
+    SetDef s;
+    s.name = name.isNotEmpty() ? name : "Set " + String ((int) setup.sets.size() + 1);
+    setup.sets.push_back (std::move (s));
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return (int) setup.sets.size() - 1;
+}
+
+void Engine::removeSet (int setIndex)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    setup.sets.erase (setup.sets.begin() + setIndex);
+    if (setup.currentSet == setIndex)      { setup.currentSet = -1; setup.currentSongInSet = -1; }
+    else if (setup.currentSet > setIndex)  --setup.currentSet;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSetName (int setIndex, const String& name)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+    setup.sets[(size_t) setIndex].name = name;
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setSetSongs (int setIndex, const std::vector<int>& songIndices)
+{
+    if (setIndex < 0 || setIndex >= (int) setup.sets.size()) return;
+
+    std::vector<int> clean;
+    for (int i : songIndices)
+        if (i >= 0 && i < (int) setup.songs.size())
+            clean.push_back (i);          // a song may appear twice: encores happen
+
+    setup.sets[(size_t) setIndex].songs = std::move (clean);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::selectSet (int setIndex)
+{
+    if (setIndex < -1 || setIndex >= (int) setup.sets.size()) return;
+    setup.currentSet = setIndex;
+    setup.currentSongInSet = -1;          // chosen, not started
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::selectSongInSet (int position)
+{
+    if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return;
+
+    const auto& st = setup.sets[(size_t) setup.currentSet];
+    if (position < 0 || position >= (int) st.songs.size()) return;
+
+    setup.currentSongInSet = position;
+    selectSong (st.songs[(size_t) position]);
+}
+
+void Engine::nextSong()
+{
+    if (setup.currentSet < 0 || setup.currentSet >= (int) setup.sets.size()) return;
+    const auto& st = setup.sets[(size_t) setup.currentSet];
+    if (st.songs.empty()) return;
+
+    /* Stops at the end rather than wrapping. Wrapping to the first number after
+       the last one is the wrong thing to do to a band that has just finished. */
+    const int next = setup.currentSongInSet + 1;
+    if (next < (int) st.songs.size()) selectSongInSet (next);
+}
+
+void Engine::previousSong()
+{
+    if (setup.currentSet < 0) return;
+    if (setup.currentSongInSet > 0) selectSongInSet (setup.currentSongInSet - 1);
+}
+
+void Engine::setNextSongCC (int cc)
+{
+    setup.nextSongCC = jlimit (0, 127, cc);
+    nextCC.store (setup.nextSongCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::setPrevSongCC (int cc)
+{
+    setup.prevSongCC = jlimit (0, 127, cc);
+    prevCC.store (setup.prevSongCC, std::memory_order_relaxed);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::armSongLearn (bool forNext)
+{
+    songLearnForNext = forNext;
+    songLearnArmed.store (true);
+}
+
+//==============================================================================
 void Engine::selectProgram (int inputIndex, int program)
 {
     if (! validInput (inputIndex) || ! validProgram (program)) return;
@@ -1327,6 +1524,43 @@ void Engine::handleAsyncUpdate()
                         { l.statusMessage ("Tempo " + String (bpm, 1) + " bpm"); });
                 break;
 
+            case Event::songLearn:
+            {
+                if (songLearnForNext) setNextSongCC (e.a);
+                else                  setPrevSongCC (e.a);
+                const String what = songLearnForNext ? "Next song" : "Previous song";
+                listeners.call ([what, cc = e.a] (Listener& l)
+                    { l.statusMessage (what + ": CC " + String (cc)); });
+                break;
+            }
+
+            case Event::songStep:
+            {
+                if (setup.currentSet < 0)
+                {
+                    listeners.call ([] (Listener& l)
+                        { l.statusMessage ("No set chosen -- pick one first."); });
+                    break;
+                }
+                if (e.a > 0) nextSong(); else previousSong();
+
+                // Say where we are: a footswitch gives no feedback of its own.
+                const auto& st = setup.sets[(size_t) setup.currentSet];
+                const int pos = setup.currentSongInSet;
+                if (pos >= 0 && pos < (int) st.songs.size())
+                {
+                    const auto& sg = setup.songs[(size_t) st.songs[(size_t) pos]];
+                    const String msg = String (pos + 1) + "/" + String ((int) st.songs.size())
+                                     + "  " + sg.name;
+                    listeners.call ([msg] (Listener& l) { l.statusMessage (msg); });
+                }
+                else if (e.a > 0)
+                {
+                    listeners.call ([] (Listener& l) { l.statusMessage ("End of the set."); });
+                }
+                break;
+            }
+
             case Event::learn:
                 listeners.call ([&] (Listener& l) { l.learnReceived (e.input, (MappingDef::Source) e.a, e.b); });
                 break;
@@ -1460,6 +1694,26 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
         tapLearnArmed.store (false);
         postEvent ({ Event::tapLearn, i, m.getControllerNumber(), 0, 0, 0 });
         return;
+    }
+
+    /* Learning the song footswitches, same rule as the tap: the pedal you press
+       to teach it is the pedal you will press to use it. */
+    if (songLearnArmed.load() && m.isController() && m.getControllerValue() >= 64)
+    {
+        songLearnArmed.store (false);
+        postEvent ({ Event::songLearn, i, m.getControllerNumber(), 0, 0, 0 });
+        return;
+    }
+
+    /* Stepping through the set, outside the channel filter and whatever is
+       loaded -- a footswitch has to work all night. Only the press counts. */
+    if (m.isController() && m.getControllerValue() >= 64)
+    {
+        const int cc = m.getControllerNumber();
+        if (const int n = nextCC.load (std::memory_order_relaxed); n > 0 && cc == n)
+        { postEvent ({ Event::songStep, i, +1, 0, 0, 0 }); return; }
+        if (const int p = prevCC.load (std::memory_order_relaxed); p > 0 && cc == p)
+        { postEvent ({ Event::songStep, i, -1, 0, 0, 0 }); return; }
     }
 
     /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
