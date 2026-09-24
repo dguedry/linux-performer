@@ -86,6 +86,49 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
          padding:9px 14px; font-size:13px; font-weight:800; letter-spacing:.04em; }
   #tap:active { background:var(--accent); color:#06121f; }
 
+  /* Tabs: the set list is what you look at during a gig, the programs are
+     what you look at while building one. */
+  .tabs { display:flex; gap:8px; padding:10px 12px 0; }
+  .tabs button { flex:1; background:var(--panel); color:var(--dim); border:0; border-radius:10px 10px 0 0;
+                 padding:12px; font-size:14px; font-weight:800; letter-spacing:.04em; }
+  .tabs button.on { background:var(--row); color:#fff; }
+
+  /* The set list. The current song is the thing you must be able to read at a
+     glance from a stand, so it is the one that is big. */
+  .setwrap { margin:10px 12px 22px; }
+  .setpick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .setpick button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
+                    padding:10px 18px; font-size:13px; font-weight:700; }
+  .setpick button.on { background:var(--accent); color:#06121f; }
+
+  .song { display:flex; align-items:baseline; gap:12px; background:var(--panel);
+          border-radius:12px; padding:14px 16px; margin-bottom:8px; width:100%;
+          border:0; text-align:left; color:#fff; }
+  .song .n { color:var(--dim); font-variant-numeric:tabular-nums; font-weight:700;
+             font-size:14px; min-width:24px; }
+  .song .t { font-size:18px; font-weight:700; flex:1; overflow:hidden;
+             text-overflow:ellipsis; white-space:nowrap; }
+  .song .bpm { color:var(--dim); font-size:13px; font-weight:700; }
+
+  /* The one you are on. */
+  .song.on { background:var(--accent); color:#06121f; padding:18px 16px; }
+  .song.on .n, .song.on .bpm { color:#06121f; }
+  .song.on .t { font-size:26px; font-weight:800; }
+  .song.on .parts { color:#06121f; }
+  .parts { font-size:13px; color:var(--dim); margin-top:4px; }
+  .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
+  .song.on .notes { color:#06121f; }
+  .songbody { flex:1; min-width:0; }
+
+  /* Step buttons: big, far apart, hard to hit the wrong one. */
+  .step { display:flex; gap:10px; margin-top:14px; }
+  .step button { flex:1; background:var(--row); color:#fff; border:0; border-radius:12px;
+                 padding:20px; font-size:17px; font-weight:800; letter-spacing:.04em; }
+  .step button:active { background:var(--accent); color:#06121f; }
+  .step button:disabled { opacity:.35; }
+
+  .empty { color:var(--dim); font-size:15px; padding:20px 4px; line-height:1.5; }
+
   .groups { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
   .groups button { background:var(--row); color:var(--dim); border:0; border-radius:999px;
                    padding:9px 16px; font-size:13px; font-weight:700; letter-spacing:.02em; }
@@ -120,6 +163,11 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
     <p class="hint" id="gatemsg"></p>
   </form>
 </div>
+<div class="tabs">
+  <button id="tabSongs" class="on">Set list</button>
+  <button id="tabProgs">Programs</button>
+</div>
+<div id="setview"></div>
 <div id="inputs"></div>
 </div>
 <script>
@@ -173,6 +221,135 @@ function show(msg) { const e = document.getElementById("err"); e.textContent = m
 
 let lastState = null;
 const filters = {};          // input index -> chosen group, "" for all
+
+/* Which tab is showing. Remembered per device: someone building a set works in
+   Programs, someone playing a gig works in the set list, and neither should
+   have to re-pick it every time the page reloads. */
+let tab = localStorage.getItem("tab") || "songs";
+
+function syncTabs() {
+  const hasSongs = !!(lastState && lastState.sets && lastState.sets.length);
+  /* Nothing to show and no way to make one from here: a setup with no songs
+     goes straight to the programs rather than an empty list. */
+  const t = hasSongs ? tab : "programs";
+  document.getElementById("tabSongs").className = t === "songs" ? "on" : "";
+  document.getElementById("tabProgs").className = t === "programs" ? "on" : "";
+  document.getElementById("setview").style.display = t === "songs" ? "" : "none";
+  document.getElementById("inputs").style.display  = t === "songs" ? "none" : "";
+}
+
+document.getElementById("tabSongs").onclick = () => { tab = "songs";    localStorage.setItem("tab", tab); syncTabs(); };
+document.getElementById("tabProgs").onclick = () => { tab = "programs"; localStorage.setItem("tab", tab); syncTabs(); };
+
+/* The set list. Drawn from the state the page already polls, so it follows a
+   footswitch press or a change made on the laptop without doing anything. */
+function renderSets(s) {
+  const host = document.getElementById("setview");
+  host.innerHTML = "";
+  const sets = s.sets || [], songs = s.songs || [];
+  if (!sets.length) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "No sets yet. Build one in Performer: group your programs into songs, then order the songs into a set.";
+    host.appendChild(e);
+    return;
+  }
+
+  const wrap = document.createElement("div"); wrap.className = "setwrap";
+
+  // Which set, when there is more than one. One set needs no chooser.
+  if (sets.length > 1) {
+    const pick = document.createElement("div"); pick.className = "setpick";
+    sets.forEach((st, i) => {
+      const b = document.createElement("button");
+      b.textContent = st.name || ("Set " + (i + 1));
+      if (i === s.currentSet) b.className = "on";
+      b.onclick = async () => {
+        try { await api("/api/setlist?index=" + i, { method: "POST" }); await refresh(true); }
+        catch (e) { show(e.message); }
+      };
+      pick.appendChild(b);
+    });
+    wrap.appendChild(pick);
+  }
+
+  const cur = sets[s.currentSet];
+  if (!cur) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "Pick a set to play.";
+    wrap.appendChild(e); host.appendChild(wrap); return;
+  }
+
+  cur.songs.forEach((songIndex, pos) => {
+    const sg = songs[songIndex];
+    if (!sg) return;                       // a set pointing at a song that has gone
+    const b = document.createElement("button");
+    b.className = "song" + (pos === s.currentSong ? " on" : "");
+
+    const n = document.createElement("span"); n.className = "n";
+    n.textContent = String(pos + 1);
+
+    const body = document.createElement("div"); body.className = "songbody";
+    const t = document.createElement("div"); t.className = "t";
+    t.textContent = sg.name || "(unnamed)";
+    body.appendChild(t);
+
+    /* What each keyboard plays, and any note -- shown only for the song you
+       are on, so the list stays readable. */
+    if (pos === s.currentSong) {
+      if (sg.parts && sg.parts.length) {
+        const p = document.createElement("div"); p.className = "parts";
+        /* Separated, because "Upper 002 B3 Lower 001 FM EP" runs into one
+           line at a glance and this is read from a stand. */
+        p.textContent = sg.parts.map(x => x.input + " " + String(x.program).padStart(3, "0")
+                                        + (x.name ? " " + x.name : "")).join("  \u00b7  ");
+        body.appendChild(p);
+      }
+      if (sg.notes) {
+        const nt = document.createElement("div"); nt.className = "notes";
+        nt.textContent = sg.notes;
+        body.appendChild(nt);
+      }
+    }
+
+    b.appendChild(n); b.appendChild(body);
+    if (sg.tempo) {
+      const bpm = document.createElement("span"); bpm.className = "bpm";
+      bpm.textContent = Math.round(sg.tempo) + " bpm";
+      b.appendChild(bpm);
+    }
+
+    b.onclick = async () => {
+      try { await api("/api/setsong?pos=" + pos, { method: "POST" }); await refresh(true); }
+      catch (e) { show(e.message); }
+    };
+    wrap.appendChild(b);
+  });
+
+  // Step buttons, matching the footswitches.
+  const step = document.createElement("div"); step.className = "step";
+  const mk = (label, dir, disabled) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.disabled = disabled;
+    b.onclick = async () => {
+      try { await api("/api/step?dir=" + dir, { method: "POST" }); await refresh(true); }
+      catch (e) { show(e.message); }
+    };
+    return b;
+  };
+  const last = cur.songs.length - 1;
+  step.appendChild(mk("← PREV", -1, s.currentSong <= 0));
+  step.appendChild(mk("NEXT →", 1, s.currentSong >= last));
+  wrap.appendChild(step);
+
+  const where = document.createElement("div"); where.className = "empty";
+  where.style.padding = "12px 4px 0";
+  where.textContent = s.currentSong >= 0
+      ? (s.currentSong + 1) + " of " + cur.songs.length
+      : cur.songs.length + " songs -- tap one to start";
+  wrap.appendChild(where);
+
+  host.appendChild(wrap);
+}
 
 function render(s) {
   lastState = s;
@@ -251,6 +428,9 @@ function render(s) {
     root.appendChild(wrap);
     loadSlots(i);
   });
+
+  renderSets(s);
+  syncTabs();
 }
 
 // ---- controls ---------------------------------------------------------------
@@ -972,6 +1152,55 @@ String RemoteServer::stateJson() const
         inputs.add (var (o.get()));
     }
     root->setProperty ("inputs", inputs);
+
+    /* Songs and sets. Sent whole rather than on demand: the list is small --
+       a gig is tens of songs, not thousands -- and the page already polls once
+       a second, so this costs nothing and means the set list is never a
+       request behind what the rig is doing. */
+    const auto& songs = engine.getSongs();
+    const auto& sets  = engine.getSets();
+    if (! songs.empty() || ! sets.empty())
+    {
+        Array<var> songArr;
+        for (const auto& sg : songs)
+        {
+            DynamicObject::Ptr so (new DynamicObject());
+            so->setProperty ("name", sg.name);
+            if (sg.tempoBpm > 0.0)     so->setProperty ("tempo", sg.tempoBpm);
+            if (sg.notes.isNotEmpty()) so->setProperty ("notes", sg.notes);
+
+            /* What each keyboard plays, named rather than numbered: "B3" is
+               what you are looking for on a stand, not "002". */
+            Array<var> parts;
+            for (int i = 0; i < (int) setup.inputs.size(); ++i)
+            {
+                const int prog = sg.programFor (i);
+                if (prog < 0) continue;
+                DynamicObject::Ptr pd (new DynamicObject());
+                pd->setProperty ("input", setup.inputs[(size_t) i].name);
+                pd->setProperty ("program", prog);
+                pd->setProperty ("name", setup.inputs[(size_t) i].programs[(size_t) prog].name);
+                parts.add (var (pd.get()));
+            }
+            so->setProperty ("parts", parts);
+            songArr.add (var (so.get()));
+        }
+        root->setProperty ("songs", songArr);
+
+        Array<var> setArr;
+        for (const auto& st : sets)
+        {
+            DynamicObject::Ptr to (new DynamicObject());
+            to->setProperty ("name", st.name);
+            Array<var> idx;
+            for (int i : st.songs) idx.add (i);
+            to->setProperty ("songs", idx);
+            setArr.add (var (to.get()));
+        }
+        root->setProperty ("sets", setArr);
+        root->setProperty ("currentSet", engine.getCurrentSet());
+        root->setProperty ("currentSong", engine.getCurrentSongInSet());
+    }
     return JSON::toString (var (root.get()), true);
 }
 
@@ -1203,6 +1432,44 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         const int prog  = path.fromFirstOccurrenceOf ("program=", false, false).getIntValue();
         // the engine is not thread-safe for this: do it on the message thread
         MessageManager::callAsync ([this, input, prog] { engine.selectProgram (input, prog); });
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    /* Songs and sets. Each one nudges the revision so every other tablet
+       redraws on its next poll rather than showing a stale set list. */
+    if (path.startsWith ("/api/song"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int song = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
+        MessageManager::callAsync ([this, song] { engine.selectSong (song); });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/setlist"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int set = path.fromFirstOccurrenceOf ("index=", false, false).getIntValue();
+        MessageManager::callAsync ([this, set] { engine.selectSet (set); });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/setsong"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const int pos = path.fromFirstOccurrenceOf ("pos=", false, false).getIntValue();
+        MessageManager::callAsync ([this, pos] { engine.selectSongInSet (pos); });
+        ++revision;
+        sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
+        return;
+    }
+    if (path.startsWith ("/api/step"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        const bool back = path.contains ("dir=-1");
+        MessageManager::callAsync ([this, back] { if (back) engine.previousSong(); else engine.nextSong(); });
+        ++revision;
         sendResponse (sock, "200 OK", "application/json", "{\"ok\":true}");
         return;
     }
