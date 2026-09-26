@@ -65,6 +65,7 @@ private:
         const bool isSet;
     };
 
+    juce::String describeCurrent() const;
     void addSong();
     void removeSong();
     void captureIntoSelectedSong();

@@ -29,7 +29,7 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     for (auto* b : { &songsList, &setList })
     {
         addAndMakeVisible (b);
-        b->setRowHeight (24);
+        b->setRowHeight (34);          // two lines: the name, and what it loads
         b->setColour (ListBox::backgroundColourId, bgRow);
     }
 
@@ -136,7 +136,8 @@ void SongsPanel::refresh()
     const auto& sets  = engine.getSets();
     const int set = engine.getCurrentSet();
 
-    songsHeader.setText (songs.empty() ? "SONGS" : "SONGS  (" + String ((int) songs.size()) + ")",
+    songsHeader.setText (songs.empty() ? "SONGS  (a program per keyboard, and a tempo)"
+                                      : "SONGS  (" + String ((int) songs.size()) + ")",
                          dontSendNotification);
 
     if (set >= 0 && set < (int) sets.size())
@@ -221,17 +222,40 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
 
     auto r = Rectangle<int> (0, 0, w, h).reduced (6, 0);
 
+
+    /* Two lines: the name, and which program each keyboard plays. The second
+       line is the answer to "what is in this song" -- without it the panel
+       looks like a list of labels rather than a list of rigs. */
+    auto nameRow = r.removeFromTop (r.getHeight() / 2 + 1);
+
+    /* The tempo sits beside the name, not beside the programs: the second line
+       needs the whole width, and a truncated "001 ..." tells you nothing. */
     if (sg.tempoBpm > 0.0)
     {
         g.setColour (playing ? Colours::white.withAlpha (0.85f) : textDim);
         g.setFont (FontOptions (11.0f));
-        const auto bpm = String (roundToInt (sg.tempoBpm)) + " bpm";
-        g.drawText (bpm, r.removeFromRight (52), Justification::centredRight);
+        g.drawText (String (roundToInt (sg.tempoBpm)) + " bpm",
+                    nameRow.removeFromRight (52), Justification::centredRight);
     }
 
     g.setColour (playing ? Colours::white : Colours::white.withAlpha (0.92f));
     g.setFont (FontOptions (13.0f, playing ? Font::bold : Font::plain));
     g.drawText (prefix + (sg.name.isNotEmpty() ? sg.name : "(unnamed)"),
+                nameRow, Justification::centredLeft, true);
+
+    const auto& inputs = owner.engine.getSetup().inputs;
+    StringArray parts;
+    for (int i = 0; i < (int) inputs.size(); ++i)
+    {
+        const int prog = sg.programFor (i);
+        if (prog < 0) continue;              // this song leaves that keyboard alone
+        const auto& pd = inputs[(size_t) i].programs[(size_t) prog];
+        parts.add (String (prog).paddedLeft ('0', 3)
+                     + (pd.name.isNotEmpty() ? " " + pd.name : ""));
+    }
+    g.setColour (playing ? Colours::white.withAlpha (0.8f) : textDim);
+    g.setFont (FontOptions (10.5f));
+    g.drawText (parts.isEmpty() ? "(nothing captured)" : parts.joinIntoString ("   "),
                 r, Justification::centredLeft, true);
 }
 
@@ -265,23 +289,63 @@ int SongsPanel::songAtSetPosition (int position) const
 }
 
 //==============================================================================
+String SongsPanel::describeCurrent() const
+{
+    /* What is loaded right now, in the same words the song row will use. Shown
+       while naming so it is obvious what is about to be stored -- the answer to
+       "what is a song?" is easier to see than to read. */
+    const auto& inputs = engine.getSetup().inputs;
+    StringArray parts;
+    for (const auto& in : inputs)
+    {
+        const auto& prog = in.programs[(size_t) in.currentProgram];
+        parts.add (in.name + "  " + String (in.currentProgram).paddedLeft ('0', 3)
+                     + "  " + (prog.name.isNotEmpty() ? prog.name : "(empty)"));
+    }
+    parts.add ("Tempo  " + String (engine.getTempoBpm(), 1) + " bpm");
+    return parts.joinIntoString ("\n");
+}
+
 void SongsPanel::addSong()
 {
-    /* Named from what is loaded, because that is usually what the song is: you
-       set up the sound, then add the song. Renaming is one button away. */
+    /* Ask for the name when the song is made. It used to be named silently
+       after whatever Upper was playing -- so every song was called "B3" until
+       you found the Rename button, which is not a thing anyone should have to
+       find. */
     String suggested;
     const auto& inputs = engine.getSetup().inputs;
     if (! inputs.empty())
     {
-        const auto& in = inputs[0];
-        const auto& prog = in.programs[(size_t) in.currentProgram];
+        const auto& prog = inputs[0].programs[(size_t) inputs[0].currentProgram];
         if (prog.name.isNotEmpty()) suggested = prog.name;
     }
 
-    selectedSong = engine.addSong (suggested);
-    engine.captureSong (selectedSong);          // a new song remembers what is up now
-    refresh();
-    songsList.selectRow (selectedSong);
+    auto* w = new AlertWindow ("New song",
+                               "The song will remember what is loaded now:\n\n"
+                                 + describeCurrent()
+                                 + "\n\nChanging a program later changes every song that uses it.",
+                               MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", suggested);
+    w->getTextEditor ("name")->setTextToShowWhenEmpty ("song name", textDim);
+    w->addTextEditor ("notes", {});
+    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("notes (key, count-in...)", textDim);
+    w->addButton ("Create", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+    w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
+    {
+        std::unique_ptr<AlertWindow> owned (w);
+        if (r == 0) return;
+
+        auto name = w->getTextEditorContents ("name").trim();
+        if (name.isEmpty()) name = "Song " + String ((int) engine.getSongs().size() + 1);
+
+        selectedSong = engine.addSong (name);
+        engine.captureSong (selectedSong);      // a new song remembers what is up now
+        const auto notes = w->getTextEditorContents ("notes").trim();
+        if (notes.isNotEmpty()) engine.setSongNotes (selectedSong, notes);
+        refresh();
+        songsList.selectRow (selectedSong);
+    }), false);
 }
 
 void SongsPanel::removeSong()
