@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "KeyboardPanel.h"
 #include "StagePanel.h"
+#include "SongsPanel.h"
 #include "RemoteServer.h"
 #include "Hotspot.h"
 #include "HelpWindow.h"
@@ -98,12 +99,14 @@ private:
     juce::TextButton helpBtn { "Help" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;
     std::unique_ptr<StagePanel> stagePanel;
+    std::unique_ptr<SongsPanel> songsPanel;
     std::unique_ptr<RemoteServer> remote;
     juce::Label tailLabel { {}, "Tail" };
     juce::Slider tailSlider;
 
     // Tempo: a readout you can tap, because a tap tempo you cannot see is one
     // you cannot trust.
+    juce::TextButton songsBtn { "Songs" };
     juce::TextButton tapButton { "Tap" };
     juce::Label tempoLabel;
     juce::Label statusLabel, cpuLabel, fileLabel;

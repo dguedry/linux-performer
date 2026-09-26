@@ -1488,6 +1488,25 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     stageBtn.setToggleState (settings.getBoolValue ("showStage", false), dontSendNotification);
     stagePanel->setVisible (stageBtn.getToggleState());
 
+    /* Songs and sets. Hidden by default and remembered, like Stage: it is the
+       panel you want while building a set and while playing one, and in the way
+       the rest of the time. */
+    songsPanel = std::make_unique<SongsPanel> (engine);
+    addChildComponent (songsPanel.get());
+    addAndMakeVisible (songsBtn);
+    songsBtn.setClickingTogglesState (true);
+    songsBtn.setColour (TextButton::buttonOnColourId, accentDim);
+    songsBtn.setTooltip ("Group programs into songs, and songs into sets");
+    songsBtn.onClick = [this]
+    {
+        const bool show = songsBtn.getToggleState();
+        songsPanel->setVisible (show);
+        settings.setValue ("showSongs", show);
+        resized();
+    };
+    songsBtn.setToggleState (settings.getBoolValue ("showSongs", false), dontSendNotification);
+    songsPanel->setVisible (songsBtn.getToggleState());
+
     addAndMakeVisible (printBtn);
     printBtn.setTooltip ("Write a printable list of which program number plays which sound, and open it in your browser");
     printBtn.onClick = [this] { printProgramMap(); };
@@ -1652,7 +1671,8 @@ void MainComponent::resized()
     midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (8);
     panicBtn.setBounds (toolbar.removeFromRight (84));      toolbar.removeFromRight (10);
     keyboardBtn.setBounds (toolbar.removeFromRight (82));   toolbar.removeFromRight (4);
-    stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (8);
+    stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (4);
+    songsBtn.setBounds (toolbar.removeFromRight (66));     toolbar.removeFromRight (8);
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
@@ -1684,6 +1704,25 @@ void MainComponent::resized()
     }
 
     r.reduce (8, 0);
+    if (songsPanel != nullptr && songsPanel->isVisible())
+    {
+        /* Give it what is spare rather than a fixed width: the mappings table
+           on the right has columns that collapse into "0..." and "1..." when
+           squeezed, and a set list is readable much narrower than that table
+           is usable. Below its minimum the panel yields entirely -- being
+           unable to read the mappings is worse than scrolling the set. */
+        const int others = 260 + 8 + 260 + 8 + 420;      // inputs, programs, a usable right side
+        const int spare  = r.getWidth() - others;
+        if (spare >= SongsPanel::minimumWidth)
+        {
+            songsPanel->setBounds (r.removeFromLeft (jmin (SongsPanel::preferredWidth, spare)));
+            r.removeFromLeft (8);
+        }
+        else
+        {
+            songsPanel->setVisible (false);   // no room; the toggle turns it back on when there is
+        }
+    }
     inputsPanel->setBounds (r.removeFromLeft (260));
     r.removeFromLeft (8);
     programsPanel->setBounds (r.removeFromLeft (260));
@@ -1783,7 +1822,13 @@ void MainComponent::refreshProgramView()
 }
 
 // Engine::Listener ------------------------------------------------------------
-void MainComponent::setupChanged() { markDirty(); updateTempoLabel(); refreshAll(); }
+void MainComponent::setupChanged()
+{
+    markDirty();
+    updateTempoLabel();
+    if (songsPanel != nullptr) songsPanel->refresh();
+    refreshAll();
+}
 
 void MainComponent::tapTempoLearned (int cc)
 {

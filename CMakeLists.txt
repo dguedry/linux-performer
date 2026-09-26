@@ -33,6 +33,7 @@ target_sources(Performer PRIVATE
     Source/RemotePlugin.cpp
     Source/LowLatency.cpp
     Source/HelpWindow.cpp
+    Source/SongsPanel.cpp
     Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp
     Source/Engine.cpp
     Source/MainComponent.cpp)

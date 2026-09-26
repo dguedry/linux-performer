@@ -642,11 +642,24 @@ int main()
             list.setCustomScanner (std::make_unique<PluginHost::OutOfProcessScanner>());
             TemporaryFile dmp (".txt");
             PluginDirectoryScanner ds (list, *vst3, FileSearchPath (yabridgeDir.getFullPathName()), true, dmp.getFile(), false);
-            // Bundles whose Windows plugin is currently missing (being reinstalled) can't load.
+            /* Bundles whose Windows plugin is currently missing (being reinstalled)
+               can't load. Counted recursively, because the scanner searches that
+               way: yabridge puts a vendor folder beside the bundles when a plugin
+               installs into one (Steinberg/HALion Sonic.vst3), and counting only
+               the top level made the scanner look like it had found one too many. */
             int expected = 0;
-            for (const auto& bundle : yabridgeDir.findChildFiles (File::findFilesAndDirectories, false, "*.vst3"))
+            for (const auto& bundle : yabridgeDir.findChildFiles (File::findFilesAndDirectories, true, "*.vst3"))
+            {
+                /* A VST3 bundle is a directory that itself ends in .vst3 and
+                   contains Contents/, so a recursive search also turns up the
+                   Windows DLL inside each one. Those are not plugins to scan. */
+                if (bundle.getParentDirectory().getFileName() != "yabridge"
+                    && bundle.getParentDirectory().getParentDirectory().getFileName() != "yabridge")
+                    continue;
+
                 if (PluginHost::brokenBridgeTarget (bundle.getFullPathName()).isEmpty()) ++expected;
                 else std::printf ("     (skipping %s: bridge target missing)\n", bundle.getFileName().toRawUTF8());
+            }
 
             struct Job : public ThreadPoolJob
             {
