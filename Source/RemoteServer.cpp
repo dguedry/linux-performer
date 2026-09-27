@@ -808,7 +808,21 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
     if (!pos) return;
     ev.preventDefault();
     try { ev.target.setPointerCapture(ev.pointerId); } catch (e) {}
-    try { rfb.focus(); } catch (e) {}   // we blocked noVNC's own focus-on-touch
+    /* Focus the canvas so it takes keys, but do NOT let the browser scroll it
+       into view. noVNC puts its own scrolling div between #screen and the
+       canvas, and that is what actually scrolls -- the canvas is taller than
+       it, so "scroll the focused element into view" means "jump back to the
+       top", on every tap. preventScroll handles it where it is honoured; the
+       scroller's position is saved and put back for where it is not. */
+    try {
+        const c = canvasOf();
+        const box = c ? c.parentElement : null;      // noVNC's scrolling div
+        const sl = box ? box.scrollLeft : 0, st = box ? box.scrollTop : 0;
+        if (c && c.focus) c.focus({ preventScroll: true });
+        if (box && (box.scrollLeft !== sl || box.scrollTop !== st)) {
+            box.scrollLeft = sl; box.scrollTop = st;
+        }
+    } catch (e) {}
     active = { id: ev.pointerId, pos };
     touchActive = true;
     sendPointer(pos, 1);
@@ -862,7 +876,17 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      address bar hides or the screen turns. So it is re-applied after that. */
   function applyZoom() {
     if (fitting) return;
+    /* Re-applying the scale resizes the canvas, and shrinking a scrolled
+       element makes the browser clamp its scroll position -- so without this,
+       every resize throws you back to the top of the plugin. A tablet resizes
+       whenever the address bar hides or shows, which is constantly. */
+    const c = canvasOf();
+    const box = c ? c.parentElement : null;
+    const sl = box ? box.scrollLeft : 0, st = box ? box.scrollTop : 0;
     try { rfb._display.scale = zoom; } catch (e) {}
+    if (box && (box.scrollLeft !== sl || box.scrollTop !== st)) {
+      box.scrollLeft = sl; box.scrollTop = st;
+    }
   }
   function reapplyZoomLater() {
     requestAnimationFrame(() => requestAnimationFrame(applyZoom));
@@ -942,6 +966,10 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
     rfb.clipViewport = false;
     rfb.scaleViewport = fitting;
     rfb.resizeSession = false;
+    /* noVNC focuses the canvas on every click, which scrolls it into view and
+       throws the plugin window back to the top. We focus it ourselves, without
+       the scroll. */
+    rfb.focusOnClick = false;
 
     rfb.addEventListener('connect', () => { retries = 0; msg.style.display = 'none'; reapplyZoomLater(); });
     rfb.addEventListener('disconnect', e => {
