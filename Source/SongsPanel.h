@@ -69,10 +69,11 @@ private:
     void addSong();
     void removeSong();
     void captureIntoSelectedSong();
-    void renameSelectedSong();
+    void editSelectedSong();
     void addToSet();
     void removeFromSet();
     void moveInSet (int delta);
+    void moveSongInList (int delta);
     void chooseSet();
     void newSet();
     void showSetMenu();
@@ -88,9 +89,10 @@ private:
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
     juce::TextButton addBtn { "+ Add" }, removeBtn { "- Remove" },
-                     captureBtn { "Capture" }, renameBtn { "Rename" };
+                     captureBtn { "Capture" }, editBtn { "Edit" };
     juce::TextButton toSetBtn { "Add to set >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
+    juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
     juce::TextButton setBtn { "Set..." }, footBtn { "Footswitches..." };
 
     int selectedSong = -1;        // index into engine.getSongs()

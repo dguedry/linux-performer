@@ -115,6 +115,10 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song.on .n, .song.on .bpm { color:#06121f; }
   .song.on .t { font-size:26px; font-weight:800; }
   .song.on .parts { color:#06121f; }
+  .find { width:100%; box-sizing:border-box; margin:0 0 12px; padding:14px 16px;
+          font-size:16px; border-radius:12px; border:1px solid #3a3d47;
+          background:var(--panel); color:#fff; }
+  .find:focus { outline:none; border-color:var(--accent); }
   .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
@@ -228,6 +232,7 @@ const filters = {};          // input index -> chosen group, "" for all
    Programs, someone playing a gig works in the set list, and neither should
    have to re-pick it every time the page reloads. */
 let tab = localStorage.getItem("tab") || "songs";
+let songFilter = "";          // what is typed in the song search, if anything
 
 function syncTabs() {
   const hasSongs = !!(lastState && lastState.sets && lastState.sets.length);
@@ -257,6 +262,34 @@ function renderSets(s) {
   }
 
   const wrap = document.createElement("div"); wrap.className = "setwrap";
+
+  /* Search. Only once there are enough songs for it to beat scrolling -- on a
+     six-song set it would just be something else in the way. Kept across
+     redraws, because the page repaints every second and a filter that cleared
+     itself while you were reading would be worse than none. */
+  const allSongs = songs.length;
+  if (allSongs > 8) {
+    const box = document.createElement("input");
+    box.className = "find"; box.type = "search";
+    box.placeholder = "Find a song";
+    box.value = songFilter;
+    box.oninput = () => { songFilter = box.value; renderSets(lastState); };
+    wrap.appendChild(box);
+    /* Put the caret back where it was: this runs inside a full redraw. */
+    if (songFilter) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+  }
+
+  const matches = (sg) => {
+    const q = songFilter.trim().toLowerCase();
+    if (!q) return true;
+    if ((sg.name || "").toLowerCase().includes(q)) return true;
+    if ((sg.notes || "").toLowerCase().includes(q)) return true;
+    // The programs too: "kontakt" or "002" is how you find a song you cannot name.
+    return (sg.parts || []).some(x =>
+      (x.name || "").toLowerCase().includes(q)
+      || String(x.program).padStart(3, "0").includes(q)
+      || (x.input || "").toLowerCase().includes(q));
+  };
 
   // Which set, when there is more than one. One set needs no chooser.
   if (sets.length > 1) {
@@ -331,11 +364,19 @@ function renderSets(s) {
     wrap.appendChild(e); host.appendChild(wrap); return;
   }
 
+  let shownInSet = 0;
   cur.songs.forEach((songIndex, pos) => {
     const sg = songs[songIndex];
     if (!sg) return;                       // a set pointing at a song that has gone
+    if (!matches(sg)) return;
     wrap.appendChild(songRow(sg, songIndex, pos));
+    ++shownInSet;
   });
+  if (!shownInSet && songFilter.trim()) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = "Nothing in this set matches.";
+    wrap.appendChild(e);
+  }
 
   // Step buttons, matching the footswitches.
   const step = document.createElement("div"); step.className = "step";
@@ -357,7 +398,8 @@ function renderSets(s) {
      put in a set is still a song you may want to play -- and before this it
      was invisible from the stand, which looked like the app had lost it. */
   const inSet = new Set(cur.songs);
-  const others = songs.map((sg, i) => [sg, i]).filter(([, i]) => !inSet.has(i));
+  const others = songs.map((sg, i) => [sg, i])
+                      .filter(([sg, i]) => !inSet.has(i) && matches(sg));
   if (others.length) {
     const h = document.createElement("div"); h.className = "otherhead";
     h.textContent = "NOT IN THIS SET";

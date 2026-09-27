@@ -140,6 +140,10 @@ sheet.
 
 ### The plugin itself, on the stand
 
+The tablet opens on the set list: the song you are on in large type with what
+each keyboard is playing, the rest of the running order underneath, and a search
+once there are enough songs to need one.
+
 **GUI** beside each input's program puts that plugin's own interface on the
 tablet -- not a picture of it, but the working editor:
 

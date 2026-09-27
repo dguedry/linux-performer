@@ -46,8 +46,9 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     captureBtn.setTooltip ("Store what every keyboard is playing right now, and the tempo, in the selected song");
     captureBtn.onClick = [this] { captureIntoSelectedSong(); };
 
-    addAndMakeVisible (renameBtn);
-    renameBtn.onClick = [this] { renameSelectedSong(); };
+    addAndMakeVisible (editBtn);
+    editBtn.setTooltip ("Name, stage notes and tempo for this song");
+    editBtn.onClick = [this] { editSelectedSong(); };
 
     addAndMakeVisible (toSetBtn);
     toSetBtn.setTooltip ("Put the selected song at the end of the set");
@@ -56,6 +57,13 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     addAndMakeVisible (fromSetBtn);
     fromSetBtn.setTooltip ("Take this song out of the set. The song itself is kept.");
     fromSetBtn.onClick = [this] { removeFromSet(); };
+
+    addAndMakeVisible (songUpBtn);
+    songUpBtn.setTooltip ("Move this song up the list. Sets keep playing the same order.");
+    songUpBtn.onClick = [this] { moveSongInList (-1); };
+    addAndMakeVisible (songDownBtn);
+    songDownBtn.setTooltip ("Move this song down the list");
+    songDownBtn.onClick = [this] { moveSongInList (1); };
 
     addAndMakeVisible (upBtn);
     upBtn.onClick = [this] { moveInSet (-1); };
@@ -107,13 +115,18 @@ void SongsPanel::resized()
     songsHeader.setBounds (songsArea.removeFromTop (14));
     auto songButtons = songsArea.removeFromBottom (26);
     songsArea.removeFromBottom (4);
+    auto songMoveCol = songsArea.removeFromRight (28);
+    songUpBtn.setBounds (songMoveCol.removeFromTop (26).reduced (1));
+    songMoveCol.removeFromTop (2);
+    songDownBtn.setBounds (songMoveCol.removeFromTop (26).reduced (1));
+    songsArea.removeFromRight (4);
     songsList.setBounds (songsArea);
 
     auto half = songButtons.removeFromLeft (songButtons.getWidth() / 2);
     addBtn.setBounds (half.removeFromLeft (half.getWidth() / 2).reduced (1, 0));
     removeBtn.setBounds (half.reduced (1, 0));
     captureBtn.setBounds (songButtons.removeFromLeft (songButtons.getWidth() / 2).reduced (1, 0));
-    renameBtn.setBounds (songButtons.reduced (1, 0));
+    editBtn.setBounds (songButtons.reduced (1, 0));
 
     setHeader.setBounds (r.removeFromTop (14));
     auto setButtons = r.removeFromBottom (26);
@@ -155,9 +168,11 @@ void SongsPanel::refresh()
     const bool haveSet  = set >= 0 && set < (int) sets.size();
     removeBtn.setEnabled (haveSong);
     captureBtn.setEnabled (haveSong);
-    renameBtn.setEnabled (haveSong);
+    editBtn.setEnabled (haveSong);
     toSetBtn.setEnabled (haveSong && haveSet);
     fromSetBtn.setEnabled (haveSet && selectedInSet >= 0);
+    songUpBtn.setEnabled (haveSong && selectedSong > 0);
+    songDownBtn.setEnabled (haveSong && selectedSong < (int) songs.size() - 1);
     upBtn.setEnabled (haveSet && selectedInSet > 0);
     downBtn.setEnabled (haveSet && selectedInSet >= 0
                         && selectedInSet < (int) sets[(size_t) set].songs.size() - 1);
@@ -334,7 +349,7 @@ void SongsPanel::addSong()
     w->addTextEditor ("name", suggested);
     w->getTextEditor ("name")->setTextToShowWhenEmpty ("song name", textDim);
     w->addTextEditor ("notes", {});
-    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("notes (key, count-in...)", textDim);
+    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("stage notes: key, count-in, a reminder", textDim);
     w->addButton ("Create", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
     w->enterModalState (true, ModalCallbackFunction::create ([this, w] (int r)
@@ -383,18 +398,19 @@ void SongsPanel::captureIntoSelectedSong()
     refresh();
 }
 
-void SongsPanel::renameSelectedSong()
+void SongsPanel::editSelectedSong()
 {
     const auto& songs = engine.getSongs();
     if (selectedSong < 0 || selectedSong >= (int) songs.size()) return;
     const auto& sg = songs[(size_t) selectedSong];
 
-    auto* w = new AlertWindow ("Song", "Name, and anything you want to see on the stand.",
+    auto* w = new AlertWindow ("Edit song",
+                               "The name, and anything you want to read on the stand.",
                                MessageBoxIconType::NoIcon);
     w->addTextEditor ("name", sg.name);
     w->addTextEditor ("notes", sg.notes);
     w->addTextEditor ("tempo", sg.tempoBpm > 0.0 ? String (sg.tempoBpm, 1) : String());
-    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("notes (key, count-in...)", textDim);
+    w->getTextEditor ("notes")->setTextToShowWhenEmpty ("stage notes: key, count-in, a reminder", textDim);
     w->getTextEditor ("tempo")->setTextToShowWhenEmpty ("tempo, or blank to keep the current one", textDim);
     w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
@@ -441,6 +457,14 @@ void SongsPanel::removeFromSet()
     engine.setSetSongs (set, songs);
     selectedInSet = jmin (selectedInSet, (int) songs.size() - 1);
     refresh();
+}
+
+void SongsPanel::moveSongInList (int delta)
+{
+    if (selectedSong < 0 || selectedSong >= (int) engine.getSongs().size()) return;
+    selectedSong = engine.moveSong (selectedSong, delta);
+    refresh();
+    songsList.selectRow (selectedSong);
 }
 
 void SongsPanel::moveInSet (int delta)
@@ -495,6 +519,8 @@ void SongsPanel::showSetMenu()
     if (current >= 0)
     {
         m.addItem (2, "Rename this set...");
+        m.addItem (4, "Move up",   current > 0);
+        m.addItem (5, "Move down", current < (int) sets.size() - 1);
         m.addItem (3, "Delete this set");
     }
 
@@ -531,6 +557,11 @@ void SongsPanel::showSetMenu()
         {
             engine.removeSet (set);
             selectedInSet = -1;
+            refresh();
+        }
+        else if (choice == 4 || choice == 5)
+        {
+            engine.moveSet (set, choice == 4 ? -1 : 1);
             refresh();
         }
     });

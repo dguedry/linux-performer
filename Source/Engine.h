@@ -135,6 +135,11 @@ public:
 
     int addSong (const juce::String& name);            // returns its index
     void removeSong (int songIndex);
+
+    /** Moves a song within the master list. Every set holds indices into that
+        list, so they are rewritten to follow: reordering songs must never
+        change what a set plays. Returns where it ended up. */
+    int moveSong (int songIndex, int delta);
     void setSongName (int songIndex, const juce::String&);
     void setSongNotes (int songIndex, const juce::String&);
     void setSongTempo (int songIndex, double bpm);     // 0 = leave the tempo alone
@@ -151,6 +156,9 @@ public:
 
     int addSet (const juce::String& name);
     void removeSet (int setIndex);
+
+    /** Moves a set within the list. Returns its new index. */
+    int moveSet (int setIndex, int delta);
     void setSetName (int setIndex, const juce::String&);
     void setSetSongs (int setIndex, const std::vector<int>& songIndices);
 

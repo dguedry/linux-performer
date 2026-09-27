@@ -142,6 +142,74 @@ keyboards can have their own "Keys" meaning different sounds. Programs with no
 group are listed under **Other**, never hidden, and if you use no groups at all
 nothing changes anywhere.
 
+## Songs and sets
+
+A program is a sound. A **song** is the moment the band starts playing: one
+program on each keyboard, at the right tempo. A **set** is the order the songs
+come in. Without this layer, starting a number means picking Upper 002, then
+Lower 001, then the tempo -- three actions, at the wrong moment.
+
+Press **Songs** in the toolbar. The panel has every song on top, and the running
+order of the chosen set below.
+
+### Making a song
+
+Get the sound right first: pick the program on each keyboard, set the tempo.
+Then press **+ Add**. The dialog shows exactly what is about to be stored and
+asks for a name.
+
+That is the whole idea -- a song remembers what was loaded when you captured it,
+rather than being filled in by hand. **Capture** stores the current state into a
+song you already have, for when you change your mind about a sound.
+
+A song holds a **program number per input**, not a copy of the plugins. So
+editing program 002 changes every song that uses it: one place to fix a sound.
+An input the song does not name is left alone, which is what you want for a
+keyboard you are not using in that number.
+
+- **Edit** sets the name, the stage notes and the tempo.
+- **Stage notes** are free text shown under the song on the tablet while it is
+  playing -- the key, a count-in, "watch the horn stabs": whatever you would
+  write on a paper set list.
+- A **tempo** of blank means "leave the tempo alone", which is not the same as
+  zero. Use it for a song where the tempo is whatever you last tapped.
+- **^ v** beside the songs list reorder it. Sets keep playing the same order:
+  they follow the song, not its position.
+
+### Making a set
+
+**Set...** makes one, renames it, moves it or deletes it. With a song selected,
+**Add to set >** puts it at the end; **^ v** beside the set order it, and
+**< Remove** takes it out of the set without deleting the song.
+
+A song can appear in more than one set, and more than once in the same set --
+encores happen. Deleting a song takes it out of every set that used it.
+
+### Playing a set
+
+Click a song to load it: every input it names, and its tempo, at once.
+
+Two footswitches step through the set. **Footswitches...** learns them -- press
+the pedal rather than looking up what it sends. They work whatever is loaded and
+whatever input they arrive on, and they say where you are ("2/8 Green Onions")
+in the status bar, because a pedal gives no feedback of its own. Stepping stops
+at the end rather than wrapping round to the first number.
+
+### On the tablet
+
+The tablet opens on the set list: the current song large, with what each
+keyboard is playing and your notes, the rest of the running order compact. Tap
+any song to jump to it, or use PREV/NEXT.
+
+Songs that are not in the current set are listed underneath, under **NOT IN THIS
+SET** -- a song you have captured but not yet ordered is still one you may want
+to play. Tapping one loads it without changing the set or where the footswitches
+step from.
+
+With more than eight songs a **Find a song** box appears. It matches the name,
+the stage notes, and the programs -- so "piano" or "002" finds a song you cannot
+quite name.
+
 ## Slots: instruments inside a program
 
 Each slot is one plugin instrument. The controls, left to right:

@@ -1164,6 +1164,52 @@ int main()
         CHECK (engine.getSongs()[(size_t) songs[0]].name == "Oye Como Va");
         CHECK (engine.getSongs()[(size_t) songs[1]].name == "No tempo");
 
+        /* Reordering the songs list must not change what any set plays: sets
+           hold indices, so a swap has to rewrite them. This is the one that
+           would quietly ruin a gig -- the set list would look the same and
+           play something else. */
+        {
+            const int a = engine.addSong ("Alpha");
+            const int b = engine.addSong ("Bravo");
+            const int c = engine.addSong ("Charlie");
+            const int st = engine.addSet ("Order test");
+            engine.setSetSongs (st, { c, a, b });          // deliberately not in order
+
+            auto namesInSet = [&]
+            {
+                StringArray out;
+                for (int i : engine.getSets()[(size_t) st].songs)
+                    out.add (engine.getSongs()[(size_t) i].name);
+                return out.joinIntoString (",");
+            };
+            const auto before = namesInSet();
+            CHECK (before == "Charlie,Alpha,Bravo");
+
+            const int moved = engine.moveSong (b, -1);     // Bravo up one
+            CHECK (moved == b - 1);
+            CHECK (engine.getSongs()[(size_t) moved].name == "Bravo");
+            CHECK (namesInSet() == before);                // the set plays the same order
+
+            engine.moveSong (moved, 1);                    // and back
+            CHECK (namesInSet() == before);
+
+            // Moving off either end does nothing rather than corrupting anything.
+            CHECK (engine.moveSong (0, -1) == 0);
+            const int last = (int) engine.getSongs().size() - 1;
+            CHECK (engine.moveSong (last, 1) == last);
+            CHECK (namesInSet() == before);
+
+            // Sets reorder too, and keep playing the one you were playing.
+            const int other = engine.addSet ("Second");
+            engine.selectSet (st);
+            const int newPos = engine.moveSet (st, 1);
+            CHECK (engine.getCurrentSet() == newPos);
+            CHECK (engine.getSets()[(size_t) newPos].name == "Order test");
+            CHECK (engine.getSets()[(size_t) st].name == "Second");
+            engine.removeSet (jmax (newPos, st));
+            engine.removeSet (jmin (newPos, st));
+        }
+
         // All of it survives a save and load.
         engine.setNextSongCC (80);
         engine.setPrevSongCC (81);

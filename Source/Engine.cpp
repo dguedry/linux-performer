@@ -541,6 +541,28 @@ void Engine::removeSong (int songIndex)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
+int Engine::moveSong (int songIndex, int delta)
+{
+    const int n = (int) setup.songs.size();
+    const int to = songIndex + delta;
+    if (songIndex < 0 || songIndex >= n || to < 0 || to >= n) return songIndex;
+
+    std::swap (setup.songs[(size_t) songIndex], setup.songs[(size_t) to]);
+
+    /* Sets point at songs by index, so swapping two songs would otherwise
+       silently change what every set plays. Rewrite the references instead:
+       the running order stays exactly as it was. */
+    for (auto& st : setup.sets)
+        for (auto& i : st.songs)
+        {
+            if (i == songIndex)   i = to;
+            else if (i == to)     i = songIndex;
+        }
+
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return to;
+}
+
 void Engine::setSongName (int songIndex, const String& name)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
@@ -622,6 +644,22 @@ void Engine::removeSet (int setIndex)
     if (setup.currentSet == setIndex)      { setup.currentSet = -1; setup.currentSongInSet = -1; }
     else if (setup.currentSet > setIndex)  --setup.currentSet;
     listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+int Engine::moveSet (int setIndex, int delta)
+{
+    const int n = (int) setup.sets.size();
+    const int to = setIndex + delta;
+    if (setIndex < 0 || setIndex >= n || to < 0 || to >= n) return setIndex;
+
+    std::swap (setup.sets[(size_t) setIndex], setup.sets[(size_t) to]);
+
+    // Keep playing the set you were playing, wherever it has moved to.
+    if (setup.currentSet == setIndex)   setup.currentSet = to;
+    else if (setup.currentSet == to)    setup.currentSet = setIndex;
+
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+    return to;
 }
 
 void Engine::setSetName (int setIndex, const String& name)
