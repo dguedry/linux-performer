@@ -261,16 +261,22 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
 
 void SongsPanel::ListProxy::listBoxItemClicked (int row, const MouseEvent&)
 {
+    /* One click loads it. That is what a tap does on the tablet and what a
+       click does in the programs list, and a set list whose songs need
+       double-clicking would be the odd one out -- on stage, twice is a miss.
+
+       It also selects, so Capture, Rename and Add to set act on what you just
+       clicked without a second step. */
     if (isSet) owner.selectedInSet = row;
     else       owner.selectedSong  = row;
-    owner.refresh();
+    play (row);
 }
 
 void SongsPanel::ListProxy::play (int row)
 {
-    /* Double-click or Return plays it. In the set that means "start here",
-       which also moves the position a footswitch will step from; in the song
-       list it is just "load this", without touching the set. */
+    /* In the set that means "start here", which also moves the position a
+       footswitch will step from; in the song list it is just "load this",
+       without touching the set. */
     if (isSet) owner.engine.selectSongInSet (row);
     else       owner.engine.selectSong (row);
     owner.refresh();
