@@ -263,12 +263,12 @@ function renderSets(s) {
 
   const wrap = document.createElement("div"); wrap.className = "setwrap";
 
-  /* Search. Only once there are enough songs for it to beat scrolling -- on a
-     six-song set it would just be something else in the way. Kept across
-     redraws, because the page repaints every second and a filter that cleared
-     itself while you were reading would be worse than none. */
-  const allSongs = songs.length;
-  if (allSongs > 8) {
+  /* Search, whenever there is more than one song. It used to appear only past
+     eight, which meant a five-song setup had a feature it could not discover --
+     and a set list you cannot find a song in is the one case where you need to.
+     Kept across redraws, because the page repaints every second and a filter
+     that cleared itself while you were reading would be worse than none. */
+  if (songs.length > 1) {
     const box = document.createElement("input");
     box.className = "find"; box.type = "search";
     box.placeholder = "Find a song";
