@@ -115,6 +115,8 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
   .song.on .n, .song.on .bpm { color:#06121f; }
   .song.on .t { font-size:26px; font-weight:800; }
   .song.on .parts { color:#06121f; }
+  .otherhead { color:var(--dim); font-size:11px; font-weight:800; letter-spacing:.1em;
+               margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
   .song.on .notes { color:#06121f; }
@@ -272,6 +274,56 @@ function renderSets(s) {
     wrap.appendChild(pick);
   }
 
+  /* One row, used for the set and for the songs outside it. `pos` is the
+     position within the set, or -1 for a song that is not in it. */
+  const songRow = (sg, songIndex, pos) => {
+    const b = document.createElement("button");
+    const playing = pos >= 0 && pos === s.currentSong;
+    b.className = "song" + (playing ? " on" : "");
+
+    if (pos >= 0) {
+      const n = document.createElement("span"); n.className = "n";
+      n.textContent = String(pos + 1);
+      b.appendChild(n);
+    }
+
+    const body = document.createElement("div"); body.className = "songbody";
+    const t = document.createElement("div"); t.className = "t";
+    t.textContent = sg.name || "(unnamed)";
+    body.appendChild(t);
+
+    /* What each keyboard plays: on the song being played, and on any song not
+       in the set -- there the programs are the only way to tell two songs with
+       the same name apart, which a list of captures tends to produce. */
+    if ((playing || pos < 0) && sg.parts && sg.parts.length) {
+      const pl = document.createElement("div"); pl.className = "parts";
+      pl.textContent = sg.parts.map(x => x.input + " " + String(x.program).padStart(3, "0")
+                                      + (x.name ? " " + x.name : "")).join("  \u00b7  ");
+      body.appendChild(pl);
+    }
+    if (playing && sg.notes) {
+      const nt = document.createElement("div"); nt.className = "notes";
+      nt.textContent = sg.notes;
+      body.appendChild(nt);
+    }
+
+    b.appendChild(body);
+    if (sg.tempo) {
+      const bpm = document.createElement("span"); bpm.className = "bpm";
+      bpm.textContent = Math.round(sg.tempo) + " bpm";
+      b.appendChild(bpm);
+    }
+
+    b.onclick = async () => {
+      /* In the set, start there, so the footswitches step from here. Outside
+         it, just load the song. */
+      const path = pos >= 0 ? "/api/setsong?pos=" + pos : "/api/song?index=" + songIndex;
+      try { await api(path, { method: "POST" }); await refresh(true); }
+      catch (e) { show(e.message); }
+    };
+    return b;
+  };
+
   const cur = sets[s.currentSet];
   if (!cur) {
     const e = document.createElement("div"); e.className = "empty";
@@ -282,47 +334,7 @@ function renderSets(s) {
   cur.songs.forEach((songIndex, pos) => {
     const sg = songs[songIndex];
     if (!sg) return;                       // a set pointing at a song that has gone
-    const b = document.createElement("button");
-    b.className = "song" + (pos === s.currentSong ? " on" : "");
-
-    const n = document.createElement("span"); n.className = "n";
-    n.textContent = String(pos + 1);
-
-    const body = document.createElement("div"); body.className = "songbody";
-    const t = document.createElement("div"); t.className = "t";
-    t.textContent = sg.name || "(unnamed)";
-    body.appendChild(t);
-
-    /* What each keyboard plays, and any note -- shown only for the song you
-       are on, so the list stays readable. */
-    if (pos === s.currentSong) {
-      if (sg.parts && sg.parts.length) {
-        const p = document.createElement("div"); p.className = "parts";
-        /* Separated, because "Upper 002 B3 Lower 001 FM EP" runs into one
-           line at a glance and this is read from a stand. */
-        p.textContent = sg.parts.map(x => x.input + " " + String(x.program).padStart(3, "0")
-                                        + (x.name ? " " + x.name : "")).join("  \u00b7  ");
-        body.appendChild(p);
-      }
-      if (sg.notes) {
-        const nt = document.createElement("div"); nt.className = "notes";
-        nt.textContent = sg.notes;
-        body.appendChild(nt);
-      }
-    }
-
-    b.appendChild(n); b.appendChild(body);
-    if (sg.tempo) {
-      const bpm = document.createElement("span"); bpm.className = "bpm";
-      bpm.textContent = Math.round(sg.tempo) + " bpm";
-      b.appendChild(bpm);
-    }
-
-    b.onclick = async () => {
-      try { await api("/api/setsong?pos=" + pos, { method: "POST" }); await refresh(true); }
-      catch (e) { show(e.message); }
-    };
-    wrap.appendChild(b);
+    wrap.appendChild(songRow(sg, songIndex, pos));
   });
 
   // Step buttons, matching the footswitches.
@@ -340,6 +352,18 @@ function renderSets(s) {
   step.appendChild(mk("← PREV", -1, s.currentSong <= 0));
   step.appendChild(mk("NEXT →", 1, s.currentSong >= last));
   wrap.appendChild(step);
+
+  /* Everything not in this set, underneath. A song you have captured but not
+     put in a set is still a song you may want to play -- and before this it
+     was invisible from the stand, which looked like the app had lost it. */
+  const inSet = new Set(cur.songs);
+  const others = songs.map((sg, i) => [sg, i]).filter(([, i]) => !inSet.has(i));
+  if (others.length) {
+    const h = document.createElement("div"); h.className = "otherhead";
+    h.textContent = "NOT IN THIS SET";
+    wrap.appendChild(h);
+    others.forEach(([sg, i]) => wrap.appendChild(songRow(sg, i, -1)));
+  }
 
   const where = document.createElement("div"); where.className = "empty";
   where.style.padding = "12px 4px 0";
