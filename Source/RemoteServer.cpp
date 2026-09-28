@@ -693,11 +693,9 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
      I-beam ended up over an organ. */
   #screen canvas { cursor:pointer !important; }
 
-  /* While playing, the canvas owns every touch: the browser must not steal one
-     to scroll or zoom, or a held key is cut short the moment the finger moves a
-     few pixels. Panning and pinching live on the Move button instead. */
-  body.playing #screen { touch-action:none; overscroll-behavior:contain; }
-  body.playing #screen canvas { touch-action:none; }
+  /* noVNC needs the raw touches, so the browser must not claim them for
+     scrolling or zooming first. */
+  #screen { touch-action:none; overscroll-behavior:contain; }
   #msg { position:fixed; left:0; right:0; top:0; padding:10px 14px; font-size:14px;
          background:#26282f; border-bottom:1px solid #2b2d35; }
   #bar { position:fixed; right:10px; bottom:10px; display:flex; gap:8px;
@@ -723,32 +721,17 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   const msg = document.getElementById('msg');
   let rfb = null;              // the current connection; replaced on reconnect
 
-  /* ---------------------------------------------------------------------
-     Playing the plugin by touch.
-
-     noVNC reads touches as gestures, which is right for a desktop and wrong
-     for an instrument. A tap arrives as a press and a release sent one after
-     the other with nothing in between, so a key gets a note-on and a note-off
-     in the same instant: a pop rather than a note. It also waits 250ms before
-     deciding a touch is not the start of a pinch, so what does sound, sounds
-     late.
-
-     So while playing we handle touches ourselves and send press, move and
-     release as they actually happen. The note lasts exactly as long as the
-     finger is down. Panning and zooming move to the Move button and the +/-
-     buttons, where they cannot be confused with playing.
-
-     One finger at a time. VNC carries a single pointer -- it is a mouse -- so
-     a second finger cannot be a second note: the server would see the one
-     pointer dragged to the new spot with its button still held, and lifting
-     the first finger would release it somewhere else. Extra fingers are
-     ignored while one is down. Chords come from the keyboard, not the tablet.
-     --------------------------------------------------------------------- */
+  /* Input is noVNC's job. It has a tested path for mouse, touch and its own
+     gestures; the hand-rolled one here sent press and release from our own
+     pointer handlers, bypassed the viewport offset and captured the pointer --
+     which between them put clicks somewhere other than where they were aimed.
+     If touch needs tuning again, tune noVNC's gesture handler rather than
+     going around it. */
   const screen = document.getElementById('screen');
   const fit = document.getElementById('fit');
-  let playing = true;            // start ready to play: that is what this is for
   let zoom = 1;
   let fitting = false;
+  let playing = true;               // false = Move: drag pans instead of clicking
 
   function syncFit() {
     fit.className = fitting ? 'on' : '';
@@ -756,113 +739,7 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   }
 
   const canvasOf = () => screen.querySelector('canvas');
-
-  /* Where a touch landed, in CSS pixels relative to the canvas -- which is what
-     _sendMouse wants. It applies the scale and the viewport offset itself
-     (Display.absX/absY), so converting to framebuffer pixels here would apply
-     both twice and put every click in the wrong place. Clipped to the canvas
-     the way noVNC's own clientToElement does. */
-  function elementPos(ev) {
-    const c = canvasOf();
-    if (!c) return null;
-    const r = c.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    const clamp = (v, hi) => v < 0 ? 0 : (v >= hi ? hi - 1 : v);
-    return { x: clamp(ev.clientX - r.left, r.width),
-             y: clamp(ev.clientY - r.top, r.height) };
-  }
-
-  /* Bypasses the gesture layer: this is the same call noVNC makes once it has
-     made up its mind about a gesture, minus the deciding. */
-  function sendPointer(pos, mask) {
-    if (!pos) return;
-    try { rfb._sendMouse(pos.x, pos.y, mask); } catch (e) { /* not connected yet */ }
-  }
-
-  /* noVNC's gesture handler and its focus hook both listen for touch events on
-     the canvas. Stopping them in the capture phase, one element up, means they
-     never run -- so a tap cannot also arrive as noVNC's instant click pair.
-     stopPropagation is not preventDefault: in Move mode the browser still pans
-     and pinches on these same touches. */
-  for (const t of ['touchstart', 'touchmove', 'touchend', 'touchcancel'])
-    screen.addEventListener(t, ev => ev.stopPropagation(), true);
-
-  /* Ghost clicks. A browser may follow a touch with synthetic mouse events;
-     cancelling pointerdown is meant to stop that, and this is the belt to that
-     brace. While a finger is down, and for a moment after it lifts, mouse
-     events reaching the canvas are not the mouse. */
-  let touchActive = false, lastTouchEnd = 0;
-  for (const t of ['mousedown', 'mouseup', 'mousemove', 'click'])
-    screen.addEventListener(t, ev => {
-      if (touchActive || (Date.now() - lastTouchEnd) < 700) ev.stopPropagation();
-    }, true);
-
-  /* The one finger that is playing, or null. The mask is a button bitmask:
-     1 = left, which is every press a plugin GUI cares about. */
-  let active = null;             // { id, pos }
-
-  function onDown(ev) {
-    if (!playing || ev.pointerType === 'mouse') return;
-    if (active !== null) { ev.preventDefault(); return; }   // second finger: ignored
-    const pos = elementPos(ev);
-    if (!pos) return;
-    ev.preventDefault();
-    try { ev.target.setPointerCapture(ev.pointerId); } catch (e) {}
-    /* Focus the canvas so it takes keys, but do NOT let the browser scroll it
-       into view. noVNC puts its own scrolling div between #screen and the
-       canvas, and that is what actually scrolls -- the canvas is taller than
-       it, so "scroll the focused element into view" means "jump back to the
-       top", on every tap. preventScroll handles it where it is honoured; the
-       scroller's position is saved and put back for where it is not. */
-    try {
-        const c = canvasOf();
-        const box = c ? c.parentElement : null;      // noVNC's scrolling div
-        const sl = box ? box.scrollLeft : 0, st = box ? box.scrollTop : 0;
-        if (c && c.focus) c.focus({ preventScroll: true });
-        if (box && (box.scrollLeft !== sl || box.scrollTop !== st)) {
-            box.scrollLeft = sl; box.scrollTop = st;
-        }
-    } catch (e) {}
-    active = { id: ev.pointerId, pos };
-    touchActive = true;
-    sendPointer(pos, 1);
-  }
-
-  function onMove(ev) {
-    if (!playing || ev.pointerType === 'mouse') return;
-    if (active === null || ev.pointerId !== active.id) return;
-    const pos = elementPos(ev);
-    if (!pos) return;
-    ev.preventDefault();
-    active.pos = pos;
-    /* Held: a glissando across the keys, or a drawbar being dragged. */
-    sendPointer(pos, 1);
-  }
-
-  function onUp(ev) {
-    if (ev.pointerType === 'mouse') return;
-    if (active === null || ev.pointerId !== active.id) return;
-    const pos = elementPos(ev) || active.pos;
-    ev.preventDefault();
-    active = null;
-    touchActive = false;
-    lastTouchEnd = Date.now();
-    sendPointer(pos, 0);
-  }
-
-  function releaseAll() {
-    if (active !== null) { sendPointer(active.pos, 0); active = null; }
-    touchActive = false;
-    lastTouchEnd = Date.now();
-  }
-
-  screen.addEventListener('pointerdown', onDown);
-  screen.addEventListener('pointermove', onMove);
-  screen.addEventListener('pointerup', onUp);
-  screen.addEventListener('pointercancel', onUp);
-  /* A finger leaving the window still has to lift the key, or the note hangs. */
-  window.addEventListener('pointerup', onUp);
-  window.addEventListener('blur', releaseAll);
+  function releaseAll() {}          // nothing of ours is held any more
 
   /* Zoom through noVNC's own Display scale rather than a CSS transform. absX
      and absY divide by that scale, so a touch or a mouse click at a scaled
@@ -910,10 +787,10 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   function syncMode() {
     document.body.classList.toggle('playing', playing);
     move.className = playing ? '' : 'on';
-    move.textContent = playing ? 'Move' : 'Playing off';
-    move.title = playing ? 'Pan and pinch instead of playing'
-                         : 'Back to playing the plugin';
-    if (!playing) releaseAll();
+    move.textContent = playing ? 'Move' : 'Moving';
+    move.title = playing ? 'Drag to pan the plugin instead of operating it'
+                         : 'Back to operating the plugin';
+    try { rfb.dragViewport = !playing; } catch (e) {}
   }
   move.onclick = () => { playing = !playing; syncMode(); };
   syncMode();
@@ -956,14 +833,15 @@ static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
   let retries = 0;
   function connect() {
     releaseAll();
-    /* Full size inside a scrollable box, so zooming magnifies real pixels
-       instead of stretching a shrunken picture. clipViewport must be FALSE for
-       that: true sizes the canvas to the container and hides the rest of the
-       plugin, and with nothing set up to drag the viewport, a tablet narrower
-       than the plugin could never reach the far side. */
+    /* noVNC's own viewport, which is what its input path expects: with
+       clipping on it sizes the canvas to the container and keeps a viewport
+       offset, and absX/absY add that offset to turn a click into a framebuffer
+       position. Turning it off left the offset at zero and the canvas bigger
+       than its box, which is how clicks stopped landing where they were
+       aimed -- Move pans it now, so the far side is still reachable. */
     screen.innerHTML = '';                 // a previous connection's canvas
     rfb = new RFB(screen, url, {});
-    rfb.clipViewport = false;
+    rfb.clipViewport = true;
     rfb.scaleViewport = fitting;
     rfb.resizeSession = false;
     /* noVNC focuses the canvas on every click, which scrolls it into view and
