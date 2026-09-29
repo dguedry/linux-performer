@@ -70,6 +70,10 @@ every used program stays loaded and changes are instant (at the cost of RAM).
 `Performer` and `performer-plugin-host` into `/usr/bin`, plus a launcher entry
 and the icon.
 
+Verified on Ubuntu 24.04, Linux Mint 22.3 (Cinnamon) and Fedora 43, with native
+LV2/VST3 plugins and Windows plugins bridged through
+[vstenv](https://github.com/dguedry/vstenv).
+
 The package filename carries the version, so fetch whichever the latest release
 lists rather than hard-coding a number:
 
@@ -93,6 +97,10 @@ build from `main` rather than the last release.
 For plugins you will also want `calf-plugins` (or any LV2/VST3 instruments),
 `pipewire-jack` for the low-latency audio path, and
 [yabridge](https://github.com/robbert-vdh/yabridge) for Windows plugins.
+[vstenv](https://github.com/dguedry/vstenv) sets up the Wine side and bridges
+Windows plugins (Native Instruments, Steinberg, iZotope and others) into the
+folders Performer scans, if you would rather not configure Wine and yabridge by
+hand.
 
 ## Build
 
