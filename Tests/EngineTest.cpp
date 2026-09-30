@@ -688,7 +688,12 @@ int main()
             // A probe stopped by the teardown may legitimately yield nothing (it will be
             // scanned next time); what must never happen is a blacklist entry.
             CHECK (list.getBlacklistedFiles().isEmpty());
-            CHECK (list.getNumTypes() <= expected && list.getNumTypes() + ds.getFailedFiles().size() >= expected);
+            /* One bundle can hold more than one plugin -- a VST3 "shell" exposes
+               several, and at least one here does -- so the count found may
+               exceed the number of bundles. What matters is that nothing went
+               missing: every bundle produced something, or is accounted for as
+               a failure. */
+            CHECK (list.getNumTypes() + ds.getFailedFiles().size() >= expected);
             CHECK (list.getNumTypes() >= 1);
 
             // The app-owned background scanner (what the Plugins window uses).
@@ -699,7 +704,12 @@ int main()
             CHECK (! sc.startScan (*vst3, FileSearchPath (yabridgeDir.getFullPathName())));   // busy
             t0 = Time::getMillisecondCounterHiRes();
             double lastReport = 0.0;
-            while (sc.isScanning() && Time::getMillisecondCounterHiRes() - t0 < 120000.0)
+            /* Long enough for a real library. Each bridged plugin is a Wine
+               subprocess that can take a second or more, so a hundred of them
+               is minutes, not seconds -- and a timeout here reads as a scanner
+               that stopped working rather than one that was still going. */
+            const double scanBudgetMs = jmax (120000.0, 3000.0 * (double) expected);
+            while (sc.isScanning() && Time::getMillisecondCounterHiRes() - t0 < scanBudgetMs)
             {
                 pump (50);
                 const auto el = Time::getMillisecondCounterHiRes() - t0;
@@ -715,7 +725,7 @@ int main()
                          fromYabridge, expected, sc.getNewlyBlacklistedFiles().size(), sc.getFailedFiles().size(), (Time::getMillisecondCounterHiRes() - t0) / 1000.0);
             CHECK (! sc.isScanning());
             CHECK (sc.getNewlyBlacklistedFiles().isEmpty());
-            CHECK (fromYabridge == expected);
+            CHECK (fromYabridge >= expected);      // shells can exceed one per bundle
         }
     }
 

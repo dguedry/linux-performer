@@ -38,16 +38,40 @@ public:
         hint.setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
         hint.setText ("Click keys, or focus the keyboard and play A S D F G H J K (W E T Y U for sharps), Z / X to change octave.", juce::dontSendNotification);
 
-        auto setupSlider = [] (juce::Slider& s, double min, double max, double step, const juce::String& tip)
+        /* A LinearBar with a value near its minimum draws as an almost empty
+           box, which is why these read as dead text fields rather than
+           controls. Vertical wheels with a visible thumb and a number beside
+           them look like what they are, and pitch and mod are vertical on
+           every keyboard ever made. */
+        auto setupWheel = [this] (juce::Slider& s, double min, double max, double step,
+                                  const juce::String& tip)
         {
             s.setRange (min, max, step);
-            s.setSliderStyle (juce::Slider::LinearBar);
+            s.setSliderStyle (juce::Slider::LinearVertical);
+            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 46, 16);
+            s.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff15161c));
+            s.setColour (juce::Slider::trackColourId,      juce::Colour (0xff4f9dff));
+            s.setColour (juce::Slider::thumbColourId,      juce::Colour (0xffd7dbe2));
+            s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+            s.setTooltip (tip);
+        };
+
+        auto setupBar = [] (juce::Slider& s, double min, double max, double step,
+                            const juce::String& tip)
+        {
+            s.setRange (min, max, step);
+            s.setSliderStyle (juce::Slider::LinearHorizontal);
+            s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
+            s.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff15161c));
+            s.setColour (juce::Slider::trackColourId,      juce::Colour (0xff4f9dff));
+            s.setColour (juce::Slider::thumbColourId,      juce::Colour (0xffd7dbe2));
+            s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
             s.setTooltip (tip);
         };
 
         addAndMakeVisible (velocityLabel);
         addAndMakeVisible (velocity);
-        setupSlider (velocity, 1, 127, 1, "Note velocity");
+        setupBar (velocity, 1, 127, 1, "How hard the on-screen keys are struck");
         velocity.setValue (100, juce::dontSendNotification);
         velocity.onValueChange = [this] { keyboard.setVelocity ((float) (velocity.getValue() / 127.0), false); };
 
@@ -59,32 +83,49 @@ public:
 
         addAndMakeVisible (modLabel);
         addAndMakeVisible (modWheel);
-        setupSlider (modWheel, 0, 127, 1, "Mod wheel (CC 1)");
+        setupWheel (modWheel, 0, 127, 1, "Mod wheel (CC 1). Stays where you leave it, like the real thing.");
         modWheel.onValueChange = [this] { send (juce::MidiMessage::controllerEvent (channel(), 1, (int) modWheel.getValue())); };
 
         addAndMakeVisible (bendLabel);
         addAndMakeVisible (pitchBend);
-        setupSlider (pitchBend, -8192, 8191, 1, "Pitch bend (springs back to centre)");
+        setupWheel (pitchBend, -8192, 8191, 1, "Pitch bend (springs back to centre when released)");
+        /* Centred, because that is where a bend wheel rests. It is bipolar, so
+           the thumb belongs in the middle of its travel, not at the bottom. */
         pitchBend.setValue (0, juce::dontSendNotification);
         pitchBend.setDoubleClickReturnValue (true, 0);
         pitchBend.onValueChange = [this] { send (juce::MidiMessage::pitchWheel (channel(), (int) pitchBend.getValue() + 8192)); };
+        /* Back to centre when let go. onDragEnd covers a normal drag; the mouse
+           being released off the slider, or the value being nudged with the
+           keyboard, would otherwise leave the pitch hanging. */
         pitchBend.onDragEnd = [this] { pitchBend.setValue (0); };
 
         addAndMakeVisible (ccLabel);
         addAndMakeVisible (ccNumber);
         ccNumber.setRange (0, 127, 1);
         ccNumber.setSliderStyle (juce::Slider::IncDecButtons);
+        /* Say how wide the number is, or JUCE gives the text box its default
+           width and squeezes the +/- buttons into whatever is left -- which is
+           how the + ended up half drawn. */
+        ccNumber.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 52, 22);
+        ccNumber.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
+        ccNumber.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff3a3d47));
         ccNumber.setValue (74, juce::dontSendNotification);
-        ccNumber.setTooltip ("Controller number to send -- handy with Learn MIDI");
+        ccNumber.setTooltip ("Which controller to send. Set it, then use Learn MIDI on a plugin parameter.");
         addAndMakeVisible (ccValue);
-        setupSlider (ccValue, 0, 127, 1, "Controller value");
+        setupBar (ccValue, 0, 127, 1, "Value to send for that controller");
         ccValue.onValueChange = [this] { send (juce::MidiMessage::controllerEvent (channel(), (int) ccNumber.getValue(), (int) ccValue.getValue())); };
 
-        for (auto* l : { &velocityLabel, &modLabel, &bendLabel, &ccLabel })
+        for (auto* l : { &velocityLabel, &ccLabel })
         {
             l->setFont (juce::FontOptions (12.0f));
             l->setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
             l->setJustificationType (juce::Justification::centredRight);
+        }
+        for (auto* l : { &bendLabel, &modLabel })
+        {
+            l->setFont (juce::FontOptions (11.0f));
+            l->setColour (juce::Label::textColourId, juce::Colour (0xff9aa0ab));
+            l->setJustificationType (juce::Justification::centred);
         }
     }
 
@@ -119,7 +160,8 @@ public:
         if (sustain.getToggleState()) { sustain.setToggleState (false, juce::dontSendNotification); send (juce::MidiMessage::controllerEvent (channel(), 64, 0)); }
     }
 
-    static constexpr int preferredHeight = 118;
+    /* Tall enough for upright wheels with their readouts underneath. */
+    static constexpr int preferredHeight = 150;
 
     void resized() override
     {
@@ -129,26 +171,38 @@ public:
         hint.setBounds (top);
         r.removeFromTop (4);
 
+        /* The two wheels sit together on the left, upright and full height,
+           the way they do on a keyboard -- bend nearest the keys. Velocity,
+           sustain and the CC sender stack beside them, because those are set
+           once and left alone rather than played. */
+        auto wheels = r.removeFromLeft (128);
+        r.removeFromLeft (10);
+
+        auto labels = wheels.removeFromBottom (14);
+        bendLabel.setBounds (labels.removeFromLeft (60));
+        labels.removeFromLeft (8);
+        modLabel.setBounds (labels);
+
+        pitchBend.setBounds (wheels.removeFromLeft (60));
+        wheels.removeFromLeft (8);
+        modWheel.setBounds (wheels);
+
         auto controls = r.removeFromLeft (300);
-        r.removeFromLeft (8);
+        r.removeFromLeft (10);
         keyboard.setBounds (r);
 
-        auto row = controls.removeFromTop (22);
-        velocityLabel.setBounds (row.removeFromLeft (56)); row.removeFromLeft (4);
-        velocity.setBounds (row.removeFromLeft (140));     row.removeFromLeft (8);
-        sustain.setBounds (row);
-        controls.removeFromTop (4);
+        auto row = controls.removeFromTop (24);
+        velocityLabel.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
+        velocity.setBounds (row);
+        controls.removeFromTop (6);
 
-        row = controls.removeFromTop (22);
-        modLabel.setBounds (row.removeFromLeft (56)); row.removeFromLeft (4);
-        modWheel.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
-        bendLabel.setBounds (row.removeFromLeft (36)); row.removeFromLeft (4);
-        pitchBend.setBounds (row);
-        controls.removeFromTop (4);
+        row = controls.removeFromTop (24);
+        sustain.setBounds (row.removeFromLeft (120));
+        controls.removeFromTop (6);
 
-        row = controls.removeFromTop (22);
-        ccLabel.setBounds (row.removeFromLeft (56)); row.removeFromLeft (4);
-        ccNumber.setBounds (row.removeFromLeft (90)); row.removeFromLeft (8);
+        row = controls.removeFromTop (24);
+        ccLabel.setBounds (row.removeFromLeft (52)); row.removeFromLeft (4);
+        ccNumber.setBounds (row.removeFromLeft (104)); row.removeFromLeft (8);
         ccValue.setBounds (row);
     }
 
