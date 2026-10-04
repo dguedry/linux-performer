@@ -10,7 +10,7 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/performer.png" alt="Performer: two keyboards as inputs, a program list grouped by kind, a Hammond B-3X loaded with its key and velocity ranges, and MIDI mappings for vibrato and Leslie speed" width="900">
+  <img src="docs/images/performer.png" alt="Performer: a set list of songs with their tempos, two keyboards as inputs, a program list grouped by kind, a Hammond B-3X loaded with its key and velocity ranges, and MIDI mappings for vibrato and Leslie speed" width="900">
 </p>
 
 Performer exists because the live hosts keyboard players rely on -- MainStage,
