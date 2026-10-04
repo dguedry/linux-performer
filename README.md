@@ -137,7 +137,12 @@ plugins, select an input and give it a MIDI device, click a program, press
 **Tablet** in the toolbar starts a small web app on your network, for picking
 programs from a music stand instead of the laptop.
 
-![The web app on a tablet: group filters and the programs of one input](docs/images/tablet-app.png)
+![The tablet set list: the song you are on in large type with what each keyboard plays, the rest of the running order, and a search](docs/images/tablet-setlist.png)
+
+The Programs tab is the same page's other half -- every program on every
+keyboard, grouped, with a GUI button per input:
+
+![The tablet showing the programs of both keyboards, grouped by kind](docs/images/tablet-app.png)
 
 ![The Tablet control dialog](docs/images/tablet-control.png)
 
