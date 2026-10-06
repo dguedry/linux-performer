@@ -59,6 +59,12 @@ public:
     static juce::String pathFromIdentifier (const juce::String& identifier);
     static juce::String pluginIdFromIdentifier (const juce::String& identifier);
 
+    /** Opens a bundle and instantiates one plugin from it, or returns null with
+        `error` set. Public so the out-of-process host can use it directly. */
+    static std::unique_ptr<juce::AudioPluginInstance> createInstance (const juce::PluginDescription&,
+                                                                      double sampleRate, int blockSize,
+                                                                      juce::String& error);
+
 private:
     void createPluginInstance (const juce::PluginDescription&, double initialSampleRate,
                                int initialBufferSize, PluginCreationCallback) override;

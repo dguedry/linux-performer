@@ -666,16 +666,23 @@ A short checklist:
 
 ## Plugin formats
 
-Performer hosts **VST3**, **LV2** and **LADSPA** natively. Windows VST3s bridged
-with yabridge appear as ordinary VST3s.
+Performer hosts **VST3**, **CLAP**, **LV2** and **LADSPA** natively. Windows
+VST3s and CLAPs bridged with yabridge appear as ordinary plugins of that format.
 
-**CLAP** is being added. Right now CLAP plugins are found and listed by a scan
--- they appear in the Plugins window with their name, vendor and whether they
-are an instrument -- but they cannot be loaded yet, and adding one to a slot
-reports that. Both native Linux CLAP plugins and Windows ones bridged by
-yabridge are scanned, from `~/.clap`, `/usr/lib/clap` and `/usr/local/lib/clap`.
+**CLAP** plugins are scanned from `~/.clap`, `/usr/lib/clap` and
+`/usr/local/lib/clap`, and load like any other format: parameters appear in the
+slot, MIDI reaches the plugin, audio comes back, the plugin's own window opens,
+and its state is saved with your setup. Both native Linux CLAP plugins and
+Windows ones bridged by yabridge work.
 
-Most CLAP plugins also ship a VST3 build, which works today.
+JUCE itself has no CLAP support, so Performer talks to the CLAP API directly.
+One thing follows from that: a `.clap` bundle can hold several plugins -- Surge
+XT ships the synth and its effects rack in one file -- so each entry in the
+Plugins window is one plugin from a bundle, not one file.
+
+Stepped parameters -- a waveform selector, say -- snap to their nearest step, so
+the value a plugin reports back may differ slightly from what was sent while
+naming the same setting. That is normal and not a sign of a lost setting.
 
 ## Windows plugins
 

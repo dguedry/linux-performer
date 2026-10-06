@@ -15,8 +15,9 @@ tablet and the organ on stage moves.
 
 Performer exists because the live hosts keyboard players rely on -- MainStage,
 Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
-**LV2** and **LADSPA** plugins natively, and Windows VST3s bridged with
-[yabridge](https://github.com/robbert-vdh/yabridge) work like any other plugin.
+**CLAP**, **LV2** and **LADSPA** plugins natively, and Windows VST3s and CLAPs
+bridged with [yabridge](https://github.com/robbert-vdh/yabridge) work like any
+other plugin.
 
 - **A program per sound, 128 per keyboard**, selected by MIDI Program Change
   while you play. Upper and Lower manuals change independently. Group them by
