@@ -8,6 +8,7 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "ClapPluginFormat.h"
 
 extern char** environ;
 
@@ -26,6 +27,8 @@ struct PluginHost::ListListener : public ChangeListener
 PluginHost::PluginHost (PropertiesFile& s) : settings (s)
 {
     addDefaultFormatsToManager (formatManager);
+    // JUCE has no CLAP format; ours goes alongside its own.
+    formatManager.addFormat (new ClapPluginFormat());
 
     deadMansPedal = settings.getFile().getSiblingFile ("RecentlyCrashedPluginsList");
     templates = std::make_unique<MappingTemplates> (settings.getFile().getSiblingFile ("mapping-templates.json"));

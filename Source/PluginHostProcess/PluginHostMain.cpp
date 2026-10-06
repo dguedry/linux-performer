@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <sys/types.h>
+#include "ClapPluginFormat.h"
 
 using namespace juce;
 using namespace perf;
@@ -52,6 +53,8 @@ public:
     PluginServer (ipc::SharedBlock* block, int fd) : shm (block), socketFd (fd)
     {
         addDefaultFormatsToManager (formatManager);
+    // JUCE has no CLAP format; ours goes alongside its own.
+    formatManager.addFormat (new ClapPluginFormat());
         control = std::thread ([this] { controlLoop(); });
     }
 
@@ -819,6 +822,7 @@ public:
 
             AudioPluginFormatManager fm;
             addDefaultFormatsToManager (fm);
+            fm.addFormat (new ClapPluginFormat());
             for (auto* f : fm.getFormats())
                 if (f->getName() == formatName)
                 {

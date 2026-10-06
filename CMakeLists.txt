@@ -18,6 +18,10 @@ juce_add_gui_app(Performer
 
 # App icon, plus the user manual: embedding docs/MANUAL.md rather than copying it
 # means the in-app help cannot drift from the file in the repository.
+# CLAP is header-only: the SDK is just the C API the plugins implement.
+add_library(ClapHeaders INTERFACE)
+target_include_directories(ClapHeaders INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include)
+
 juce_add_binary_data(PerformerAssets
     SOURCES Resources/performer-512.png Resources/performer-256.png Resources/performer-64.png
             docs/MANUAL.md)
@@ -27,6 +31,7 @@ target_sources(Performer PRIVATE
     Source/Model.cpp
     Source/PluginHost.cpp
     Source/PluginScanner.cpp
+    Source/ClapPluginFormat.cpp
     Source/PluginIcons.cpp
     Source/MappingSuggestions.cpp
     Source/Ipc/Protocol.cpp
@@ -56,6 +61,7 @@ target_compile_definitions(Performer PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(Performer PRIVATE
+    ClapHeaders
     PerformerAssets
     ${CMAKE_DL_LIBS}
     juce::juce_audio_basics
@@ -82,6 +88,7 @@ juce_add_gui_app(PerformerPluginHost
 
 target_sources(PerformerPluginHost PRIVATE
     Source/PluginHostProcess/PluginHostMain.cpp
+    Source/ClapPluginFormat.cpp
     Source/Ipc/Protocol.cpp)
 
 target_include_directories(PerformerPluginHost PRIVATE Source
@@ -98,6 +105,7 @@ target_compile_definitions(PerformerPluginHost PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(PerformerPluginHost PRIVATE
+    ClapHeaders
     PerformerAssets
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -125,24 +133,26 @@ add_custom_command(TARGET Performer POST_BUILD
 # Tests
 enable_testing()
 juce_add_console_app(ModelTest PRODUCT_NAME "ModelTest")
-target_sources(ModelTest PRIVATE Tests/ModelTest.cpp Source/Model.cpp Source/MappingSuggestions.cpp Source/QrCode.cpp)
+target_sources(ModelTest PRIVATE Tests/ModelTest.cpp Source/ClapPluginFormat.cpp Source/Model.cpp Source/MappingSuggestions.cpp Source/QrCode.cpp)
 target_include_directories(ModelTest PRIVATE Source)
 target_compile_definitions(ModelTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST3=0 JUCE_PLUGINHOST_LV2=0 JUCE_PLUGINHOST_LADSPA=0 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(ModelTest PRIVATE
+    ClapHeaders
     juce::juce_core juce::juce_data_structures juce::juce_events
     juce::juce_audio_processors
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 add_test(NAME ModelTest COMMAND ModelTest)
 
 juce_add_console_app(RemoteTest PRODUCT_NAME "RemoteTest")
-target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
+target_sources(RemoteTest PRIVATE Tests/RemoteTest.cpp Source/RemoteServer.cpp Source/Hotspot.cpp Source/QrCode.cpp Source/PluginView.cpp Source/PluginView.cpp Source/QrCode.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(RemoteTest PRIVATE Source)
 target_compile_definitions(RemoteTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(RemoteTest PRIVATE
+    ClapHeaders
     PerformerAssets
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_audio_formats
     juce::juce_audio_processors juce::juce_audio_utils
@@ -152,12 +162,13 @@ target_link_libraries(RemoteTest PRIVATE
 add_test(NAME RemoteTest COMMAND RemoteTest)
 
 juce_add_console_app(EngineTest PRODUCT_NAME "EngineTest")
-target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/QrCode.cpp Source/Model.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
+target_sources(EngineTest PRIVATE Tests/EngineTest.cpp Source/QrCode.cpp Source/Model.cpp Source/ClapPluginFormat.cpp Source/PluginHost.cpp Source/PluginScanner.cpp Source/PluginIcons.cpp Source/MappingSuggestions.cpp Source/Ipc/Protocol.cpp Source/RemotePlugin.cpp Source/Engine.cpp)
 target_include_directories(EngineTest PRIVATE Source)
 target_compile_definitions(EngineTest PRIVATE
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_ALSA=1 JUCE_JACK=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(EngineTest PRIVATE
+    ClapHeaders
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_audio_formats
     juce::juce_audio_processors juce::juce_audio_utils
     juce::juce_core juce::juce_data_structures juce::juce_events

@@ -664,6 +664,19 @@ A short checklist:
 - Keep the set on one input per manual, with program numbers matching the
   patch numbers on your keyboard, so you never touch the computer.
 
+## Plugin formats
+
+Performer hosts **VST3**, **LV2** and **LADSPA** natively. Windows VST3s bridged
+with yabridge appear as ordinary VST3s.
+
+**CLAP** is being added. Right now CLAP plugins are found and listed by a scan
+-- they appear in the Plugins window with their name, vendor and whether they
+are an instrument -- but they cannot be loaded yet, and adding one to a slot
+reports that. Both native Linux CLAP plugins and Windows ones bridged by
+yabridge are scanned, from `~/.clap`, `/usr/lib/clap` and `/usr/local/lib/clap`.
+
+Most CLAP plugins also ship a VST3 build, which works today.
+
 ## Windows plugins
 
 Windows VST3 plugins bridged with [yabridge](https://github.com/robbert-vdh/yabridge)

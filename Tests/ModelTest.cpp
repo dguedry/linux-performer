@@ -4,6 +4,7 @@
 #include "MappingSuggestions.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
+#include "ClapPluginFormat.h"
 
 using namespace perf;
 
@@ -321,6 +322,29 @@ int main()
         const auto fixed = Setup::fromVar (broken);
         CHECK (fixed.sets[0].songs == std::vector<int> ({ 0 }));   // 99 and -3 dropped
         CHECK (fixed.currentSet == -1 && fixed.currentSongInSet == -1);
+    }
+
+    // ---- CLAP identifiers ------------------------------------------------
+    /* A CLAP bundle can hold several plugins, so a description has to name the
+       plugin as well as the file. Get this wrong and a saved setup reopens the
+       wrong plugin out of the bundle, or none. */
+    {
+        const auto id = perf::ClapPluginFormat::makeIdentifier ("/usr/lib/clap/Surge XT.clap",
+                                                                "org.surge-synth-team.surge-xt");
+        CHECK (perf::ClapPluginFormat::pathFromIdentifier (id) == "/usr/lib/clap/Surge XT.clap");
+        CHECK (perf::ClapPluginFormat::pluginIdFromIdentifier (id) == "org.surge-synth-team.surge-xt");
+
+        // A path with no id is still a usable path, for a bundle holding one plugin.
+        const auto bare = perf::ClapPluginFormat::makeIdentifier ("/usr/lib/clap/Thing.clap", {});
+        CHECK (bare == "/usr/lib/clap/Thing.clap");
+        CHECK (perf::ClapPluginFormat::pathFromIdentifier (bare) == "/usr/lib/clap/Thing.clap");
+        CHECK (perf::ClapPluginFormat::pluginIdFromIdentifier (bare).isEmpty());
+
+        // Spaces in a path are ordinary: every FabFilter bundle has one.
+        const auto spaced = perf::ClapPluginFormat::makeIdentifier ("/home/x/.clap/FabFilter Pro-Q 4.clap",
+                                                                    "com.fabfilter.proq.4");
+        CHECK (perf::ClapPluginFormat::pathFromIdentifier (spaced) == "/home/x/.clap/FabFilter Pro-Q 4.clap");
+        CHECK (perf::ClapPluginFormat::pluginIdFromIdentifier (spaced) == "com.fabfilter.proq.4");
     }
 
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
