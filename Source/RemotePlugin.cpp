@@ -86,8 +86,9 @@ std::vector<std::string> RemotePlugin::buildHelperEnvironment (std::vector<char*
 
     // systemd environment.d files (KEY=value lines) are applied at login by desktops
     // that support it; a terminal or launcher that predates them misses out. Apply any
-    // variable from there that this process doesn't already have -- that is where
-    // nilinux puts WINELOADER and WINEFSYNC for DAWs.
+    // variable from there that this process doesn't already have -- that is where a
+    // session-based Wine setup puts WINELOADER and WINEFSYNC for DAWs. (vstenv does
+    // not need this: it records the loader in the prefix instead.)
     std::map<String, String> extra;
     for (const auto& conf : home.getChildFile (".config/environment.d").findChildFiles (File::findFiles, false, "*.conf"))
         for (auto& raw : StringArray::fromLines (conf.loadFileAsString()))

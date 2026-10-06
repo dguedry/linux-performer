@@ -43,11 +43,19 @@ public:
         or in the sibling JUCE artefacts folder of a build tree. */
     static juce::File findHostExecutable();
 
-    /** Environment for helper processes. yabridge starts `wine` from PATH; tools like
-        nilinux install a ~/.local/bin/wine shim (and WINELOADER via environment.d) so
-        that plugins run with the wine that owns their prefix. Desktop launchers may not
-        have either, so the helper's environment gets them applied explicitly. The
-        returned strings are "NAME=value"; `pointers` receives a null-terminated envp. */
+    /** Environment for helper processes.
+
+        A plugin has to run with the wine that owns its prefix, or that wine will
+        try to update the prefix and corrupt it. vstenv arranges this inside the
+        prefix -- it records the loader there and teaches yabridge-host.exe to
+        read it -- so nothing is needed from us. The older convention, which
+        nilinux used and a hand-built prefix may still use, puts a ~/.local/bin/wine
+        shim and WINELOADER/WINEFSYNC in the session, and a desktop launcher does
+        not always have those. So they are applied here explicitly, which is
+        harmless when the prefix does not need them.
+
+        The returned strings are "NAME=value"; `pointers` receives a
+        null-terminated envp. */
     static std::vector<std::string> buildHelperEnvironment (std::vector<char*>& pointers);
 
     /** Spawns the host process and loads the plugin. Blocks until done or timed out. */

@@ -201,23 +201,31 @@ own, which the tablet joins directly. Performer asks once which wifi adapter to
 use and remembers it; a spare USB adapter lets the machine stay on its normal
 network at the same time. See the [manual](docs/MANUAL.md) for the details.
 
-## Windows plugins via yabridge and nilinux
+## Windows plugins via yabridge and vstenv
 
-Windows VST3s bridged with yabridge appear as normal plugins. If the Wine prefix
-is managed by [nilinux](https://github.com/dguedry/nilinux) (Native Access on
-Linux), that tool requires DAWs to start yabridge with *its* wine: the host's
-wine would run its own prefix update and corrupt the prefix. Performer follows
-that convention for every helper it starts: `~/.local/bin` is put first on the
-helper's `PATH` when nilinux's `wine` shim is there, and variables from
-`~/.config/environment.d/*.conf` (`WINELOADER`, `WINEFSYNC`) are applied when
-the session lacks them, so it does not matter whether Performer was started
-from a terminal or a desktop launcher.
+Windows VST3s bridged with yabridge appear as normal plugins, and Performer does
+not care how the Wine side was set up.
 
-While Native Access installs or updates a product, its Windows plugin file is
-replaced and the yabridge bundle briefly points at nothing. Performer reports
-that as "yabridge link points to a missing file" instead of a blacklist; when
-nilinux has finished (it runs `yabridgectl sync` after Native Access exits),
-scan again and the plugin comes back.
+[vstenv](https://github.com/dguedry/vstenv) is the easy way to get one: it
+provisions its own Wine, installs each vendor's manager application (Native
+Access, IK Product Manager, Steinberg Download Assistant, Audio Modeling
+Software Center) and the products they deliver, and bridges the result into the
+folders Performer scans. A prefix it manages records which wine belongs to it,
+and vstenv teaches `yabridge-host.exe` to read that record -- so the right wine
+is used whatever starts the plugin, with nothing on `PATH` and nothing set in
+the session. Performer needs to do nothing special for it.
+
+Performer does still accommodate the older convention, for a prefix set up by
+[nilinux](https://github.com/dguedry/nilinux) (which vstenv succeeds) or by
+hand: `~/.local/bin` goes first on a helper's `PATH` when a `wine` shim is
+there, and variables from `~/.config/environment.d/*.conf` (`WINELOADER`,
+`WINEFSYNC`) are applied when the session lacks them. That matters because a
+desktop launcher and a terminal do not always agree about the environment.
+
+While a vendor's installer replaces a plugin file, the yabridge bundle briefly
+points at nothing. Performer reports that as "yabridge link points to a missing
+file" rather than blacklisting the plugin; once the install finishes and
+`yabridgectl sync` has run, scan again and the plugin comes back.
 
 ## Process model
 

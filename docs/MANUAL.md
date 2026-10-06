@@ -670,16 +670,29 @@ Windows VST3 plugins bridged with [yabridge](https://github.com/robbert-vdh/yabr
 appear as ordinary VST3s. Scan the folder yabridge puts them in, usually
 `~/.vst3/yabridge`.
 
-If your Wine prefix is managed by [nilinux](https://github.com/dguedry/nilinux)
-(Native Access on Linux), Performer follows its convention automatically: it
-puts `~/.local/bin` first on the helper's PATH when the nilinux `wine` shim is
-there, and applies `WINELOADER` and `WINEFSYNC` from
-`~/.config/environment.d/*.conf`. This matters because the wrong Wine version
-would try to update the prefix and corrupt it.
+Setting the Wine side up by hand is the fiddly part, and
+[vstenv](https://github.com/dguedry/vstenv) exists to do it for you: it
+provisions its own Wine, installs the vendor manager applications (Native
+Access, IK Product Manager, Steinberg Download Assistant, Audio Modeling
+Software Center) and the products they deliver, and bridges everything into
+`~/.vst3/yabridge` for Performer to scan. Nothing in Performer depends on it --
+any yabridge setup works -- but it saves a lot of tedium.
 
-While Native Access installs or updates a product, the bridged plugin file is
-briefly missing. Performer reports *yabridge link points to a missing file*
-rather than blacklisting the plugin; scan again once the install has finished.
+A prefix vstenv manages records which Wine belongs to it, and yabridge is taught
+to read that record, so the right Wine runs the plugin whatever started it. That
+matters because the wrong Wine version would try to update the prefix and
+corrupt it. Performer needs to do nothing for this to work.
+
+For a prefix set up the older way -- by hand, or by
+[nilinux](https://github.com/dguedry/nilinux), which vstenv succeeds -- Performer
+still follows the convention that relies on the session: it puts `~/.local/bin`
+first on a helper's PATH when a `wine` shim is there, and applies `WINELOADER`
+and `WINEFSYNC` from `~/.config/environment.d/*.conf`, since a desktop launcher
+and a terminal do not always agree about those.
+
+While a vendor's installer replaces a plugin, the bridged file is briefly
+missing. Performer reports *yabridge link points to a missing file* rather than
+blacklisting the plugin; scan again once the install has finished.
 
 ## When something goes wrong
 
