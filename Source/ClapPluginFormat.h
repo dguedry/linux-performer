@@ -46,10 +46,14 @@ public:
     juce::StringArray searchPathsForPlugins (const juce::FileSearchPath&, bool recursive, bool) override;
     juce::FileSearchPath getDefaultLocationsToSearch() override;
 
-    /** Loading a plugin runs its own code, which may want the message thread. */
+    /** False, and it matters: JUCE's synchronous createPluginInstance refuses
+        outright for any format that claims otherwise, which is the call the
+        out-of-process host makes. Creation here really is synchronous -- it
+        dlopens the bundle and returns, never waiting on the message thread --
+        so there is nothing to be unblocked for. */
     bool requiresUnblockedMessageThreadDuringCreation (const juce::PluginDescription&) const override
     {
-        return true;
+        return false;
     }
 
     /** A description's fileOrIdentifier is "<path>|<clap plugin id>": a bundle

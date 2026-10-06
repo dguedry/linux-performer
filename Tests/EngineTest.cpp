@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "PluginIcons.h"
 #include "MappingSuggestions.h"
+#include "ClapPluginFormat.h"
 #include <juce_events/juce_events.h>
 #include <cstdio>
 #include <cmath>
@@ -1229,6 +1230,33 @@ int main()
         CHECK (saved.nextSongCC == 80 && saved.prevSongCC == 81);
         CHECK (saved.songs[0].name == "Oye Como Va");
         CHECK (std::abs (saved.songs[0].tempoBpm - 116.0) < 0.001);
+    }
+
+    // CLAP has to be loadable by the synchronous API, because that is the one
+    // the out-of-process host calls. A format claiming it needs an unblocked
+    // message thread is refused outright by JUCE with "cannot be instantiated
+    // synchronously", which silently broke every CLAP plugin once already.
+    {
+        perf::ClapPluginFormat clap;
+        PluginDescription anyClap;
+        anyClap.pluginFormatName = perf::ClapPluginFormat::getFormatName();
+        CHECK (! clap.requiresUnblockedMessageThreadDuringCreation (anyClap));
+
+        // The format must be registered where the host looks for it, by name.
+        AudioPluginFormatManager fm;
+        addDefaultFormatsToManager (fm);
+        fm.addFormat (new perf::ClapPluginFormat());
+        bool foundClap = false;
+        for (auto* f : fm.getFormats())
+            if (f->getName() == perf::ClapPluginFormat::getFormatName())
+                foundClap = true;
+        CHECK (foundClap);
+
+        // An identifier carries both path and plugin id, since one bundle can
+        // hold several plugins; round-tripping it must not lose either.
+        const auto id = perf::ClapPluginFormat::makeIdentifier ("/a/b/Thing.clap", "com.x.thing");
+        CHECK (perf::ClapPluginFormat::pathFromIdentifier (id) == "/a/b/Thing.clap");
+        CHECK (perf::ClapPluginFormat::pluginIdFromIdentifier (id) == "com.x.thing");
     }
 
     std::printf (failures == 0 ? "EngineTest: all checks passed\n" : "EngineTest: %d failure(s)\n", failures);
