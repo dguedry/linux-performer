@@ -560,6 +560,12 @@ private:
     std::atomic<bool> wantProcessing { false }; // set by whoever prepares us
 
     void stopProcessingFromAudioThread();
+
+    bool isAudioThread() const
+    {
+        const auto id = audioThreadId.load();
+        return id != nullptr && id == Thread::getCurrentThreadId();
+    }
     bool noteDialectMidi = true;         // false = CLAP's own note events
     int mainInChannels = 0, mainOutChannels = 2;
 
@@ -773,17 +779,40 @@ void ClapInstance::releaseResources()
     active = false;
 }
 
-/* stop_processing() belongs to the audio thread too. By the time this is
-   called the audio thread is no longer running blocks for us, so the honest
-   thing is to stop it here and accept that this one call is made from
-   whichever thread is tearing the plugin down -- the alternative is leaving
-   the plugin processing forever. Plugins accept this because it mirrors what
-   every host does on teardown. */
+/* stop_processing() must happen on the audio thread, exactly like
+   start_processing(). Ask for it and give the audio thread a moment to do it:
+   while blocks are still being delivered -- which is the case when the host
+   reprepares a running plugin -- that is all it takes.
+
+   Only if no block arrives do we stop it here. That happens on teardown, when
+   the audio thread has already been stopped and nobody is left to do it; the
+   alternative is leaving the plugin processing forever. */
 void ClapInstance::stopProcessingFromAudioThread()
 {
     wantProcessing.store (false);
-    if (processing.exchange (false) && plugin != nullptr && plugin->stop_processing != nullptr)
-        plugin->stop_processing (plugin);
+
+    if (! processing.load() || plugin == nullptr || plugin->stop_processing == nullptr)
+    {
+        processing.store (false);
+        return;
+    }
+
+    if (! MessageManager::existsAndIsCurrentThread() && isAudioThread())
+    {
+        // Already on the audio thread: just do it.
+        if (processing.exchange (false))
+            plugin->stop_processing (plugin);
+        return;
+    }
+
+    /* Wait for the audio thread to notice. 100 ms is far longer than any
+       sane block takes, and the loop exits the moment it has happened. */
+    const auto deadline = Time::getMillisecondCounter() + 100;
+    while (processing.load() && Time::getMillisecondCounter() < deadline)
+        Thread::sleep (1);
+
+    if (processing.exchange (false))
+        plugin->stop_processing (plugin);   // no audio thread left to do it
 }
 
 void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
@@ -791,9 +820,18 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
     audioThreadId.store (Thread::getCurrentThreadId());
 
     /* This is the audio thread, which is the only place CLAP allows
-       start_processing() to be called from. */
-    if (active && wantProcessing.load() && ! processing.load() && plugin != nullptr)
-        processing.store (plugin->start_processing != nullptr && plugin->start_processing (plugin));
+       start_processing() and stop_processing() to be called from. */
+    if (plugin != nullptr)
+    {
+        if (active && wantProcessing.load() && ! processing.load())
+            processing.store (plugin->start_processing != nullptr && plugin->start_processing (plugin));
+        else if (! wantProcessing.load() && processing.load())
+        {
+            if (plugin->stop_processing != nullptr) plugin->stop_processing (plugin);
+            processing.store (false);
+            return;                       // nothing more to do this block
+        }
+    }
 
     const int numSamples = buffer.getNumSamples();
     if (plugin == nullptr || ! processing.load() || numSamples <= 0)
