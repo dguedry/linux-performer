@@ -7,6 +7,147 @@ namespace perf
 {
 
 /**
+    Draws a pitch or mod wheel as the thing it is: a cylinder turning in a
+    slot, seen edge-on.
+
+    A plain vertical slider is readable but it is not what anyone looks for on
+    a keyboard. The parts that sell it are the curvature -- a light gradient
+    across the width, darkest at the edges where the cylinder turns away -- and
+    the ridges, which are what you actually see moving when a real wheel moves.
+
+    The ridges are spaced by the cosine of their position around the cylinder,
+    so they crowd together towards the top and bottom edges the way they do on
+    a real one, rather than being evenly spaced like a ladder.
+*/
+class WheelLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    /** `springsToCentre` draws the detent mark a pitch wheel rests against. */
+    explicit WheelLookAndFeel (bool springsToCentreIn) : springsToCentre (springsToCentreIn) {}
+
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height,
+                           float sliderPos, float, float,
+                           juce::Slider::SliderStyle, juce::Slider& slider) override
+    {
+        const juce::Rectangle<float> full ((float) x, (float) y, (float) width, (float) height);
+
+        /* The wheel itself is narrower than the space it is given: a real one
+           sits down in a slot with the panel visible either side. */
+        const float wheelWidth = juce::jmin (full.getWidth() - 6.0f, 18.0f);
+        auto wheel = full.withSizeKeepingCentre (wheelWidth, full.getHeight() - 4.0f);
+        const float radius = wheelWidth * 0.5f;
+        /* A near-square cap, not a semicircle: the end of a cylinder seen
+           edge-on is almost flat, and a full round makes it read as a pill. */
+        const float corner = juce::jmin (radius, 6.0f);
+
+        // The slot the wheel turns in, cut into the panel.
+        auto slot = wheel.expanded (3.0f, 2.0f);
+        const float slotCorner = juce::jmin (radius + 2.0f, 8.0f);
+        g.setColour (juce::Colour (0xff0b0c10));
+        g.fillRoundedRectangle (slot, slotCorner);
+        g.setColour (juce::Colour (0xff2a2d36));
+        g.drawRoundedRectangle (slot.reduced (0.5f), slotCorner, 1.0f);
+
+        /* Across the width: light down one side, dark at both edges. This is
+           the whole illusion -- without it the wheel reads as a flat strip. */
+        juce::ColourGradient across (juce::Colour (0xff202329), wheel.getX(), 0.0f,
+                                     juce::Colour (0xff17191f), wheel.getRight(), 0.0f, false);
+        across.addColour (0.30, juce::Colour (0xff6b707c));
+        across.addColour (0.46, juce::Colour (0xff585d68));
+        across.addColour (0.72, juce::Colour (0xff33373f));
+        g.setGradientFill (across);
+        g.fillRoundedRectangle (wheel, corner);
+
+        /* Ridges. Spacing is the giveaway: evenly spaced lines look like a
+           ladder, so these are placed by their angle around the cylinder and
+           crowd together towards the top and bottom where the surface turns
+           away. They roll with the value, which is what sells the movement. */
+        const float travel    = juce::jmax (1.0f, wheel.getHeight());
+        const float thumbPos  = juce::jlimit (wheel.getY(), wheel.getBottom(), (float) sliderPos);
+        const float rollPhase = (thumbPos - wheel.getY()) / travel;
+
+        const int ridgeCount = 22;
+        for (int i = 0; i < ridgeCount; ++i)
+        {
+            const float turn  = std::fmod ((float) i / (float) ridgeCount + rollPhase, 1.0f);
+            const float angle = turn * juce::MathConstants<float>::pi;
+
+            // Crowded at the ends, spread across the middle.
+            const float ny = (1.0f - std::cos (angle)) * 0.5f;
+            const float ry = wheel.getY() + ny * wheel.getHeight();
+
+            // Ridges facing us catch the light; those at the edge are dim.
+            const float facing = std::sin (angle);
+            if (facing < 0.05f) continue;
+
+            const float inset = 2.0f + (1.0f - facing) * radius * 0.5f;
+            const float x1 = wheel.getX() + inset, x2 = wheel.getRight() - inset;
+            if (x2 <= x1) continue;
+
+            g.setColour (juce::Colours::black.withAlpha (0.55f * facing));
+            g.drawLine (x1, ry, x2, ry, 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.16f * facing));
+            g.drawLine (x1, ry + 1.0f, x2, ry + 1.0f, 1.0f);
+        }
+
+        /* The ends fall away into shadow, so the wheel reads as round rather
+           than as a flat-topped cylinder. Drawn over the ridges so they fade
+           out at the top and bottom as they turn away. */
+        const float fade = juce::jmin (wheel.getHeight() * 0.3f, 26.0f);
+        juce::ColourGradient top (juce::Colours::black.withAlpha (0.8f), 0.0f, wheel.getY(),
+                                  juce::Colours::transparentBlack, 0.0f, wheel.getY() + fade, false);
+        g.setGradientFill (top);
+        g.fillRoundedRectangle (wheel, corner);
+        juce::ColourGradient bottom (juce::Colours::black.withAlpha (0.8f), 0.0f, wheel.getBottom(),
+                                     juce::Colours::transparentBlack, 0.0f, wheel.getBottom() - fade, false);
+        g.setGradientFill (bottom);
+        g.fillRoundedRectangle (wheel, corner);
+
+        /* A pitch wheel rests at centre, so mark the detent it springs back
+           to. A mod wheel has no such thing and gets no mark. */
+        if (springsToCentre)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.16f));
+            g.drawLine (wheel.getX() + 3.0f, wheel.getCentreY(), wheel.getRight() - 3.0f, wheel.getCentreY(), 1.0f);
+        }
+
+        /* The grip: the moulded thumb rest, standing proud of the cylinder.
+           It is what the eye tracks, so it is shaded like a small cylinder of
+           its own rather than filled flat. */
+        const float gripHeight = 13.0f;
+        juce::Rectangle<float> grip (wheel.getX() - 0.5f,
+                                     juce::jlimit (wheel.getY(), wheel.getBottom() - gripHeight,
+                                                   thumbPos - gripHeight * 0.5f),
+                                     wheel.getWidth() + 1.0f, gripHeight);
+
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (grip.translated (0.0f, 1.5f), 3.5f);
+
+        juce::ColourGradient gripFill (juce::Colour (0xff2e323a), grip.getX(), 0.0f,
+                                       juce::Colour (0xff23262c), grip.getRight(), 0.0f, false);
+        gripFill.addColour (0.30, juce::Colour (0xffb8bec9));
+        gripFill.addColour (0.46, juce::Colour (0xff868c98));
+        gripFill.addColour (0.70, juce::Colour (0xff4a4f59));
+        g.setGradientFill (gripFill);
+        g.fillRoundedRectangle (grip, 3.5f);
+
+        // Lip top and bottom, so it reads as a moulding and not a painted band.
+        g.setColour (juce::Colours::white.withAlpha (slider.isMouseOverOrDragging() ? 0.55f : 0.34f));
+        g.drawLine (grip.getX() + 3.0f, grip.getY() + 1.0f, grip.getRight() - 3.0f, grip.getY() + 1.0f, 1.2f);
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.drawLine (grip.getX() + 3.0f, grip.getBottom() - 1.0f, grip.getRight() - 3.0f, grip.getBottom() - 1.0f, 1.2f);
+
+        // A glint along the lit side, so the cylinder looks polished.
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawLine (wheel.getX() + radius * 0.62f, wheel.getY() + 3.0f,
+                    wheel.getX() + radius * 0.62f, wheel.getBottom() - 3.0f, 1.0f);
+    }
+
+private:
+    const bool springsToCentre;
+};
+
+/**
     An on-screen keyboard and a few controllers for testing sounds and mappings
     without a MIDI controller. Everything it sends goes through Engine::injectMidi
     into one input, on that input's channel, so program changes, key zones,
@@ -48,10 +189,8 @@ public:
         {
             s.setRange (min, max, step);
             s.setSliderStyle (juce::Slider::LinearVertical);
-            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 46, 16);
-            s.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff15161c));
-            s.setColour (juce::Slider::trackColourId,      juce::Colour (0xff4f9dff));
-            s.setColour (juce::Slider::thumbColourId,      juce::Colour (0xffd7dbe2));
+            s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 34, 16);
+            s.setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xffc7ccd6));
             s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
             s.setTooltip (tip);
         };
@@ -99,6 +238,11 @@ public:
            keyboard, would otherwise leave the pitch hanging. */
         pitchBend.onDragEnd = [this] { pitchBend.setValue (0); };
 
+        /* Drawn as real wheels. Only the bend wheel gets a centre detent,
+           because only it springs back to one. */
+        pitchBend.setLookAndFeel (&bendLook);
+        modWheel.setLookAndFeel (&modLook);
+
         addAndMakeVisible (ccLabel);
         addAndMakeVisible (ccNumber);
         ccNumber.setRange (0, 127, 1);
@@ -133,6 +277,10 @@ public:
     {
         releaseAll();
         state.removeListener (this);
+
+        // The sliders must let go before the look and feel they point at dies.
+        pitchBend.setLookAndFeel (nullptr);
+        modWheel.setLookAndFeel (nullptr);
     }
 
     /** Which input receives the notes. Held notes are released when this changes. */
@@ -175,16 +323,18 @@ public:
            the way they do on a keyboard -- bend nearest the keys. Velocity,
            sustain and the CC sender stack beside them, because those are set
            once and left alone rather than played. */
-        auto wheels = r.removeFromLeft (128);
+        /* Narrow: a wheel is a cylinder seen edge-on, and real ones are
+           barely wider than a thumb. A wide column reads as a strip. */
+        auto wheels = r.removeFromLeft (74);
         r.removeFromLeft (10);
 
         auto labels = wheels.removeFromBottom (14);
-        bendLabel.setBounds (labels.removeFromLeft (60));
-        labels.removeFromLeft (8);
+        bendLabel.setBounds (labels.removeFromLeft (34));
+        labels.removeFromLeft (6);
         modLabel.setBounds (labels);
 
-        pitchBend.setBounds (wheels.removeFromLeft (60));
-        wheels.removeFromLeft (8);
+        pitchBend.setBounds (wheels.removeFromLeft (34));
+        wheels.removeFromLeft (6);
         modWheel.setBounds (wheels);
 
         auto controls = r.removeFromLeft (300);
@@ -242,6 +392,8 @@ private:
     juce::Label targetLabel, hint;
     juce::Label velocityLabel { {}, "Velocity" }, modLabel { {}, "Mod" }, bendLabel { {}, "Bend" }, ccLabel { {}, "CC" };
     juce::Slider velocity, modWheel, pitchBend, ccNumber, ccValue;
+
+    WheelLookAndFeel bendLook { true }, modLook { false };
     juce::TextButton sustain { "Sustain" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KeyboardPanel)
