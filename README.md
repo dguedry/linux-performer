@@ -206,8 +206,10 @@ network at the same time. See the [manual](docs/MANUAL.md) for the details.
 
 ## Windows plugins via yabridge and vstenv
 
-Windows VST3s bridged with yabridge appear as normal plugins, and Performer does
-not care how the Wine side was set up.
+Windows VST3s and CLAPs bridged with yabridge appear as normal plugins of that
+format, and Performer does not care how the Wine side was set up. yabridge
+bridges both, so a Windows CLAP is scanned from `~/.clap/yabridge` and hosted
+like any other -- its own window and all.
 
 [vstenv](https://github.com/dguedry/vstenv) is the easy way to get one: it
 provisions its own Wine, installs each vendor's manager application (Native

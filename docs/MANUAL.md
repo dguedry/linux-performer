@@ -692,9 +692,9 @@ naming the same setting. That is normal and not a sign of a lost setting.
 
 ## Windows plugins
 
-Windows VST3 plugins bridged with [yabridge](https://github.com/robbert-vdh/yabridge)
-appear as ordinary VST3s. Scan the folder yabridge puts them in, usually
-`~/.vst3/yabridge`.
+Windows VST3 and CLAP plugins bridged with [yabridge](https://github.com/robbert-vdh/yabridge)
+appear as ordinary plugins of that format. Scan the folders yabridge puts them
+in, usually `~/.vst3/yabridge` for VST3s and `~/.clap/yabridge` for CLAPs.
 
 Setting the Wine side up by hand is the fiddly part, and
 [vstenv](https://github.com/dguedry/vstenv) exists to do it for you: it
