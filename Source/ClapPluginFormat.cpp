@@ -779,14 +779,17 @@ void ClapInstance::releaseResources()
     active = false;
 }
 
-/* stop_processing() must happen on the audio thread, exactly like
-   start_processing(). Ask for it and give the audio thread a moment to do it:
-   while blocks are still being delivered -- which is the case when the host
-   reprepares a running plugin -- that is all it takes.
+/* stop_processing() is [audio-thread] in clap/plugin.h, with no exception for
+   teardown -- and Surge XT says so out loud when a host gets it wrong. So it
+   is only ever called from processBlock(), and this just asks.
 
-   Only if no block arrives do we stop it here. That happens on teardown, when
-   the audio thread has already been stopped and nobody is left to do it; the
-   alternative is leaving the plugin processing forever. */
+   Where the audio thread is still running blocks (the host reprepares a
+   plugin mid-session) the wait below is all it takes. Where it has already
+   stopped, nothing calls stop_processing at all: deactivate() is
+   [main-thread & active] and is well defined from here regardless, and a
+   plugin that is deactivated has by definition stopped processing. Calling it
+   from the wrong thread to tidy a flag would be trading a real rule for a
+   cosmetic one. */
 void ClapInstance::stopProcessingFromAudioThread()
 {
     wantProcessing.store (false);
@@ -797,22 +800,23 @@ void ClapInstance::stopProcessingFromAudioThread()
         return;
     }
 
-    if (! MessageManager::existsAndIsCurrentThread() && isAudioThread())
+    if (isAudioThread())
     {
-        // Already on the audio thread: just do it.
+        // Already on the audio thread: this is the one place it may happen.
         if (processing.exchange (false))
             plugin->stop_processing (plugin);
         return;
     }
 
-    /* Wait for the audio thread to notice. 100 ms is far longer than any
-       sane block takes, and the loop exits the moment it has happened. */
+    /* Give the audio thread a chance to notice and do it. 100 ms is far
+       longer than any sane block, and this returns the moment it happens. */
     const auto deadline = Time::getMillisecondCounter() + 100;
     while (processing.load() && Time::getMillisecondCounter() < deadline)
         Thread::sleep (1);
 
-    if (processing.exchange (false))
-        plugin->stop_processing (plugin);   // no audio thread left to do it
+    /* Still processing means no audio thread is left to ask -- we are being
+       torn down. Drop the flag and let deactivate() do the rest. */
+    processing.store (false);
 }
 
 void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
