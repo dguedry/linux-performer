@@ -400,14 +400,20 @@ on the tablet could drive that organ but never follow it. Mirroring the window
 sidesteps that, because what you see is what the plugin is showing -- and it
 needs no setting up for each plugin, which matters when a rig has a dozen.
 
-This needs `x11vnc`, `websockify` and `novnc` installed; Performer says so if
-any are missing.
+This needs `x11vnc`, `websockify`, `xdotool` and `novnc` installed; Performer
+says so if any are missing.
 
 It works on a Wayland desktop as well as an X11 one. Performer is an X11
 application and plugin editors are X11 windows, so both run through XWayland,
 which every Wayland desktop provides and which `x11vnc` can read and write like
-any other X display. What does not work is a Wayland session with XWayland
-switched off: Performer will not start there at all, mirroring or no.
+any other X display. This is tested: a plugin's own window mirrors to the
+tablet under XWayland exactly as it does on X11.
+
+A Wayland session without XWayland is the one case that does not work, because
+everything here reads the screen through X. The tools are still installed and
+still start, so rather than leave the tablet showing a black rectangle,
+Performer checks that an X display is actually reachable and says what to
+install. Install `xwayland` and log back in, or use an X11 session.
 
 The stream travels on the same port as the tablet app, so nothing extra has to
 be opened in a firewall, and it stops when Performer does.

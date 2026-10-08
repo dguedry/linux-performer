@@ -182,9 +182,11 @@ plays properly -- one finger at a time, since the mirror is a single pointer. **
 switches to panning and pinching, and **Full** hides the browser's address bar.
 Taps arrive on the computer as real clicks, so the plugin window must not be
 covered by another window there -- Performer raises it each time you press GUI. Each plugin gets its own tab, named after the
-program. Needs `x11vnc`, `websockify` and `novnc`, and works on Wayland
-desktops as well as X11 ones -- Performer and plugin editors are X11 windows, so
-they run through XWayland, which `x11vnc` reads and writes normally.
+program. Needs `x11vnc`, `websockify`, `xdotool` and `novnc`, and works on
+Wayland desktops as well as X11 ones -- Performer and plugin editors are X11
+windows, so they run through XWayland, which `x11vnc` reads and writes
+normally. A Wayland session with no XWayland is the one case that does not
+work, and Performer says so rather than showing a black screen.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which

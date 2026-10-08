@@ -39,6 +39,45 @@ namespace
                 return d;
         return {};
     }
+
+    /** Is there an X display these tools can actually work with?
+
+        Installed is not the same as usable. Everything here reads the screen
+        through X: x11vnc mirrors an X window and xdotool finds it by name. On
+        a Wayland session without Xwayland they are present, they start, and
+        they see nothing -- the tablet would show a black rectangle instead of
+        a plugin, with no hint as to why. JUCE itself is X11-only on Linux, so
+        if Performer is running at all there is normally an X display here;
+        this catches the case where there is not. */
+    bool hasUsableXDisplay()
+    {
+        if (SystemStats::getEnvironmentVariable ("DISPLAY", {}).isEmpty())
+            return false;
+
+        /* Ask xdotool to do the simplest thing it can. If it cannot reach the
+           display it fails here rather than when a plugin window is open. */
+        auto xdotool = findTool ("xdotool");
+        if (xdotool == File()) return false;
+
+        ChildProcess p;
+        if (! p.start (StringArray { xdotool.getFullPathName(), "search", "--name", "^$" },
+                       ChildProcess::wantStdOut | ChildProcess::wantStdErr))
+            return false;
+
+        const auto out = p.readAllProcessOutput();
+        if (! p.waitForProcessToFinish (3000))
+        {
+            p.kill();
+            return false;
+        }
+
+        /* A search that matches nothing still talks to X successfully, so the
+           test is whether the display opened at all. xdotool says so on
+           stderr and exits non-zero; both are checked because the wording has
+           changed between versions. */
+        return ! out.containsIgnoreCase ("open display")
+            && ! out.containsIgnoreCase ("xdo instance");
+    }
 }
 
 //==============================================================================
@@ -47,14 +86,30 @@ bool PluginView::available (String& whatIsMissing)
     StringArray missing;
     if (findTool ("x11vnc") == File())     missing.add ("x11vnc");
     if (findTool ("websockify") == File()) missing.add ("websockify");
+    if (findTool ("xdotool") == File())    missing.add ("xdotool");
     if (findNoVncRoot() == File())         missing.add ("novnc");
 
-    if (missing.isEmpty()) return true;
+    if (! missing.isEmpty())
+    {
+        whatIsMissing = "Showing a plugin's window on the tablet needs "
+                      + missing.joinIntoString (", ") + ". Install "
+                      + (missing.size() == 1 ? "it" : "them") + " and try again.";
+        return false;
+    }
 
-    whatIsMissing = "Showing a plugin's window on the tablet needs "
-                  + missing.joinIntoString (", ") + ". Install "
-                  + (missing.size() == 1 ? "it" : "them") + " and try again.";
-    return false;
+    /* The tools are there; can they see anything? Checked second so the
+       message names the real problem rather than sending someone off to
+       install something they already have. */
+    if (! hasUsableXDisplay())
+    {
+        whatIsMissing = "Showing a plugin's window on the tablet needs an X display, "
+                        "and there is not one here. On a Wayland session this means "
+                        "Xwayland is missing: install it (package xwayland) and log "
+                        "back in, or use an X11 session instead.";
+        return false;
+    }
+
+    return true;
 }
 
 unsigned long PluginView::findWindow (const String& title)
