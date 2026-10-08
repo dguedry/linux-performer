@@ -1,9 +1,11 @@
 #include "ClapPluginFormat.h"
 
+#include <juce_gui_extra/juce_gui_extra.h>
 #include <clap/clap.h>
 #include <dlfcn.h>
 #include <atomic>
 #include <cstring>
+#include <poll.h>
 #include <vector>
 
 namespace perf
@@ -211,7 +213,8 @@ private:
     dropouts. Everything here that the plugin can call at any time is either
     lock-free or deferred.
 */
-class ClapInstance final : public AudioPluginInstance
+class ClapInstance final : public AudioPluginInstance,
+                           private Timer
 {
 public:
     ClapInstance (std::shared_ptr<Bundle> b, const clap_plugin_t* p, PluginDescription d)
@@ -231,15 +234,103 @@ public:
 
     ~ClapInstance() override
     {
+        stopTimer();
         if (plugin != nullptr)
         {
-            if (active) { plugin->stop_processing (plugin); plugin->deactivate (plugin); }
+            if (active) { stopProcessingFromAudioThread(); plugin->deactivate (plugin); }
             plugin->destroy (plugin);
         }
     }
 
     /** Reads the plugin's ports and parameters. Must run before the plugin is used. */
     bool initialise (double sampleRate, int blockSize, String& error);
+
+    /* CLAP plugins do their non-audio work -- including, for some, driving
+       their own GUI redraws -- in on_main_thread(), which the host has to call
+       after request_callback(). Surge XT embeds and maps its window and then
+       never paints a pixel without this, which looks exactly like a broken
+       embed. request_restart() is handled here too, since both are main-thread
+       obligations the plugin is entitled to expect. */
+    void timerCallback() override
+    {
+        auto* p = plugin;
+        if (p == nullptr) return;
+
+        if (callbackRequested.exchange (false) && p->on_main_thread != nullptr)
+            p->on_main_thread (p);
+
+        serviceFds (p);
+        serviceTimers (p);
+
+        if (restartRequested.exchange (false))
+        {
+            const auto sr = getSampleRate() > 0 ? getSampleRate() : 48000.0;
+            const auto bs = getBlockSize()  > 0 ? getBlockSize()  : 512;
+            prepareToPlay (sr, bs);
+        }
+    }
+
+    /** Poll whatever the plugin registered and tell it which are ready. This is
+        how a Linux plugin gets to read its own X11 socket: it has no event loop
+        of its own and relies on the host to notice and call back. */
+    void serviceFds (const clap_plugin_t* p)
+    {
+        std::vector<FdEntry> snapshot;
+        {
+            const ScopedLock sl (fdLock);
+            snapshot = fds;
+        }
+        if (snapshot.empty()) return;
+
+        auto* ext = static_cast<const clap_plugin_posix_fd_support_t*>
+                        (p->get_extension (p, CLAP_EXT_POSIX_FD_SUPPORT));
+        if (ext == nullptr || ext->on_fd == nullptr) return;
+
+        std::vector<pollfd> pfds;
+        pfds.reserve (snapshot.size());
+        for (const auto& e : snapshot)
+        {
+            short ev = 0;
+            if (e.flags & CLAP_POSIX_FD_READ)  ev |= POLLIN;
+            if (e.flags & CLAP_POSIX_FD_WRITE) ev |= POLLOUT;
+            pfds.push_back ({ e.fd, ev, 0 });
+        }
+
+        // Zero timeout: this is a poll from inside our own timer, never a wait.
+        if (::poll (pfds.data(), (nfds_t) pfds.size(), 0) <= 0) return;
+
+        for (size_t i = 0; i < pfds.size(); ++i)
+        {
+            clap_posix_fd_flags_t got = 0;
+            if (pfds[i].revents & POLLIN)  got |= CLAP_POSIX_FD_READ;
+            if (pfds[i].revents & POLLOUT) got |= CLAP_POSIX_FD_WRITE;
+            if (pfds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) got |= CLAP_POSIX_FD_ERROR;
+            if (got != 0)
+                ext->on_fd (p, pfds[i].fd, got);
+        }
+    }
+
+    /** Fire any timer the plugin registered that is due. */
+    void serviceTimers (const clap_plugin_t* p)
+    {
+        auto* ext = static_cast<const clap_plugin_timer_support_t*>
+                        (p->get_extension (p, CLAP_EXT_TIMER_SUPPORT));
+        if (ext == nullptr || ext->on_timer == nullptr) return;
+
+        const auto now = Time::getMillisecondCounterHiRes();
+        std::vector<clap_id> due;
+        {
+            const ScopedLock sl (fdLock);
+            for (auto& t : timers)
+                if (now >= t.nextDueMs)
+                {
+                    due.push_back (t.id);
+                    t.nextDueMs = now + (double) t.periodMs;
+                }
+        }
+        for (auto id : due)
+            ext->on_timer (p, id);
+    }
 
     //==============================================================================
     const String getName() const override                   { return description.name; }
@@ -298,13 +389,155 @@ private:
     // Host callbacks. `request_*` may arrive from any thread.
     static ClapInstance* self (const clap_host_t* h) { return static_cast<ClapInstance*> (h->host_data); }
 
-    static const void* CLAP_ABI hostGetExtension (const clap_host_t*, const char*)
+    static const void* CLAP_ABI hostGetExtension (const clap_host_t* h, const char* id)
     {
-        /* No host extensions offered yet. A plugin asking for one it cannot have
-           must get null, which every plugin handles: it is the normal answer for
-           a host that does not implement something. */
+        if (h == nullptr || id == nullptr) return nullptr;
+
+        /* clap.gui has to be offered, not just answered with null: a plugin that
+           cannot ask the host to resize may decline to build its window at all,
+           which is what Surge XT does -- the editor frame comes up empty. */
+        if (std::strcmp (id, CLAP_EXT_GUI) == 0) return &hostGuiExt;
+
+        /* A Linux plugin draws its own GUI on its own X11 connection. It has no
+           event loop of its own, so it hands the host its socket and its redraw
+           timer and expects to be called back. Without these two the window
+           embeds and maps correctly and then never paints a single pixel --
+           which is exactly how Surge XT fails. */
+        if (std::strcmp (id, CLAP_EXT_POSIX_FD_SUPPORT) == 0) return &hostPosixFdExt;
+        if (std::strcmp (id, CLAP_EXT_TIMER_SUPPORT) == 0)     return &hostTimerExt;
+
+        /* Without this a plugin has to guess which thread it is on. That guess
+           happens to be right when the host has only one thread, and wrong as
+           soon as there is a separate audio thread -- which is why Surge XT
+           builds its GUI in a single-threaded test and refuses to in the real
+           out-of-process host. */
+        if (std::strcmp (id, CLAP_EXT_THREAD_CHECK) == 0) return &hostThreadCheckExt;
+
+        /* Anything else: null is the normal answer for a host that does not
+           implement something, and every plugin handles it. */
         return nullptr;
     }
+
+    //==============================================================================
+    /* Host side of clap.gui. The plugin calls these from the message thread when
+       it wants its frame resized. */
+    static void CLAP_ABI hostGuiResizeHintsChanged (const clap_host_t*) {}
+
+    static bool CLAP_ABI hostGuiRequestResize (const clap_host_t* h, uint32_t width, uint32_t height)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr) return false;
+        inst->requestedEditorSize.store (((uint64_t) width << 32) | (uint64_t) height);
+        if (auto* ed = inst->getActiveEditor())
+        {
+            Component::SafePointer<Component> sp (ed);
+            MessageManager::callAsync ([sp, width, height]
+            {
+                if (sp != nullptr)
+                    sp->setSize ((int) jmax (1u, width), (int) jmax (1u, height));
+            });
+        }
+        return true;
+    }
+
+    static bool CLAP_ABI hostGuiRequestShow (const clap_host_t*) { return false; }
+    static bool CLAP_ABI hostGuiRequestHide (const clap_host_t*) { return false; }
+    static void CLAP_ABI hostGuiClosed (const clap_host_t*, bool) {}
+
+    static constexpr clap_host_gui_t hostGuiExt
+    {
+        &hostGuiResizeHintsChanged,
+        &hostGuiRequestResize,
+        &hostGuiRequestShow,
+        &hostGuiRequestHide,
+        &hostGuiClosed
+    };
+
+    //==============================================================================
+    /* Host side of clap.posix-fd-support: the plugin's file descriptors are
+       polled on the message thread and on_fd() is called when one is ready. */
+    static bool CLAP_ABI hostRegisterFd (const clap_host_t* h, int fd, clap_posix_fd_flags_t flags)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr || fd < 0) return false;
+        const ScopedLock sl (inst->fdLock);
+        for (auto& e : inst->fds) if (e.fd == fd) { e.flags = flags; return true; }
+        inst->fds.push_back ({ fd, flags });
+        return true;
+    }
+
+    static bool CLAP_ABI hostModifyFd (const clap_host_t* h, int fd, clap_posix_fd_flags_t flags)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr) return false;
+        const ScopedLock sl (inst->fdLock);
+        for (auto& e : inst->fds) if (e.fd == fd) { e.flags = flags; return true; }
+        return false;
+    }
+
+    static bool CLAP_ABI hostUnregisterFd (const clap_host_t* h, int fd)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr) return false;
+        const ScopedLock sl (inst->fdLock);
+        for (auto it = inst->fds.begin(); it != inst->fds.end(); ++it)
+            if (it->fd == fd) { inst->fds.erase (it); return true; }
+        return false;
+    }
+
+    static constexpr clap_host_posix_fd_support_t hostPosixFdExt
+    {
+        &hostRegisterFd, &hostModifyFd, &hostUnregisterFd
+    };
+
+    //==============================================================================
+    /* Host side of clap.timer-support. The plugin asks for a period and gets
+       on_timer() at roughly that rate on the message thread. */
+    static bool CLAP_ABI hostRegisterTimer (const clap_host_t* h, uint32_t periodMs, clap_id* timerId)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr || timerId == nullptr) return false;
+        const ScopedLock sl (inst->fdLock);
+        const auto id = inst->nextTimerId++;
+        inst->timers.push_back ({ id, jmax (1u, periodMs), 0.0 });
+        *timerId = id;
+        return true;
+    }
+
+    static bool CLAP_ABI hostUnregisterTimer (const clap_host_t* h, clap_id timerId)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr) return false;
+        const ScopedLock sl (inst->fdLock);
+        for (auto it = inst->timers.begin(); it != inst->timers.end(); ++it)
+            if (it->id == timerId) { inst->timers.erase (it); return true; }
+        return false;
+    }
+
+    static constexpr clap_host_timer_support_t hostTimerExt
+    {
+        &hostRegisterTimer, &hostUnregisterTimer
+    };
+
+    //==============================================================================
+    /* Host side of clap.thread-check. */
+    static bool CLAP_ABI hostIsMainThread (const clap_host_t*)
+    {
+        return MessageManager::existsAndIsCurrentThread();
+    }
+
+    static bool CLAP_ABI hostIsAudioThread (const clap_host_t* h)
+    {
+        auto* inst = self (h);
+        if (inst == nullptr) return false;
+        const auto id = inst->audioThreadId.load();
+        return id != nullptr && id == Thread::getCurrentThreadId();
+    }
+
+    static constexpr clap_host_thread_check_t hostThreadCheckExt
+    {
+        &hostIsMainThread, &hostIsAudioThread
+    };
 
     static void CLAP_ABI hostRequestRestart (const clap_host_t* h)  { self (h)->restartRequested.store (true); }
     static void CLAP_ABI hostRequestProcess (const clap_host_t*)    {}
@@ -322,12 +555,31 @@ private:
     const clap_plugin_audio_ports_t* audioPorts = nullptr;
     const clap_plugin_note_ports_t* notePorts = nullptr;
 
-    bool active = false, processing = false, hasNoteInput = false;
+    bool active = false, hasNoteInput = false;
+    std::atomic<bool> processing { false };     // set by the audio thread
+    std::atomic<bool> wantProcessing { false }; // set by whoever prepares us
+
+    void stopProcessingFromAudioThread();
     bool noteDialectMidi = true;         // false = CLAP's own note events
     int mainInChannels = 0, mainOutChannels = 2;
 
     Array<ClapParameter*> clapParams;    // owned by AudioProcessor
     std::atomic<bool> restartRequested { false }, callbackRequested { false };
+    std::atomic<uint64_t> requestedEditorSize { 0 };   // width<<32 | height
+
+    /* Registered by the plugin through clap.posix-fd-support and
+       clap.timer-support, serviced on the message thread. */
+    struct FdEntry    { int fd; clap_posix_fd_flags_t flags; };
+    struct TimerEntry { clap_id id; uint32_t periodMs; double nextDueMs; };
+    /* Whichever thread last called processBlock. The plugin is entitled to ask
+       whether it is on the audio thread, and the honest answer is "the one the
+       host actually processes on", which we only learn by being called. */
+    std::atomic<void*> audioThreadId { nullptr };
+
+    CriticalSection fdLock;
+    std::vector<FdEntry> fds;
+    std::vector<TimerEntry> timers;
+    clap_id nextTimerId = 1;
     int64_t steadyTime = 0;
 
     /* Single-producer/single-consumer ring: the message thread writes, the
@@ -455,21 +707,37 @@ bool ClapInstance::initialise (double sampleRate, int blockSize, String& error)
 
     description.numInputChannels  = mainInChannels;
     description.numOutputChannels = mainOutChannels;
+    /* 60 Hz: this services the plugin's registered fds and timers as well as
+       its main-thread callbacks, and a GUI redrawing at 30 fps wants to be
+       polled faster than it draws. The poll is non-blocking and does nothing
+       at all until the plugin registers something. */
+    startTimerHz (60);
+
     return true;
+
 }
 
 void ClapInstance::prepareToPlay (double sampleRate, int blockSize)
 {
     if (plugin == nullptr) return;
 
-    if (active) { if (processing) plugin->stop_processing (plugin); plugin->deactivate (plugin); }
-    active = processing = false;
+    if (active)
+    {
+        stopProcessingFromAudioThread();
+        plugin->deactivate (plugin);
+    }
+    active = false;
 
     setRateAndBufferSizeDetails (sampleRate, blockSize);
 
+    /* activate() is a main-thread call; start_processing() is not. CLAP is
+       strict about this and a plugin may refuse to run at all if the host gets
+       it wrong -- Surge XT reports "called on wrong thread" and then never
+       draws its GUI. So processing is started by the audio thread itself, at
+       the top of the first block after activation. */
     if (! plugin->activate (plugin, sampleRate, 1u, (uint32_t) jmax (1, blockSize))) return;
     active = true;
-    processing = plugin->start_processing (plugin);
+    wantProcessing.store (true);
 
     inPtrs.assign ((size_t) jmax (1, mainInChannels), nullptr);
     outPtrs.assign ((size_t) jmax (1, mainOutChannels), nullptr);
@@ -500,15 +768,35 @@ void ClapInstance::prepareToPlay (double sampleRate, int blockSize)
 void ClapInstance::releaseResources()
 {
     if (plugin == nullptr || ! active) return;
-    if (processing) plugin->stop_processing (plugin);
+    stopProcessingFromAudioThread();
     plugin->deactivate (plugin);
-    active = processing = false;
+    active = false;
+}
+
+/* stop_processing() belongs to the audio thread too. By the time this is
+   called the audio thread is no longer running blocks for us, so the honest
+   thing is to stop it here and accept that this one call is made from
+   whichever thread is tearing the plugin down -- the alternative is leaving
+   the plugin processing forever. Plugins accept this because it mirrors what
+   every host does on teardown. */
+void ClapInstance::stopProcessingFromAudioThread()
+{
+    wantProcessing.store (false);
+    if (processing.exchange (false) && plugin != nullptr && plugin->stop_processing != nullptr)
+        plugin->stop_processing (plugin);
 }
 
 void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
 {
+    audioThreadId.store (Thread::getCurrentThreadId());
+
+    /* This is the audio thread, which is the only place CLAP allows
+       start_processing() to be called from. */
+    if (active && wantProcessing.load() && ! processing.load() && plugin != nullptr)
+        processing.store (plugin->start_processing != nullptr && plugin->start_processing (plugin));
+
     const int numSamples = buffer.getNumSamples();
-    if (plugin == nullptr || ! processing || numSamples <= 0)
+    if (plugin == nullptr || ! processing.load() || numSamples <= 0)
     {
         for (int ch = getTotalNumInputChannels(); ch < buffer.getNumChannels(); ++ch)
             buffer.clear (ch, 0, numSamples);
@@ -715,37 +1003,62 @@ public:
         auto* plugin = owner.getPlugin();
         auto* gui = owner.gui;
 
-        if (gui != nullptr && gui->create != nullptr
-            && gui->create (plugin, CLAP_WINDOW_API_X11, false))
-        {
-            created = true;
-
-            uint32_t w = 600, h = 400;
-            if (gui->get_size != nullptr) gui->get_size (plugin, &w, &h);
-            setSize ((int) jmax (64u, w), (int) jmax (64u, h));
-
-            /* Parent the plugin into our own window. addToDesktop gives this
-               component a native peer whose handle CLAP can use. */
-            addToDesktop (0);
-            if (auto* peer = getPeer())
-            {
-                clap_window_t win {};
-                win.api = CLAP_WINDOW_API_X11;
-                win.x11 = (unsigned long) (pointer_sized_int) peer->getNativeHandle();
-                if (gui->set_parent != nullptr && gui->set_parent (plugin, &win))
-                    if (gui->show != nullptr) gui->show (plugin);
-            }
-        }
-        else
+        if (gui == nullptr || gui->create == nullptr
+            || ! gui->create (plugin, CLAP_WINDOW_API_X11, false))
         {
             setSize (400, 120);
+            return;
         }
+
+        created = true;
+
+        /* X11 embedding is XEmbed, which is a protocol and not just a reparent:
+           the client waits to be told it has been embedded before it will draw.
+           Doing the reparent by hand gives a correctly sized, completely blank
+           window. XEmbedComponent speaks it -- and with no client window id it
+           runs the host-initiated flow, which is the order CLAP uses: we supply
+           a window, the plugin parents itself into it. */
+        /* withIgnoreXembedMapped matters here. XEmbedComponent normally waits to
+           see XEMBED_MAPPED on a client window it discovered itself before it
+           maps anything. A CLAP plugin is handed the host window and parents
+           itself into it, so there is no discovery and the flag is never read
+           -- the plugin is correctly embedded inside a window that is never
+           mapped, and the editor stays blank. JUCE's own plugin hosting sets
+           this for the same reason. */
+        embed = std::make_unique<XEmbedComponent> (XEmbedComponentOptions{}
+                                                       .withWantsKeyboardFocus (true)
+                                                       .withAllowForeignWidgetToResizeComponent (true)
+                                                       .withIgnoreXembedMapped (true));
+        addAndMakeVisible (*embed);
+
+        uint32_t w = 600, h = 400;
+        if (gui->get_size != nullptr && ! gui->get_size (plugin, &w, &h)) { w = 600; h = 400; }
+        setSize ((int) jmax (64u, w), (int) jmax (64u, h));
+
+        setResizable (gui->can_resize != nullptr && gui->can_resize (plugin), false);
     }
 
     ~ClapEditor() override
     {
+        if (embed != nullptr) embed->removeClient();
         if (created && owner.gui != nullptr && owner.gui->destroy != nullptr)
             owner.gui->destroy (owner.getPlugin());
+    }
+
+    /* The host window exists once we are in a window, not in the constructor,
+       so the plugin cannot be parented any earlier than this. */
+    void parentHierarchyChanged() override  { attachIfPossible(); refreshEmbedMapping(); }
+    void visibilityChanged() override       { attachIfPossible(); refreshEmbedMapping(); }
+
+    void resized() override
+    {
+        if (embed != nullptr)
+        {
+            embed->setBounds (getLocalBounds());
+            embed->updateEmbeddedBounds();
+        }
+        if (attached)
+            sendSizeToPlugin ((uint32_t) jmax (1, getWidth()), (uint32_t) jmax (1, getHeight()));
     }
 
     void paint (Graphics& g) override
@@ -758,8 +1071,102 @@ public:
     }
 
 private:
+    /* set_size must only ever be given a size adjust_size has approved -- a
+       plugin may reject anything else, and Surge XT does, by refusing the size
+       and warning about it. Returns the size actually agreed. */
+    std::pair<uint32_t, uint32_t> sendSizeToPlugin (uint32_t w, uint32_t h, bool evenIfNotAttached = false)
+    {
+        auto* gui = owner.gui;
+        auto* plugin = owner.getPlugin();
+        if (gui == nullptr || gui->set_size == nullptr) return { w, h };
+        if (! evenIfNotAttached && ! attached) return { w, h };
+        if (gui->can_resize == nullptr || ! gui->can_resize (plugin)) return { w, h };
+
+        if (gui->adjust_size != nullptr)
+        {
+            uint32_t aw = w, ah = h;
+            if (gui->adjust_size (plugin, &aw, &ah) && aw > 0 && ah > 0)
+            { w = aw; h = ah; }
+        }
+        gui->set_size (plugin, w, h);
+        return { w, h };
+    }
+
+    /* XEmbedComponent only maps its X11 windows while the component is
+       showing, and it learns that from a listener that does not fire for every
+       way a component can start showing. The out-of-process host creates the
+       editor before the window is made visible, so the mapping check runs once
+       with isShowing() false and never again: the plugin is correctly parented
+       into a window that is never mapped, and nothing is drawn. Nudging the
+       bounds re-runs the check once we really are showing. */
+    void refreshEmbedMapping()
+    {
+        if (embed == nullptr || ! isShowing()) return;
+
+        const auto b = embed->getBounds();
+        if (b.isEmpty()) return;
+
+        embed->setBounds (b.withHeight (b.getHeight() + 1));
+        embed->setBounds (b);
+        embed->updateEmbeddedBounds();
+    }
+
+    void attachIfPossible()
+    {
+        if (attached || ! created || embed == nullptr) return;
+
+        /* Wait until this component is genuinely on screen. A plugin asked to
+           embed into a window that is not yet showing can simply decline to
+           build its GUI -- Surge XT does, and the editor then stays blank
+           forever because nothing asks it again. isShowing() is the honest
+           test: it means this component and every parent is visible and has a
+           peer. */
+        if (! isShowing() || getPeer() == nullptr) return;
+
+        auto* gui = owner.gui;
+        auto* plugin = owner.getPlugin();
+        if (gui == nullptr || gui->set_parent == nullptr) return;
+
+        embed->setBounds (getLocalBounds());
+        const auto hostWindow = embed->getHostWindowID();
+        if (hostWindow == 0) return;
+
+        /* The order clap/ext/gui.h sets out: scale, then size, then parent,
+           then show. Size after parenting leaves plugins drawing wrongly. */
+        if (gui->set_scale != nullptr)
+            if (const auto scale = getPeer()->getPlatformScaleFactor(); scale > 0.0)
+                gui->set_scale (plugin, scale);
+
+        uint32_t w = 0, h = 0;
+        if (gui->get_size == nullptr || ! gui->get_size (plugin, &w, &h) || w == 0 || h == 0)
+        {
+            w = (uint32_t) jmax (1, getWidth());
+            h = (uint32_t) jmax (1, getHeight());
+        }
+        if (gui->can_resize != nullptr && gui->can_resize (plugin))
+        {
+            const auto agreed = sendSizeToPlugin (w, h, true);
+            w = agreed.first; h = agreed.second;
+        }
+
+        clap_window_t win {};
+        win.api = CLAP_WINDOW_API_X11;
+        win.x11 = hostWindow;
+        if (! gui->set_parent (plugin, &win)) return;
+
+        attached = true;
+        if (gui->show != nullptr) gui->show (plugin);
+
+        if ((int) w != getWidth() || (int) h != getHeight())
+            setSize ((int) jmax (1u, w), (int) jmax (1u, h));
+
+        embed->updateEmbeddedBounds();
+    }
+
     ClapInstance& owner;
+    std::unique_ptr<XEmbedComponent> embed;
     bool created = false;
+    bool attached = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClapEditor)
 };
