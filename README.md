@@ -161,10 +161,10 @@ once there are enough songs to need one.
 **GUI** beside each input's program puts that plugin's own interface on the
 tablet -- not a picture of it, but the working editor:
 
-![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](docs/images/tablet-plugin-gui.png)
+![IK Multimedia's Hammond B-3X mirrored to the tablet: the real drawbars, the Leslie and the vibrato, drawn by the plugin itself](docs/images/tablet-plugin-gui.png)
 
-Everything works: drag those drawbars, browse Kontakt's library, open a menu,
-load a different patch. Input travels back to the plugin, so the tablet is a
+Everything works: pull those drawbars, kick the Leslie from slow to fast, open a
+menu, load a different patch. Input travels back to the plugin, so the tablet is a
 second screen and mouse for it rather than a remote with a fixed set of buttons.
 A laptop or phone on the same network does the same job -- it is a web page, so
 whatever you point at it is a full editor for every plugin in the rig.

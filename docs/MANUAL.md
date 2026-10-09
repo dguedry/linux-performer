@@ -379,10 +379,11 @@ If the program is a split or a layer with more than one instrument, GUI asks
 which one you meant -- an organ over a pad has two interfaces and only you know
 which. Programs with no plugins have no button at all.
 
-![Kontakt's Vintage Organs mirrored to the tablet: the real drawbars, drawn by the plugin itself](images/tablet-plugin-gui.png)
+![IK Multimedia's Hammond B-3X mirrored to the tablet: the real drawbars, the Leslie and the vibrato, drawn by the plugin itself](images/tablet-plugin-gui.png)
 
 That is the plugin itself, not a drawing of it, and it is fully interactive:
-drag those drawbars, browse the library, open a menu, load a different patch.
+pull those drawbars, kick the Leslie from slow to fast, open a menu, load a
+different patch.
 Input travels back to the plugin, so the tablet works as a second screen and
 mouse rather than a remote with a fixed set of buttons -- and a laptop or phone
 on the same network does the same, because it is only a web page.
