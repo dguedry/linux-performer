@@ -43,7 +43,9 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
 
     addAndMakeVisible (captureBtn);
     captureBtn.setColour (TextButton::buttonColourId, accentDim);
-    captureBtn.setTooltip ("Store what every keyboard is playing right now, and the tempo, in the selected song");
+    captureBtn.setTooltip ("Save what every keyboard is playing right now, and the tempo, into the selected "
+                           "song -- this is how you change which sounds a song loads: select it, change the "
+                           "programs, then press this");
     captureBtn.onClick = [this] { captureIntoSelectedSong(); };
 
     addAndMakeVisible (editBtn);
@@ -404,8 +406,36 @@ void SongsPanel::editSelectedSong()
     if (selectedSong < 0 || selectedSong >= (int) songs.size()) return;
     const auto& sg = songs[(size_t) selectedSong];
 
+    /* What this song currently loads, so the dialog is not a dead end for
+       someone who opened it looking for the sounds. They are not editable
+       here on purpose: a song stores whatever the rig is set to, so the way
+       to change them is to set the rig up and press Capture, and a second way
+       of saying it would be a second thing to keep in step. */
+    const auto& inputs = engine.getSetup().inputs;
+    StringArray loads;
+    for (int i = 0; i < (int) inputs.size(); ++i)
+    {
+        const int prog = sg.programFor (i);
+        const auto& in = inputs[(size_t) i];
+        if (prog < 0 || prog >= (int) in.programs.size())
+        {
+            loads.add (in.name + ": left alone");
+            continue;
+        }
+        const auto& pd = in.programs[(size_t) prog];
+        loads.add (in.name + ": " + String (prog).paddedLeft ('0', 3)
+                     + (pd.name.isNotEmpty() ? " " + pd.name : ""));
+    }
+
+    const String whatItLoads =
+        loads.isEmpty() ? String ("This song has no sounds stored yet.")
+                        : ("Loads " + loads.joinIntoString (", ") + ".");
+
     auto* w = new AlertWindow ("Edit song",
-                               "The name, and anything you want to read on the stand.",
+                               whatItLoads
+                                 + "\n\nTo change those, close this, set each keyboard to the sound you "
+                                   "want and press Capture.\n\nThe name, and anything you want to "
+                                   "read on the stand:",
                                MessageBoxIconType::NoIcon);
     w->addTextEditor ("name", sg.name);
     w->addTextEditor ("notes", sg.notes);
