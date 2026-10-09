@@ -8,6 +8,10 @@
     See Source/Ipc/Protocol.h for the wire protocol.
 */
 
+// For setWindowAbove: JUCE's X11 wrappers are only exposed on request.
+#if JUCE_LINUX || defined (__linux__)
+ #define JUCE_GUI_BASICS_INCLUDE_XHEADERS 1
+#endif
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -20,6 +24,48 @@
 #endif
 #include <iostream>
 #include <mutex>
+
+namespace
+{
+    /* Add or remove _NET_WM_STATE_ABOVE on a window that already exists, by
+       the EWMH client message a window manager expects for a mapped window.
+
+       Not Component::setAlwaysOnTop: on X11 JUCE cannot change that in place,
+       so it destroys the X window and creates a new one with the hint set at
+       birth. For an editor being mirrored that is the one thing that must not
+       happen -- x11vnc is bound to the window id, and the plugin's own GUI is
+       parented into that X window. */
+    void setWindowAbove (juce::ComponentPeer* peer, bool above)
+    {
+       #if JUCE_LINUX
+        if (peer == nullptr) return;
+        auto* xws = juce::XWindowSystem::getInstance();
+        auto* display = xws->getDisplay();
+        if (display == nullptr) return;
+
+        auto* sym = juce::X11Symbols::getInstance();
+        const auto aboveAtom = juce::XWindowSystemUtilities::Atoms::getCreating (display, "_NET_WM_STATE_ABOVE");
+        const auto root = sym->xRootWindow (display, sym->xDefaultScreen (display));
+
+        XClientMessageEvent m {};
+        m.type         = ClientMessage;
+        m.display      = display;
+        m.window       = (::Window) peer->getNativeHandle();
+        m.message_type = xws->getAtoms().windowState;
+        m.format       = 32;
+        m.data.l[0]    = above ? 1 : 0;        // _NET_WM_STATE_ADD / _NET_WM_STATE_REMOVE
+        m.data.l[1]    = (long) aboveAtom;
+        m.data.l[2]    = 0;
+        m.data.l[3]    = 1;                    // source: a normal application
+
+        juce::XWindowSystemUtilities::ScopedXLock lock;
+        sym->xSendEvent (display, root, false, SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*) &m);
+        sym->xFlush (display);
+       #else
+        juce::ignoreUnused (peer, above);
+       #endif
+    }
+}
 #include <map>
 #include <algorithm>
 #include <cstdlib>
@@ -193,9 +239,9 @@ private:
                 if (instance == nullptr) return fail ("no plugin");
                 MemoryOutputStream out;
                 auto& params = instance->getParameters();
-                const auto tAll = Time::getMillisecondCounterHiRes();
+                const auto tAll = juce::Time::getMillisecondCounterHiRes();
                 const auto midi = queryMidiAssignments (*instance);
-                const auto tVals = Time::getMillisecondCounterHiRes();
+                const auto tVals = juce::Time::getMillisecondCounterHiRes();
                 out.writeInt (params.size());
                 for (auto* p : params)
                 {
@@ -217,7 +263,7 @@ private:
                 }
                 if (timeParams())
                     std::fprintf (stderr, "[params] %d parameters: midi probe %.0f ms, values+names %.0f ms\n",
-                                  params.size(), tVals - tAll, Time::getMillisecondCounterHiRes() - tVals);
+                                  params.size(), tVals - tAll, juce::Time::getMillisecondCounterHiRes() - tVals);
                 return ok (out);
             }
 
@@ -301,7 +347,7 @@ private:
                    runs away to the edge of the canvas. So while the window is
                    being mirrored it stays above everything else. */
                 const bool onTop = in.readBool();
-                if (editorWindow != nullptr) editorWindow->setAlwaysOnTop (onTop);
+                if (editorWindow != nullptr) setWindowAbove (editorWindow->getPeer(), onTop);
                 return ok();
             }
 
@@ -312,7 +358,7 @@ private:
                    CPU -- plugins stop drawing when they are not visible. */
                 if (editorWindow != nullptr)
                 {
-                    editorWindow->setAlwaysOnTop (false);   // nothing is mirroring a hidden window
+                    setWindowAbove (editorWindow->getPeer(), false);   // nothing is mirroring a hidden window
                     editorWindow->setVisible (false);
                 }
                 return ok();
@@ -371,7 +417,7 @@ private:
             return result;
         }
 
-        const auto tMap0 = Time::getMillisecondCounterHiRes();
+        const auto tMap0 = juce::Time::getMillisecondCounterHiRes();
         std::map<String, int> indexById;
         for (auto* p : inst.getParameters())
             indexById[parameterId (*p)] = p->getParameterIndex();
@@ -392,7 +438,7 @@ private:
                 ++found;
             }
         if (timeParams())
-            std::fprintf (stderr, "[params] %d parameters are MIDI controller proxies (probe took %.0f ms)\n", found, Time::getMillisecondCounterHiRes() - tMap0);
+            std::fprintf (stderr, "[params] %d parameters are MIDI controller proxies (probe took %.0f ms)\n", found, juce::Time::getMillisecondCounterHiRes() - tMap0);
        #endif
         return result;
     }
