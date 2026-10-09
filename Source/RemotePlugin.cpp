@@ -335,6 +335,13 @@ bool RemotePlugin::showEditor (const String& title)
     return ok;
 }
 
+bool RemotePlugin::keepEditorOnTop (bool onTop)
+{
+    MemoryOutputStream out;
+    out.writeBool (onTop);
+    return request (ipc::Msg::keepEditorOnTop, out.getMemoryBlock(), kEditorTimeoutMs);
+}
+
 bool RemotePlugin::hideEditor()
 {
     editorOpen.store (false);

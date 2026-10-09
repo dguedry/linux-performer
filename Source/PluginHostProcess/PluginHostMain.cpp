@@ -290,12 +290,31 @@ private:
                 return ok();
             }
 
+            case ipc::Msg::keepEditorOnTop:
+            {
+                /* A tablet drives this window through x11vnc, which delivers
+                   each tap by moving the real pointer onto the window and
+                   clicking. That only reaches the plugin if nothing on this
+                   desktop covers it. With a browser on the same machine it is
+                   worse than a lost tap: the browser sees the moved pointer as
+                   a mouse move, sends it to the plugin again, and the cursor
+                   runs away to the edge of the canvas. So while the window is
+                   being mirrored it stays above everything else. */
+                const bool onTop = in.readBool();
+                if (editorWindow != nullptr) editorWindow->setAlwaysOnTop (onTop);
+                return ok();
+            }
+
             case ipc::Msg::hideEditor:
                 /* Hidden, not destroyed: destroying it takes the plugin's editor
                    with it (the window owns it), so the next open would pay the
                    whole cost again. A hidden window costs some memory and no
                    CPU -- plugins stop drawing when they are not visible. */
-                if (editorWindow != nullptr) editorWindow->setVisible (false);
+                if (editorWindow != nullptr)
+                {
+                    editorWindow->setAlwaysOnTop (false);   // nothing is mirroring a hidden window
+                    editorWindow->setVisible (false);
+                }
                 return ok();
 
             case ipc::Msg::quit:

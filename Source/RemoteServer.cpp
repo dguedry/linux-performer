@@ -1525,8 +1525,14 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                                  + "  " + def.name + " / " + plugin->getName()))
                         *error = "Could not open that plugin's window.";
                     else
+                    {
                         *title = in.name + " / " + String (prog).paddedLeft ('0', 3)
                               + "  " + def.name + " / " + plugin->getName();
+                        /* Whether just opened or already open: from now on a
+                           tablet is looking at it, and taps only land if it is
+                           not covered. See keepEditorOnTop in the host. */
+                        plugin->keepEditorOnTop (true);
+                    }
                 }
             }
             ready->signal();

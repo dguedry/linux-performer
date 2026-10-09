@@ -85,6 +85,7 @@ enum class Msg : uint32_t
     setState,             // blob
     showEditor,           // title
     hideEditor,
+    keepEditorOnTop,      // bool: while a tablet mirrors the window, nothing may cover it
     getInfo,              // -> name, isInstrument, hasEditor, latency
     quit,
 

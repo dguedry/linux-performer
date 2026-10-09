@@ -88,6 +88,8 @@ public:
     bool setState (const juce::MemoryBlock&);
     bool showEditor (const juce::String& title);
     bool hideEditor();
+    /** Keep the editor above every other window, or stop doing so. */
+    bool keepEditorOnTop (bool onTop);
     bool isEditorOpen() const                               { return editorOpen.load(); }
 
     void setListener (Listener* l)                          { listener = l; }
