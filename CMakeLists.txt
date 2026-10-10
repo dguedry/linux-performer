@@ -125,6 +125,17 @@ target_link_libraries(PerformerPluginHost PRIVATE
 add_dependencies(Performer PerformerPluginHost)
 
 # Put the helper next to the main executable so it is found at runtime.
+#
+# Done when the HELPER relinks, not only when Performer does: a change to the
+# host alone used to leave the stale copy in place, so the app kept launching
+# an old helper while the new one sat unused in its own artefacts directory --
+# and every test of the new code was silently running the old one.
+# Performer's own post-build copy is kept for the first build, when its
+# directory may not exist yet when the helper is linked.
+add_custom_command(TARGET PerformerPluginHost POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:Performer>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:PerformerPluginHost> $<TARGET_FILE_DIR:Performer>/performer-plugin-host
+    COMMENT "Copying performer-plugin-host next to Performer")
 add_custom_command(TARGET Performer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:PerformerPluginHost> $<TARGET_FILE_DIR:Performer>/performer-plugin-host
     COMMENT "Copying performer-plugin-host next to Performer")
