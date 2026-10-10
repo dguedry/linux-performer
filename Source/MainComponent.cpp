@@ -1106,6 +1106,28 @@ public:
         addBtn.onClick    = [this] { if (auto m = makeMapping()) engine.addMapping (owner.getSelectedInput(), owner.getEditedProgram(), *m); };
         updateBtn.onClick = [this] { int r = table.getSelectedRow(); if (r >= 0) if (auto m = makeMapping()) engine.updateMapping (owner.getSelectedInput(), owner.getEditedProgram(), r, *m); };
         removeBtn.onClick = [this] { int r = table.getSelectedRow(); if (r >= 0) engine.removeMapping (owner.getSelectedInput(), owner.getEditedProgram(), r); };
+
+        /* Min, max and pass-through apply to the selected mapping as they are
+           changed. They used to take effect only on Update, and nothing said
+           so: a pass-through ticked and never pressed home left the CC consumed
+           by its mapping and never reaching the plugin, which looked like the
+           plugin ignoring the controller. Source and target still go through
+           Update, since changing those is making a different mapping. */
+        auto applyEdit = [this]
+        {
+            const int r = table.getSelectedRow();
+            const auto* def = currentProgram();
+            if (r < 0 || def == nullptr || r >= (int) def->mappings.size()) return;
+            auto m = def->mappings[(size_t) r];
+            m.minValue    = (float) minSlider.getValue();
+            m.maxValue    = (float) maxSlider.getValue();
+            m.passThrough = passToggle.getToggleState();
+            engine.updateMapping (owner.getSelectedInput(), owner.getEditedProgram(), r, m);
+            owner.markDirty();
+        };
+        minSlider.onValueChange = applyEdit;
+        maxSlider.onValueChange = applyEdit;
+        passToggle.onClick      = applyEdit;
     }
 
     void refresh()

@@ -283,7 +283,7 @@ private:
     struct Event
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
-                    songStep, songLearn };
+                    songStep, songLearn, editorClosed };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -338,7 +338,7 @@ private:
     void unloadProgram (InputRuntime&, int program);
     void destroyProgramPlugins (ProgramRuntime&);
     void destroyNode (PluginNode*);
-    void captureProgramState (int inputIndex, ProgramRuntime&);
+    bool captureProgramState (int inputIndex, ProgramRuntime&);   // true if anything changed
     void resolveMappings (ProgramRuntime&, const ProgramDef&);
     void openMidiDevices();
     void housekeeping();
@@ -358,6 +358,7 @@ private:
 
     void noteParameterTouched (int inputIndex, int program, int slot, int effect, int paramIndex);
     void notePluginDied (int inputIndex, int program, int slot, int effect);
+    void noteEditorClosed (int inputIndex, int program);
     void notifyContent (int inputIndex, int program);
 
     //==============================================================================

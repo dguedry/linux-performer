@@ -6,8 +6,22 @@
 #include "LowLatency.h"
 #include "BinaryData.h"
 #include <cstdio>
+#include <csignal>
+#include <atomic>
 
-class PerformerApplication : public juce::JUCEApplication
+namespace
+{
+    /* A termination signal becomes an ordinary quit. Without this, SIGTERM
+       ends the process without running shutdown(), so the save that happens
+       on quit never does -- and anything a plugin was told since the last
+       autosave is gone. Only a flag is set here, because a signal handler may
+       do almost nothing; the message thread notices it and quits properly. */
+    std::atomic<bool> quitSignalled { false };
+    void onQuitSignal (int) { quitSignalled.store (true); }
+}
+
+class PerformerApplication : public juce::JUCEApplication,
+                             private juce::Timer
 {
 public:
     const juce::String getApplicationName() override       { return "Performer"; }
@@ -55,6 +69,17 @@ public:
         host   = std::make_unique<perf::PluginHost> (*settings);
         engine = std::make_unique<perf::Engine> (*host, *settings);
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine, *settings, initialSetup);
+
+        std::signal (SIGTERM, onQuitSignal);
+        std::signal (SIGINT,  onQuitSignal);
+        std::signal (SIGHUP,  onQuitSignal);
+        startTimer (250);
+    }
+
+    void timerCallback() override
+    {
+        if (quitSignalled.exchange (false))
+            systemRequestedQuit();
     }
 
     /** Early builds stored settings in ~/Performer; move them to ~/.config/Performer once. */
@@ -79,6 +104,7 @@ public:
 
     void shutdown() override
     {
+        stopTimer();
         perf::HelpWindow::close();   // a help window must not outlive the app
         mainWindow.reset();     // closes plugin editors and autosaves
         engine.reset();

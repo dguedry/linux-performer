@@ -36,6 +36,10 @@ struct Engine::PluginNode : public RemotePlugin::Listener
     {
         engine.notePluginDied (inputIndex.load(), program, slotIndex.load(), effectIndex.load());
     }
+    void remoteEditorClosed (RemotePlugin&) override
+    {
+        engine.noteEditorClosed (inputIndex.load(), program);
+    }
 
     Engine& engine;
     std::atomic<int> inputIndex;
@@ -750,6 +754,16 @@ void Engine::selectProgram (int inputIndex, int program)
 
     auto* next = ensureProgramLoaded (inputIndex, program);
 
+    /* Pull the outgoing program's state into the model before leaving it.
+       Anything set inside a plugin's own window -- SWAM being told which
+       controller is expression -- lives only in that process until it is
+       captured, and switching away is the natural moment: the program change
+       already marks the setup dirty and brings the autosave forward, so this
+       costs no extra write, it just makes the write current. `active` only
+       changes on this thread, so reading it outside the lock is safe. */
+    if (in.active != nullptr && in.active != next)
+        captureProgramState (inputIndex, *in.active);
+
     {
         const ScopedLock sl (lock);
         if (in.active != next)
@@ -1066,18 +1080,22 @@ void Engine::destroyNode (PluginNode* node)
     node->plugin.reset();
 }
 
-void Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
+bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
 {
-    if (! validInput (inputIndex)) return;
+    if (! validInput (inputIndex)) return false;
     auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) rt.program];
 
-    auto capture = [] (PluginNode& node, MemoryBlock& dest)
+    bool changed = false;
+    auto capture = [&changed] (PluginNode& node, MemoryBlock& dest)
     {
         if (node.alive())
         {
             MemoryBlock mb;
-            if (node.plugin->getState (mb) && mb.getSize() > 0)
+            if (node.plugin->getState (mb) && mb.getSize() > 0 && mb != dest)
+            {
                 dest = std::move (mb);
+                changed = true;
+            }
         }
     };
 
@@ -1091,6 +1109,7 @@ void Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
     }
     for (size_t e = 0; e < rt.effects.size() && e < def.effects.size(); ++e)
         capture (*rt.effects[e], def.effects[e].state);
+    return changed;
 }
 
 //==============================================================================
@@ -1509,6 +1528,12 @@ void Engine::noteParameterTouched (int inputIndex, int program, int slot, int ef
     postEvent ({ Event::touched, inputIndex, program, slot, effect, paramIndex });
 }
 
+void Engine::noteEditorClosed (int inputIndex, int program)
+{
+    // Reader thread; the capture is an IPC round trip that belongs on the message thread.
+    postEvent ({ Event::editorClosed, inputIndex, program, 0, 0, 0 });
+}
+
 void Engine::notePluginDied (int inputIndex, int program, int slot, int effect)
 {
     postEvent ({ Event::pluginDied, inputIndex, program, slot, effect, 0 });
@@ -1606,6 +1631,20 @@ void Engine::handleAsyncUpdate()
             case Event::touched:
                 lastTouched = { e.input, e.a, e.b, e.c, e.d };
                 listeners.call ([&] (Listener& l) { l.parameterTouched (e.input, e.a, e.b, e.c, e.d); });
+                break;
+
+            case Event::editorClosed:
+                /* The window is where a plugin's own settings get changed, and
+                   closing it is as near to "done" as there is. Capture the
+                   program's state now and say the program changed, which marks
+                   the setup dirty for the next autosave. Byte-comparing the
+                   state would not do: SWAM and Kontakt return a different blob
+                   on every read, so a real change and no change look alike. */
+                if (auto* rt = getLoaded (e.input, e.a))
+                {
+                    captureProgramState (e.input, *rt);
+                    listeners.call ([&] (Listener& l) { l.programContentChanged (e.input, e.a); });
+                }
                 break;
 
             case Event::pluginLoaded:
