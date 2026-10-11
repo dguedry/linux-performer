@@ -128,13 +128,20 @@ public:
             setResizable (true, false);
             setResizeLimits (960, 600, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
-            setVisible (true);
-            // DocumentWindow::setIcon only feeds JUCE's own title bar; the X11 window icon
-            // (_NET_WM_ICON, what the task switcher shows) is set on the peer, which exists
-            // once the window is visible.
+
+            /* The X11 window icon (_NET_WM_ICON, what the panel shows) has to be
+               on the window BEFORE it is mapped. Cinnamon's window list reads
+               a window's icon when the window appears and does not look again;
+               set afterwards, as it was, the panel kept the generic gear it had
+               found at map time. Adding to the desktop while still invisible
+               creates the X window unmapped, so the icon goes on first and the
+               map comes with it. DocumentWindow::setIcon only feeds JUCE's own
+               title bar, so both are set. */
             const auto icon = juce::ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize);
             setIcon (icon);
+            addToDesktop (getDesktopWindowStyleFlags());
             if (auto* peer = getPeer()) peer->setIcon (icon);
+            setVisible (true);
         }
 
         ~MainWindow() override

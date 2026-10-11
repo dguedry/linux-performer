@@ -519,8 +519,11 @@ private:
             setResizable (editor->isResizable(), false);
             setResizeLimits (200, 100, 8192, 8192);
             centreWithSize (getWidth(), getHeight());
-            setVisible (true);
+            // Icon before the map, for the same reason as the main window: the
+            // panel reads it once, when the window appears.
+            addToDesktop (getDesktopWindowStyleFlags());
             if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
+            setVisible (true);
 
             // yabridge (Wine-bridged plugins) only learns where the embedded window is on
             // screen when the window the plugin's editor was attached to -- our content
