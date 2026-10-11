@@ -1964,9 +1964,9 @@ void MainComponent::loadSetupFile (const File& f)
         showStatus ("Loaded " + f.getFileName());
 }
 
-bool MainComponent::writeSetupFile (const File& f)
+bool MainComponent::writeSetupFile (const File& f, int captureBudgetMs)
 {
-    auto r = engine.captureSetup().saveToFile (f);
+    auto r = engine.captureSetup (captureBudgetMs).saveToFile (f);
     if (r.failed()) { showStatus ("Save failed: " + r.getErrorMessage()); return false; }
     dirty = false;
     lastAutosaveTime = Time::getMillisecondCounterHiRes();
@@ -2013,8 +2013,12 @@ void MainComponent::saveSetup (bool forceAskForFile)
 
 void MainComponent::saveOnQuit()
 {
-    if (currentFile != File()) writeSetupFile (currentFile);
-    else                       writeSetupFile (getAutosaveFile());
+    /* Bounded: a host that has stopped answering must not hold the exit.
+       Eight seconds covers every healthy host on a big rig; a plugin that
+       cannot answer in that time keeps the state the model last had for it,
+       which the autosave and the program changes have been keeping current. */
+    if (currentFile != File()) writeSetupFile (currentFile, 8000);
+    else                       writeSetupFile (getAutosaveFile(), 8000);
 }
 
 //==============================================================================

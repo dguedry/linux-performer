@@ -84,7 +84,9 @@ public:
     bool setParameterValue (int index, float value);
 
     // State / editor --------------------------------------------------------------------
-    bool getState (juce::MemoryBlock&);
+    /** `timeoutMs` < 0 means the usual 30 s. A quit passes something short:
+        a host that has stopped answering must not hold the exit for long. */
+    bool getState (juce::MemoryBlock&, int timeoutMs = -1);
     bool setState (const juce::MemoryBlock&);
     bool showEditor (const juce::String& title);
     bool hideEditor();
@@ -109,7 +111,12 @@ public:
     int getMissedBlocks() const                             { return missedBlocks.load(); }
 
     /** Asks the process to quit and reaps it (or kills it after a grace period). */
-    void shutdown();
+    /** Tells the host to quit and does not wait. Call on every plugin first,
+        then shutdown() on each: they then all exit at once rather than one
+        after another, each with its own full wait. */
+    void requestQuit();
+    /** Reaps the host, giving it `patienceMs` to exit on its own before SIGKILL. */
+    void shutdown (int patienceMs = 3000);
 
 private:
     bool request (ipc::Msg, const juce::MemoryBlock& payload, int timeoutMs, juce::MemoryBlock* response = nullptr);

@@ -24,10 +24,10 @@ namespace
 
     std::atomic<int> shmCounter { 0 };
 
-    void reapProcess (pid_t pid)
+    void reapProcess (pid_t pid, int patienceMs)
     {
         // Give it a moment to exit on its own, then insist.
-        for (int i = 0; i < 60; ++i)
+        for (int i = 0; i < juce::jmax (1, patienceMs / 50); ++i)
         {
             int status = 0;
             const auto r = ::waitpid (pid, &status, WNOHANG);
@@ -316,9 +316,26 @@ bool RemotePlugin::setParameterValue (int index, float value)
     return request (ipc::Msg::setParameterValue, out.getMemoryBlock(), kControlTimeoutMs);
 }
 
-bool RemotePlugin::getState (MemoryBlock& state)
+bool RemotePlugin::getState (MemoryBlock& state, int timeoutMs)
 {
-    return request (ipc::Msg::getState, {}, kStateTimeoutMs, &state);
+    return request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state);
+}
+
+void RemotePlugin::requestQuit()
+{
+    if (! alive.load()) return;
+    /* Fire and forget: the reply, if any, is not worth waiting for here, and
+       the reaper in shutdown() will see the process go. */
+    {
+        const std::lock_guard<std::mutex> l (sendMutex);
+        ipc::sendFrame (socketFd, ipc::Msg::quit, nextRequestId++, {});
+    }
+    if (shm != nullptr)
+    {
+        shm->quit.store (1);
+        ::sem_post (&shm->request);
+    }
+    alive.store (false);
 }
 
 bool RemotePlugin::setState (const MemoryBlock& state)
@@ -559,7 +576,7 @@ bool RemotePlugin::finishProcess (float* outL, float* outR, const timespec& dead
 }
 
 //==============================================================================
-void RemotePlugin::shutdown()
+void RemotePlugin::shutdown (int patienceMs)
 {
     if (pid < 0 && socketFd < 0 && shm == nullptr) return;
 
@@ -588,7 +605,7 @@ void RemotePlugin::shutdown()
     if (pid > 0)
     {
         const pid_t p = pid;
-        std::thread ([p] { reapProcess (p); }).detach();
+        std::thread ([p, patienceMs] { reapProcess (p, patienceMs); }).detach();
         pid = -1;
     }
 

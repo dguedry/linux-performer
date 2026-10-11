@@ -64,7 +64,7 @@ private:
     void newSetup();
     void openSetup();
     void saveSetup (bool forceAskForFile);
-    bool writeSetupFile (const juce::File&);
+    bool writeSetupFile (const juce::File&, int captureBudgetMs = -1);
     void setCurrentFile (const juce::File&);
     juce::File getAutosaveFile() const;
 

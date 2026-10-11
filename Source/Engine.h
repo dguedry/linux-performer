@@ -72,7 +72,10 @@ public:
     const Setup& getSetup() const                   { return setup; }
     void loadSetup (Setup newSetup);
     /** Pulls the live plugin states into the model and returns a snapshot for saving. */
-    Setup captureSetup();
+    /** `budgetMs` >= 0 bounds the whole capture: hosts that have stopped
+        answering share one deadline instead of each costing a full wait. The
+        model keeps whatever it last had for a plugin that does not answer. */
+    Setup captureSetup (int budgetMs = -1);
     void setPreloadAllPrograms (bool);
     void setReleaseTailSeconds (double);
 
@@ -336,7 +339,10 @@ private:
 
     // runtime management (message thread)
     void rebuildRuntimes();
-    void teardownRuntimes();
+    /** `captureFirst` pulls state into the model before destroying plugins;
+        false when the model is about to go too. `budgetMs` >= 0 bounds the
+        whole teardown. */
+    void teardownRuntimes (bool captureFirst = true, int budgetMs = -1);
     ProgramRuntime* ensureProgramLoaded (int inputIndex, int program);
     std::unique_ptr<ProgramRuntime> buildProgram (int inputIndex, int program);
     std::unique_ptr<SlotRuntime> buildSlot (int inputIndex, int program, int slotIndex, const SlotDef&);
@@ -345,9 +351,9 @@ private:
     void loaderThreadFunc();
     void attachLoaded (LoadResult&);
     void unloadProgram (InputRuntime&, int program);
-    void destroyProgramPlugins (ProgramRuntime&);
-    void destroyNode (PluginNode*);
-    bool captureProgramState (int inputIndex, ProgramRuntime&);   // true if anything changed
+    void destroyProgramPlugins (ProgramRuntime&, int patienceMs = 3000);
+    void destroyNode (PluginNode*, int patienceMs = 3000);
+    bool captureProgramState (int inputIndex, ProgramRuntime&, int timeoutMs = -1);   // true if anything changed
     void resolveMappings (ProgramRuntime&, const ProgramDef&);
     void openMidiDevices();
     void housekeeping();

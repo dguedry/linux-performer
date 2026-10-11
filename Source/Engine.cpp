@@ -186,7 +186,11 @@ Engine::~Engine()
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
     deviceManager.removeChangeListener (this);
-    teardownRuntimes();
+    /* No capture: whatever was worth saving was saved by the window on its
+       way out, and the model dies with this object. Bounded, because a quit
+       that waits on every host that has stopped answering is a quit that
+       takes minutes. */
+    teardownRuntimes (false, 6000);
 
     // Stop the loader: drop queued jobs, cut short a load in progress, join.
     {
@@ -240,11 +244,21 @@ void Engine::loadSetup (Setup newSetup)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
-Setup Engine::captureSetup()
+Setup Engine::captureSetup (int budgetMs)
 {
+    const auto deadline = Time::getMillisecondCounter() + (uint32) jmax (0, budgetMs);
     for (int i = 0; i < (int) runtimes.size(); ++i)
         for (auto& [prog, rt] : runtimes[(size_t) i]->loaded)
-            captureProgramState (i, *rt);
+        {
+            int timeout = -1;
+            if (budgetMs >= 0)
+            {
+                const auto now = Time::getMillisecondCounter();
+                if (now >= deadline) continue;            // out of time: keep what we have
+                timeout = (int) jmin ((uint32) 30000, deadline - now);
+            }
+            captureProgramState (i, *rt, timeout);
+        }
     return setup;
 }
 
@@ -344,7 +358,7 @@ void Engine::rebuildRuntimes()
     }
 }
 
-void Engine::teardownRuntimes()
+void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
 {
     // Take everything away from the audio thread first.
     std::vector<std::unique_ptr<InputRuntime>> old;
@@ -354,18 +368,37 @@ void Engine::teardownRuntimes()
         runtimes.clear();
     }
 
+    const auto deadline = Time::getMillisecondCounter() + (uint32) jmax (0, budgetMs);
+    auto remaining = [&] { return budgetMs < 0 ? -1 : (int) jmax (0, (int) (deadline - Time::getMillisecondCounter())); };
+
     for (int i = 0; i < (int) old.size(); ++i)
     {
         auto& in = *old[(size_t) i];
         in.active = nullptr;
         in.releasing.clear();
-        for (auto& [prog, rt] : in.loaded)
-        {
-            if (i < (int) setup.inputs.size())
-                captureProgramState (i, *rt);
-            destroyProgramPlugins (*rt);
-        }
+        if (captureFirst)
+            for (auto& [prog, rt] : in.loaded)
+                if (i < (int) setup.inputs.size())
+                    captureProgramState (i, *rt, remaining());
     }
+
+    /* Two phases. Every host is told to quit first, so they all wind down at
+       the same time; then each is reaped with what patience is left. One
+       after another, each with its own full wait, seventeen hosts of which
+       three had stopped answering took minutes to leave. */
+    for (auto& in : old)
+        for (auto& [prog, rt] : in->loaded)
+        {
+            for (auto& s : rt->slots)
+            {
+                for (auto& e : s->effects) if (e->plugin != nullptr) e->plugin->requestQuit();
+                if (s->plugin != nullptr) s->plugin->requestQuit();
+            }
+            for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->requestQuit();
+        }
+    for (auto& in : old)
+        for (auto& [prog, rt] : in->loaded)
+            destroyProgramPlugins (*rt, budgetMs < 0 ? 3000 : jmin (3000, remaining()));
 }
 
 //==============================================================================
@@ -1073,41 +1106,41 @@ void Engine::unloadProgram (InputRuntime& in, int program)
     destroyProgramPlugins (*rt);
 }
 
-void Engine::destroyProgramPlugins (ProgramRuntime& rt)
+void Engine::destroyProgramPlugins (ProgramRuntime& rt, int patienceMs)
 {
     for (auto& s : rt.slots)
     {
-        for (auto& e : s->effects) destroyNode (e.get());
-        destroyNode (s.get());
+        for (auto& e : s->effects) destroyNode (e.get(), patienceMs);
+        destroyNode (s.get(), patienceMs);
     }
-    for (auto& e : rt.effects) destroyNode (e.get());
+    for (auto& e : rt.effects) destroyNode (e.get(), patienceMs);
     rt.slots.clear();
     rt.effects.clear();
 }
 
-void Engine::destroyNode (PluginNode* node)
+void Engine::destroyNode (PluginNode* node, int patienceMs)
 {
     if (node == nullptr) return;
     nodeRegistry.erase (node->id);       // a load still in flight will be discarded on arrival
     node->loading.store (false);
     if (node->plugin == nullptr) return;
     node->plugin->setListener (nullptr);
-    node->plugin->shutdown();
+    node->plugin->shutdown (patienceMs);
     node->plugin.reset();
 }
 
-bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt)
+bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt, int timeoutMs)
 {
     if (! validInput (inputIndex)) return false;
     auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) rt.program];
 
     bool changed = false;
-    auto capture = [&changed] (PluginNode& node, MemoryBlock& dest)
+    auto capture = [&changed, timeoutMs] (PluginNode& node, MemoryBlock& dest)
     {
         if (node.alive())
         {
             MemoryBlock mb;
-            if (node.plugin->getState (mb) && mb.getSize() > 0 && mb != dest)
+            if (node.plugin->getState (mb, timeoutMs) && mb.getSize() > 0 && mb != dest)
             {
                 dest = std::move (mb);
                 changed = true;
