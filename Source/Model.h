@@ -128,6 +128,24 @@ struct InputDef
     number per input rather than a single program. -1 means "leave that
     keyboard alone", which is what you want for an input you are not using in
     this song, or a pad you keep set up between numbers. */
+/** A chart for a song: a lead sheet, a scan, a typed chord chart. The file
+    lives in the setup's charts folder (see chartsFolderFor) and is referred to
+    by name only, so a setup and its folder can be moved together. */
+struct ChartRef
+{
+    juce::String file;     // file name within the charts folder
+    juce::String title;    // what the tablet calls it; the file name if empty
+
+    juce::String displayName() const { return title.isNotEmpty() ? title : file; }
+
+    juce::var toVar() const;
+    static ChartRef fromVar (const juce::var&);
+};
+
+/** The sidecar folder for a setup file: MySetup.performer.json keeps its
+    charts in MySetup.performer.charts/, beside it. */
+juce::File chartsFolderFor (const juce::File& setupFile);
+
 struct SongDef
 {
     juce::String name;
@@ -145,6 +163,10 @@ struct SongDef
     /** Free text: a key, a count-in, "capo 2", whatever helps on stage. Shown
         on the tablet under the song name. */
     juce::String notes;
+
+    /** Sheet music for the stand. Empty for most songs; the tablet shows a
+        Chart button only when there is something to show. */
+    std::vector<ChartRef> charts;
 
     int programFor (int inputIndex) const
     {

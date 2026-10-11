@@ -20,6 +20,7 @@ namespace perf
     song remembers it. Typing program numbers into boxes would be the same work
     done twice, and wrong more often. */
 class SongsPanel : public juce::Component,
+                   public juce::FileDragAndDropTarget,
                    private juce::ListBoxModel,
                    private juce::Timer
 {
@@ -88,8 +89,8 @@ private:
     juce::ListBox songsList, setList;
     ListProxy songsModel { *this, false }, setModel { *this, true };
 
-    juce::TextButton addBtn { "+ Add" }, removeBtn { "- Remove" },
-                     captureBtn { "Capture" }, editBtn { "Edit" };
+    juce::TextButton addBtn { "+" }, removeBtn { "-" },
+                     captureBtn { "Capture" }, editBtn { "Edit" }, chartBtn { "Chart..." };
     juce::TextButton toSetBtn { "Add to set >" }, fromSetBtn { "< Remove" },
                      upBtn { "^" }, downBtn { "v" };
     juce::TextButton songUpBtn { "^" }, songDownBtn { "v" };
@@ -99,6 +100,12 @@ private:
     int selectedInSet = -1;       // position within the current set
 
     std::unique_ptr<juce::FileChooser> chooser;
+
+    // Sheet music: a file copied into the setup's charts folder and listed on the song.
+    void showChartMenu();
+    void attachChartFile (const juce::File&, int songIndex);
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SongsPanel)
 };

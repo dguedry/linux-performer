@@ -227,6 +227,32 @@ InputDef InputDef::fromVar (const var& v)
 
 //==============================================================================
 //==============================================================================
+var ChartRef::toVar() const
+{
+    DynamicObject::Ptr o (new DynamicObject());
+    o->setProperty ("file", file);
+    if (title.isNotEmpty()) o->setProperty ("title", title);
+    return var (o.get());
+}
+
+ChartRef ChartRef::fromVar (const var& v)
+{
+    ChartRef c;
+    if (auto* o = v.getDynamicObject())
+    {
+        c.file  = o->getProperty ("file").toString();
+        c.title = o->getProperty ("title").toString();
+    }
+    return c;
+}
+
+File chartsFolderFor (const File& setupFile)
+{
+    if (setupFile == File()) return {};
+    // "MySetup.performer.json" -> "MySetup.performer.charts"
+    return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
+}
+
 var SongDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -237,6 +263,12 @@ var SongDef::toVar() const
     // Only written when set, so a setup without songs stays byte-identical.
     if (tempoBpm > 0.0)    o->setProperty ("tempoBpm", tempoBpm);
     if (notes.isNotEmpty()) o->setProperty ("notes", notes);
+    if (! charts.empty())
+    {
+        juce::Array<juce::var> arr;
+        for (const auto& c : charts) arr.add (c.toVar());
+        o->setProperty ("charts", arr);
+    }
     return var (o);
 }
 
@@ -248,6 +280,10 @@ SongDef SongDef::fromVar (const var& v)
         s.name     = o->getProperty ("name").toString();
         s.tempoBpm = (double) o->getProperty ("tempoBpm");
         s.notes    = o->getProperty ("notes").toString();
+        if (auto* arr = o->getProperty ("charts").getArray())
+            for (const auto& c : *arr)
+                if (auto ref = ChartRef::fromVar (c); ref.file.isNotEmpty())
+                    s.charts.push_back (ref);
         if (auto* arr = o->getProperty ("programs").getArray())
             for (auto& p : *arr)
                 s.programs.push_back ((int) p);

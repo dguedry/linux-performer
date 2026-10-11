@@ -210,6 +210,36 @@ With more than eight songs a **Find a song** box appears. It matches the name,
 the stage notes, and the programs -- so "piano" or "002" finds a song you cannot
 quite name.
 
+## Charts on the stand
+
+A song can carry its sheet music -- a lead sheet, a scan, a typed chord
+chart -- and the tablet shows it. Press **Chart...** under the songs list to
+attach a file, or drop one onto a song. PDF, PNG, JPEG, GIF and WebP are
+accepted, plain text (`.txt`) is shown as it is in a monospace face, and a
+ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
+words. A song may have several; they appear as tabs.
+
+The file is copied, not referred to: it goes into a folder beside the setup
+named after it -- `MySetup.performer.json` keeps its charts in
+`MySetup.performer.charts/` -- so the pair can be moved or backed up
+together, and **Save As** brings the folder along. Removing a chart from a
+song takes it off the song and leaves the file in the folder.
+
+A PDF is rendered to page images when it is attached, so every tablet shows
+it the same way and can turn it a page at a time: tap the right third of the
+page or swipe left for the next page, the left third or swipe right for the
+previous. The rendering uses `pdftoppm` (package `poppler-utils`); where it
+is not installed the PDF is handed to the browser as it is, which on some
+tablets means scrolling rather than paging.
+
+On the tablet, a song with a chart shows a **Chart** button on its row. It
+opens the chart in its own tab, which **follows the set**: when the song
+changes -- from a footswitch, the tablet or a program change -- the tab moves
+to the new song's chart, and says so when the new song has none. Press
+**Follow** to pin it to the song you are looking at instead. A song's
+`notes` line is still the place for a key or a count-in; a chart is for what
+does not fit on one line.
+
 ## Slots: instruments inside a program
 
 Each slot is one plugin instrument. The controls, left to right:

@@ -574,6 +574,22 @@ void Engine::setSongName (int songIndex, const String& name)
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
 
+void Engine::addSongChart (int songIndex, const ChartRef& chart)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size() || chart.file.isEmpty()) return;
+    setup.songs[(size_t) songIndex].charts.push_back (chart);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
+void Engine::removeSongChart (int songIndex, int chartIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;
+    auto& charts = setup.songs[(size_t) songIndex].charts;
+    if (chartIndex < 0 || chartIndex >= (int) charts.size()) return;
+    charts.erase (charts.begin() + chartIndex);
+    listeners.call ([] (Listener& l) { l.setupChanged(); });
+}
+
 void Engine::setSongNotes (int songIndex, const String& notes)
 {
     if (songIndex < 0 || songIndex >= (int) setup.songs.size()) return;

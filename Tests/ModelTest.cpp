@@ -347,6 +347,25 @@ int main()
         CHECK (perf::ClapPluginFormat::pluginIdFromIdentifier (spaced) == "com.fabfilter.proq.4");
     }
 
+    // ---- charts on a song -----------------------------------------------
+    {
+        SongDef a; a.name = "With charts";
+        a.charts.push_back ({ "sheet.pdf", "Lead sheet" });
+        a.charts.push_back ({ "words.cho", "" });
+        const auto back = SongDef::fromVar (a.toVar());
+        CHECK (back.charts.size() == 2);
+        CHECK (back.charts[0].file == "sheet.pdf" && back.charts[0].title == "Lead sheet");
+        CHECK (back.charts[1].file == "words.cho" && back.charts[1].displayName() == "words.cho");
+
+        // A song without charts writes no key, so older setups stay byte-identical.
+        SongDef plain; plain.name = "Plain";
+        CHECK (! plain.toVar().getDynamicObject()->hasProperty ("charts"));
+
+        // The folder sits beside the setup, named after it.
+        CHECK (chartsFolderFor (juce::File ("/x/MySetup.performer.json")).getFullPathName() == "/x/MySetup.performer.charts");
+        CHECK (chartsFolderFor (juce::File()) == juce::File());
+    }
+
     std::printf (failures == 0 ? "ModelTest: all checks passed\n" : "ModelTest: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

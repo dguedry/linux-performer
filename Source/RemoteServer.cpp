@@ -1,6 +1,7 @@
 #include "RemoteServer.h"
 #include "MappingSuggestions.h"
 #include "PluginView.h"
+#include "Charts.h"
 #include <thread>
 #include <fcntl.h>
 #include "BinaryData.h"
@@ -123,6 +124,9 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
                margin:18px 0 8px; }
   .parts { font-size:13px; color:var(--dim); margin-top:4px; }
   .notes { font-size:14px; color:#d8a657; margin-top:4px; font-style:italic; }
+  .song .chart { margin-left:10px; padding:8px 14px; border-radius:10px; background:#2b2d35; color:#d7dbe2;
+                 font-size:14px; font-weight:600; flex:0 0 auto; }
+  .song.on .chart { background:#06121f; color:#fff; }
   .song.on .notes { color:#06121f; }
   .songbody { flex:1; min-width:0; }
 
@@ -345,6 +349,18 @@ function renderSets(s) {
       const bpm = document.createElement("span"); bpm.className = "bpm";
       bpm.textContent = Math.round(sg.tempo) + " bpm";
       b.appendChild(bpm);
+    }
+    /* Sheet music, in its own tab that follows the set from then on. A tap
+       here must not also pick the song: that is the row's job. */
+    if (sg.charts && sg.charts.length) {
+      const ch = document.createElement("span"); ch.className = "chart";
+      ch.textContent = "Chart";
+      ch.onclick = (ev) => {
+        ev.stopPropagation();
+        const w = window.open("/chart.html?song=" + songIndex + "&t=" + encodeURIComponent(token), "performer-chart");
+        if (w) w.focus();
+      };
+      b.appendChild(ch);
     }
 
     b.onclick = async () => {
@@ -658,6 +674,213 @@ RemoteServer::~RemoteServer()
 
    Served from here rather than patched into /usr/share/novnc, which belongs to
    the distribution and would be overwritten by an update. */
+/* The stand. One song's chart, full screen, following the set: when the
+   song changes -- footswitch, tablet, program change -- this page moves to
+   the new song's chart by itself, like a stand that turns its own pages.
+   A PDF that has been rendered is shown a page at a time (tap the right
+   third or swipe for the next page, the left third for the previous); one
+   that has not is handed to the browser. Images stretch to the width and
+   pinch to zoom. Text is monospace; ChordPro gets its chords set above
+   the words. */
+static const char* kChartHtml = R"HTML(<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes,viewport-fit=cover">
+<meta name="theme-color" content="#15161c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Chart</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; padding:0; background:#15161c; color:#d7dbe2;
+              font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #bar { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; padding:8px 12px;
+         background:#1e1f24; border-bottom:1px solid #2b2d35; }
+  #bar a, #bar button { background:#2b2d35; color:#d7dbe2; border:0; border-radius:10px; padding:8px 14px;
+                        font-size:15px; font-weight:600; text-decoration:none; }
+  #bar button.on { background:#4f9dff; color:#06121f; }
+  #title { flex:1; font-size:17px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #tabs { display:flex; gap:6px; padding:8px 12px; flex-wrap:wrap; }
+  #tabs:empty { display:none; }
+  #tabs button { background:#26282f; color:#9aa0ab; border:0; border-radius:8px; padding:6px 12px; font-size:14px; }
+  #tabs button.on { background:#3a3d47; color:#fff; }
+  #page { min-height:70vh; }
+  #page img { display:block; width:100%; height:auto; background:#fff; }
+  #page iframe { display:block; width:100%; height:calc(100vh - 60px); border:0; background:#fff; }
+  #page pre { margin:0; padding:16px; font:15px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap;
+              background:#fbf8f1; color:#1b1b1b; min-height:70vh; }
+  #page pre .c { color:#9b2d2d; font-weight:700; }
+  #page pre .d { color:#6b5e3c; font-style:italic; }
+  #empty { padding:40px 20px; text-align:center; color:#9aa0ab; font-size:18px; }
+  #nav { position:fixed; left:0; right:0; bottom:0; display:flex; justify-content:space-between; padding:10px 12px;
+         pointer-events:none; }
+  #nav button { pointer-events:auto; background:#2b2d35cc; color:#fff; border:0; border-radius:12px; padding:12px 18px;
+                font-size:16px; font-weight:700; }
+  #nav span { align-self:center; background:#2b2d35cc; border-radius:10px; padding:6px 12px; font-size:14px; }
+</style></head>
+<body>
+<div id="bar">
+  <a id="back" href="/">&#8592; Set list</a>
+  <div id="title"></div>
+  <button id="follow" class="on" title="Move to each song's chart as the set moves">Follow</button>
+</div>
+<div id="tabs"></div>
+<div id="page"></div>
+<div id="nav" style="display:none"><button id="prev">&#8249; Prev</button><span id="where"></span><button id="next">Next &#8250;</button></div>
+<script>
+let token = new URLSearchParams(location.search).get("t") || localStorage.getItem("t") || "";
+if (token) localStorage.setItem("t", token);
+document.getElementById("back").href = "/?t=" + encodeURIComponent(token);
+async function api(path) {
+  const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token));
+  if (!r.ok) throw new Error("Performer answered " + r.status);
+  return r.json();
+}
+const withToken = (u) => u + "?t=" + encodeURIComponent(token);
+const esc = (t) => t.replace(/[&<>]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[ch]));
+
+let follow = true;
+let song = parseInt(new URLSearchParams(location.search).get("song") || "-1", 10);
+let chart = parseInt(new URLSearchParams(location.search).get("c") || "0", 10);
+let pageNo = 1, state = null, shownKey = "";
+
+document.getElementById("follow").onclick = () => {
+  follow = !follow;
+  document.getElementById("follow").className = follow ? "on" : "";
+};
+
+/* Which song the set is on, as an index into state.songs. */
+function playingSong(s) {
+  const st = (s.sets || [])[s.currentSet];
+  if (!st || s.currentSong < 0 || s.currentSong >= st.songs.length) return -1;
+  return st.songs[s.currentSong];
+}
+
+/* ChordPro: [C]chords inside the words become a line of chords above them,
+   placed by character so a monospace face lines them up. Directives in
+   braces become a title, a subtitle or a comment; the rest are dropped. */
+function renderChordPro(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, "");
+    const m = line.match(/^\{\s*([a-z_]+)\s*:?\s*(.*?)\s*\}$/i);
+    if (m) {
+      const k = m[1].toLowerCase(), v = esc(m[2]);
+      if (k === "title" || k === "t") out.push('<span class="d" style="font-size:20px;font-weight:700;font-style:normal">' + v + "</span>");
+      else if (k === "subtitle" || k === "st" || k === "artist") out.push('<span class="d">' + v + "</span>");
+      else if (k === "comment" || k === "c" || k === "ci" || k === "cb") out.push('<span class="d">(' + v + ")</span>");
+      continue;
+    }
+    if (line.indexOf("[") < 0) { out.push(esc(line)); continue; }
+    let chords = "", words = "";
+    const re = /\[([^\]]*)\]/g; let last = 0, mm;
+    while ((mm = re.exec(line)) !== null) {
+      words += line.slice(last, mm.index);
+      while (chords.length < words.length) chords += " ";
+      chords += mm[1] + " ";
+      last = re.lastIndex;
+    }
+    words += line.slice(last);
+    out.push('<span class="c">' + esc(chords.replace(/\s+$/, "")) + "</span>");
+    out.push(esc(words));
+  }
+  return out.join("\n");
+}
+
+async function showChart() {
+  const s = state; if (!s) return;
+  const sg = (s.songs || [])[song];
+  const page = document.getElementById("page"), tabs = document.getElementById("tabs"), nav = document.getElementById("nav");
+  document.getElementById("title").textContent = sg ? (sg.name || "(unnamed)") : "";
+  if (!sg || !sg.charts || !sg.charts.length) {
+    tabs.innerHTML = ""; nav.style.display = "none";
+    page.innerHTML = '<div id="empty">' + (sg ? "No chart for this song" : "No song") + "</div>";
+    shownKey = ""; return;
+  }
+  if (chart < 0 || chart >= sg.charts.length) chart = 0;
+  const c = sg.charts[chart];
+  const key = song + "/" + chart + "/" + (c.pages || 0) + "/" + pageNo;
+  if (key === shownKey) return;          // nothing new to draw
+  shownKey = key;
+
+  tabs.innerHTML = ""; nav.style.display = "none";
+  if (sg.charts.length > 1) {
+    sg.charts.forEach((cc, i) => {
+      const b = document.createElement("button"); b.textContent = cc.title; b.className = i === chart ? "on" : "";
+      b.onclick = () => { chart = i; pageNo = 1; shownKey = ""; showChart(); };
+      tabs.appendChild(b);
+    });
+  }
+
+  if (c.kind === "pdf" && c.pages > 0) {
+    if (pageNo > c.pages) pageNo = c.pages;
+    page.innerHTML = '<img src="' + withToken(c.url + "/page/" + pageNo) + '" alt="page ' + pageNo + '">';
+    if (c.pages > 1) {
+      nav.style.display = "flex";
+      document.getElementById("where").textContent = pageNo + " / " + c.pages;
+      if (pageNo < c.pages) new Image().src = withToken(c.url + "/page/" + (pageNo + 1));   // have the next ready
+    }
+  } else if (c.kind === "pdf") {
+    page.innerHTML = '<iframe src="' + withToken(c.url) + '"></iframe>'
+                   + '<div id="empty"><a style="color:#4f9dff" href="' + withToken(c.url) + '" target="_blank">Open the PDF</a></div>';
+  } else if (c.kind === "image") {
+    page.innerHTML = '<img src="' + withToken(c.url) + '" alt="' + esc(c.title) + '">';
+  } else {
+    try {
+      const r = await fetch(withToken(c.url)); const text = await r.text();
+      page.innerHTML = "<pre>" + (c.kind === "chordpro" ? renderChordPro(text) : esc(text)) + "</pre>";
+    } catch (e) { page.innerHTML = '<div id="empty">Could not load the chart</div>'; }
+  }
+}
+
+function turn(delta) {
+  const sg = state && state.songs[song]; const c = sg && sg.charts && sg.charts[chart];
+  if (!c || !(c.pages > 1)) return;
+  const n = Math.min(c.pages, Math.max(1, pageNo + delta));
+  if (n !== pageNo) { pageNo = n; shownKey = ""; showChart(); window.scrollTo(0, 0); }
+}
+document.getElementById("prev").onclick = () => turn(-1);
+document.getElementById("next").onclick = () => turn(+1);
+/* Tap the right third for the next page, the left third for the previous;
+   the middle is left alone so a pinch or a scroll does not turn pages. */
+document.getElementById("page").addEventListener("click", (ev) => {
+  const w = window.innerWidth;
+  if (ev.clientX > w * 2 / 3) turn(+1); else if (ev.clientX < w / 3) turn(-1);
+});
+let touchX = null;
+document.addEventListener("touchstart", (e) => { touchX = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+document.addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX; touchX = null;
+  if (Math.abs(dx) > 80) turn(dx < 0 ? +1 : -1);
+}, { passive: true });
+
+let rev = null, lastPlaying = null;
+async function refresh() {
+  try {
+    const s = await api("/api/state");
+    const first = state === null;
+    state = s;
+    /* Follow moves with the set, it does not override a choice: the song
+       named in the URL stays until the set actually changes song. Opened
+       without one, the playing song is shown. */
+    const now = playingSong(s);
+    if (song < 0) song = now;
+    else if (follow && lastPlaying !== null && now >= 0 && now !== lastPlaying && now !== song)
+    { song = now; chart = 0; pageNo = 1; shownKey = ""; }
+    lastPlaying = now;
+    if (first || s.revision !== rev) { rev = s.revision; shownKey = ""; }
+    await showChart();
+  } catch (e) {
+    document.getElementById("title").textContent = e.message;
+  }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body></html>
+)HTML";
+
 static const char* kPluginViewHtml = R"HTML(<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -1141,6 +1364,29 @@ String RemoteServer::stateJson() const
             if (sg.tempoBpm > 0.0)     so->setProperty ("tempo", sg.tempoBpm);
             if (sg.notes.isNotEmpty()) so->setProperty ("notes", sg.notes);
 
+            /* Charts, by index: the page asks for /chart/<song>/<n>, never for
+               a file name, so nothing a tablet sends can name a path. A PDF
+               that has been rendered says how many pages it has. */
+            if (! sg.charts.empty())
+            {
+                const int songIndex = (int) (&sg - songs.data());
+                const auto folder = engine.getChartsFolder();
+                Array<var> chartArr;
+                for (int c = 0; c < (int) sg.charts.size(); ++c)
+                {
+                    const auto& ref = sg.charts[(size_t) c];
+                    const auto file = folder.getChildFile (ref.file);
+                    DynamicObject::Ptr co (new DynamicObject());
+                    co->setProperty ("title", ref.displayName());
+                    co->setProperty ("kind", chartKindFor (file));
+                    co->setProperty ("url", "/chart/" + String (songIndex) + "/" + String (c));
+                    if (chartKindFor (file) == "pdf")
+                        co->setProperty ("pages", chartPages (file).size());
+                    chartArr.add (var (co.get()));
+                }
+                so->setProperty ("charts", chartArr);
+            }
+
             /* What each keyboard plays, named rather than numbered: "B3" is
                what you are looking for on a stand, not "002". */
             Array<var> parts;
@@ -1560,6 +1806,53 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
             else                     o->setProperty ("port", session.webPort);
         }
         sendResponse (sock, "200 OK", "application/json", JSON::toString (var (o.get()), true));
+        return;
+    }
+    if (path.startsWith ("/chart.html"))
+    {
+        sendBytes (sock, "200 OK", "text/html; charset=utf-8", kChartHtml, (int) strlen (kChartHtml));
+        return;
+    }
+    if (path.startsWith ("/chart/"))
+    {
+        /* /chart/<song>/<n>            the file itself
+           /chart/<song>/<n>/page/<p>   one rendered page of a PDF, from 1
+           Everything is resolved through the model by index; the only file
+           name used is the one the setup recorded, inside the charts folder. */
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "text/plain", "bad token"); return; }
+        const auto parts = StringArray::fromTokens (path.upToFirstOccurrenceOf ("?", false, false).fromFirstOccurrenceOf ("/chart/", false, false), "/", {});
+        const int song = parts.size() > 0 ? parts[0].getIntValue() : -1;
+        const int n    = parts.size() > 1 ? parts[1].getIntValue() : -1;
+        const int page = (parts.size() > 3 && parts[2] == "page") ? parts[3].getIntValue() : 0;
+
+        File file;
+        {
+            const auto& songs = engine.getSongs();
+            if (song >= 0 && song < (int) songs.size() && n >= 0 && n < (int) songs[(size_t) song].charts.size())
+            {
+                const auto& ref = songs[(size_t) song].charts[(size_t) n];
+                const auto folder = engine.getChartsFolder();
+                if (folder != File() && ref.file.isNotEmpty()
+                    && ! ref.file.containsAnyOf ("/\\") && ! ref.file.startsWith ("."))
+                {
+                    file = folder.getChildFile (ref.file);
+                    if (page > 0)
+                    {
+                        const auto pages = chartPages (file);
+                        file = page <= pages.size() ? pages[page - 1] : File();
+                    }
+                    if (file != File() && ! file.isAChildOf (folder)) file = File();
+                }
+            }
+        }
+        if (file == File() || ! file.existsAsFile())
+        {
+            sendResponse (sock, "404 Not Found", "text/plain", "No such chart.");
+            return;
+        }
+        MemoryBlock data;
+        if (! file.loadFileAsData (data)) { sendResponse (sock, "500 Internal Server Error", "text/plain", "Could not read the chart."); return; }
+        sendBytes (sock, "200 OK", chartContentTypeFor (file), static_cast<const char*> (data.getData()), (int) data.getSize());
         return;
     }
     if (path.startsWith ("/api/panic"))

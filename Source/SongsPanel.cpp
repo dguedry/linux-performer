@@ -1,4 +1,5 @@
 #include "SongsPanel.h"
+#include "Charts.h"
 
 namespace perf
 {
@@ -51,6 +52,11 @@ SongsPanel::SongsPanel (Engine& e) : engine (e)
     addAndMakeVisible (editBtn);
     editBtn.setTooltip ("Name, stage notes and tempo for this song");
     editBtn.onClick = [this] { editSelectedSong(); };
+
+    addAndMakeVisible (chartBtn);
+    chartBtn.setTooltip ("Sheet music for this song, shown on the tablet: attach a PDF, an image, "
+                         "a text chart or a ChordPro file -- or drop one on the song");
+    chartBtn.onClick = [this] { showChartMenu(); };
 
     addAndMakeVisible (toSetBtn);
     toSetBtn.setTooltip ("Put the selected song at the end of the set");
@@ -124,11 +130,12 @@ void SongsPanel::resized()
     songsArea.removeFromRight (4);
     songsList.setBounds (songsArea);
 
-    auto half = songButtons.removeFromLeft (songButtons.getWidth() / 2);
-    addBtn.setBounds (half.removeFromLeft (half.getWidth() / 2).reduced (1, 0));
-    removeBtn.setBounds (half.reduced (1, 0));
-    captureBtn.setBounds (songButtons.removeFromLeft (songButtons.getWidth() / 2).reduced (1, 0));
-    editBtn.setBounds (songButtons.reduced (1, 0));
+    addBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
+    removeBtn.setBounds (songButtons.removeFromLeft (28).reduced (1, 0));
+    const int third = songButtons.getWidth() / 3;
+    captureBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
+    editBtn.setBounds (songButtons.removeFromLeft (third).reduced (1, 0));
+    chartBtn.setBounds (songButtons.reduced (1, 0));
 
     setHeader.setBounds (r.removeFromTop (14));
     auto setButtons = r.removeFromBottom (26);
@@ -171,6 +178,7 @@ void SongsPanel::refresh()
     removeBtn.setEnabled (haveSong);
     captureBtn.setEnabled (haveSong);
     editBtn.setEnabled (haveSong);
+    chartBtn.setEnabled (haveSong);
     toSetBtn.setEnabled (haveSong && haveSet);
     fromSetBtn.setEnabled (haveSet && selectedInSet >= 0);
     songUpBtn.setEnabled (haveSong && selectedSong > 0);
@@ -270,6 +278,8 @@ void SongsPanel::ListProxy::paintListBoxItem (int row, Graphics& g, int w, int h
         parts.add (String (prog).paddedLeft ('0', 3)
                      + (pd.name.isNotEmpty() ? " " + pd.name : ""));
     }
+    if (! sg.charts.empty())
+        parts.add (String (CharPointer_UTF8 ("\xe2\x99\xaa")) + (sg.charts.size() > 1 ? " charts" : " chart"));
     g.setColour (playing ? Colours::white.withAlpha (0.8f) : textDim);
     g.setFont (FontOptions (10.5f));
     g.drawText (parts.isEmpty() ? "(nothing captured)" : parts.joinIntoString ("   "),
@@ -622,6 +632,99 @@ void SongsPanel::showFootswitchMenu()
         }
         refresh();
     });
+}
+
+//==============================================================================
+void SongsPanel::showChartMenu()
+{
+    const auto& songs = engine.getSongs();
+    if (selectedSong < 0 || selectedSong >= (int) songs.size()) return;
+    const auto& sg = songs[(size_t) selectedSong];
+
+    PopupMenu m;
+    m.addItem (1, "Attach a file...");
+    if (! sg.charts.empty())
+    {
+        m.addSectionHeader ("Attached");
+        for (int i = 0; i < (int) sg.charts.size(); ++i)
+            m.addItem (100 + i, "Remove " + sg.charts[(size_t) i].displayName());
+    }
+
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (chartBtn), [this, idx = selectedSong] (int r)
+    {
+        if (r == 1)
+        {
+            chooser = std::make_unique<FileChooser> ("Attach a chart",
+                                                     File::getSpecialLocation (File::userHomeDirectory),
+                                                     chartFilePatterns());
+            chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles
+                                    | FileBrowserComponent::canSelectMultipleItems,
+                                  [this, idx] (const FileChooser& fc)
+            {
+                for (const auto& f : fc.getResults()) attachChartFile (f, idx);
+            });
+        }
+        else if (r >= 100)
+        {
+            /* The entry goes; the file stays in the folder. Another song may
+               use it, and a chart is the kind of thing you want back. */
+            engine.removeSongChart (idx, r - 100);
+            refresh();
+        }
+    });
+}
+
+void SongsPanel::attachChartFile (const File& f, int songIndex)
+{
+    if (songIndex < 0 || songIndex >= (int) engine.getSongs().size()) return;
+    if (! f.existsAsFile() || ! isChartFile (f)) return;
+
+    const auto folder = engine.getChartsFolder();
+    if (folder == File()) return;
+    folder.createDirectory();
+
+    /* Copied in rather than referred to, so the setup and its charts travel
+       together. A name already in use gets a number -- unless it is the same
+       file again, which just gets listed. */
+    File dest = folder.getChildFile (f.getFileName());
+    if (dest.existsAsFile() && ! dest.hasIdenticalContentTo (f))
+        dest = folder.getNonexistentChildFile (f.getFileNameWithoutExtension(), f.getFileExtension(), true);
+    if (! dest.existsAsFile() && ! f.copyFileTo (dest)) return;
+
+    engine.addSongChart (songIndex, { dest.getFileName(), {} });
+    if (chartKindFor (dest) == "pdf")
+        prerenderPdfPagesAsync (dest);      // pages appear on the tablet as they are made
+    refresh();
+}
+
+bool SongsPanel::isInterestedInFileDrag (const StringArray& files)
+{
+    for (const auto& p : files)
+        if (isChartFile (File (p))) return true;
+    return false;
+}
+
+void SongsPanel::filesDropped (const StringArray& files, int x, int y)
+{
+    /* Dropped on a song: that song. Dropped on the set: the song at that
+       position. Anywhere else: the selected song. */
+    const auto& songs = engine.getSongs();
+    int song = -1;
+    if (songsList.getBounds().contains (x, y))
+        song = songsList.getRowContainingPosition (x - songsList.getX(), y - songsList.getY());
+    else if (setList.getBounds().contains (x, y))
+    {
+        const int pos = setList.getRowContainingPosition (x - setList.getX(), y - setList.getY());
+        const int set = engine.getCurrentSet();
+        const auto& sets = engine.getSets();
+        if (set >= 0 && set < (int) sets.size() && pos >= 0 && pos < (int) sets[(size_t) set].songs.size())
+            song = sets[(size_t) set].songs[(size_t) pos];
+    }
+    if (song < 0 || song >= (int) songs.size()) song = selectedSong;
+    if (song < 0 || song >= (int) songs.size()) return;
+
+    for (const auto& p : files)
+        attachChartFile (File (p), song);
 }
 
 } // namespace perf

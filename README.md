@@ -41,6 +41,10 @@ other plugin.
   page or a B-3X's drawbars without walking back to the computer. Nothing to
   install -- scan the code or type a short one, and add it to the home screen if
   you like. Performer can serve its own wifi network when the venue has none.
+- **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
+  song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
+  PDF pages a tap at a time and following the set from song to song. Files
+  are kept in a folder beside the setup, so the two travel together.
 
 **[Read the user manual](docs/MANUAL.md)** for everyday use, or press **Help**
 in the toolbar to read the same manual inside the app. The rest of this

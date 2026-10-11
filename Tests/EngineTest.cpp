@@ -1221,6 +1221,20 @@ int main()
             engine.removeSet (jmin (newPos, st));
         }
 
+        // Charts attach to a song and come off it again.
+        {
+            const int withChart = engine.addSong ("Charted");
+            engine.addSongChart (withChart, { "charted.pdf", "Sheet" });
+            engine.addSongChart (withChart, { "charted.cho", "" });
+            CHECK (engine.getSongs()[(size_t) withChart].charts.size() == 2);
+            engine.removeSongChart (withChart, 0);
+            CHECK (engine.getSongs()[(size_t) withChart].charts.size() == 1);
+            CHECK (engine.getSongs()[(size_t) withChart].charts[0].file == "charted.cho");
+            engine.removeSongChart (withChart, 5);                    // out of range: ignored
+            CHECK (engine.getSongs()[(size_t) withChart].charts.size() == 1);
+            engine.removeSong (withChart);
+        }
+
         // All of it survives a save and load.
         engine.setNextSongCC (80);
         engine.setPrevSongCC (81);

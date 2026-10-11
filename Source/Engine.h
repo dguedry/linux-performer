@@ -149,6 +149,15 @@ public:
         program, and the current tempo. Building a set is then "get the sound
         right, press Capture". */
     void captureSong (int songIndex);
+    void addSongChart (int songIndex, const ChartRef&);
+    void removeSongChart (int songIndex, int chartIndex);
+
+    /** The file the setup was loaded from or last saved to, or none. The
+        charts folder sits beside it, so both the desktop and the tablet
+        server derive the same place from here. */
+    void setSetupFile (const juce::File& f)  { setupFile = f; }
+    juce::File getSetupFile() const          { return setupFile; }
+    juce::File getChartsFolder() const       { return chartsFolderFor (setupFile); }
 
     /** Selects every input's program for this song and applies its tempo.
         Inputs the song leaves at -1 are not touched. */
@@ -367,6 +376,7 @@ private:
     juce::AudioDeviceManager deviceManager;
 
     Setup setup;
+    juce::File setupFile;             // see setSetupFile
     std::vector<std::unique_ptr<InputRuntime>> runtimes;
 
     /** Tap tempo. Only the recent taps count: a pause means the player has

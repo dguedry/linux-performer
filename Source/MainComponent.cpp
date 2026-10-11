@@ -1924,6 +1924,10 @@ File MainComponent::getAutosaveFile() const
 void MainComponent::setCurrentFile (const File& f)
 {
     currentFile = f;
+    /* An unsaved setup keeps its charts beside the recovery copy, so attaching
+       one before the first Save still has somewhere to go; Save As brings the
+       folder along. */
+    engine.setSetupFile (f == File() ? getAutosaveFile() : f);
     settings.setValue ("lastSetup", f.getFullPathName());
     settings.saveIfNeeded();
     fileLabel.setText (f == File() ? "(unsaved setup)" : f.getFullPathName(), dontSendNotification);
@@ -1996,7 +2000,14 @@ void MainComponent::saveSetup (bool forceAskForFile)
         auto f = fc.getResult();
         if (f == File()) return;
         if (! f.hasFileExtension ("json")) f = f.withFileExtension ("performer.json");
-        if (writeSetupFile (f)) { setCurrentFile (f); showStatus ("Saved " + f.getFileName()); }
+        if (writeSetupFile (f))
+        {
+            // The charts travel with the setup: copy the folder to the new name.
+            const auto from = engine.getChartsFolder(), to = chartsFolderFor (f);
+            if (from.isDirectory() && from != to) from.copyDirectoryTo (to);
+            setCurrentFile (f);
+            showStatus ("Saved " + f.getFileName());
+        }
     });
 }
 

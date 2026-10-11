@@ -12,6 +12,7 @@
 #include "QrCode.h"
 #include "BinaryData.h"
 #include "Engine.h"
+#include "Charts.h"
 #include "PluginHost.h"
 
 using namespace juce;
@@ -282,6 +283,35 @@ int main()
         // UTF-8 must survive the round trip through BinaryData: the manual uses
         // typographic punctuation, and mojibake here would be very visible.
         check (! manual.contains ("â€"), "the manual is not mojibake");
+    }
+
+    /* Charts: what the stand can show, and how a PDF's pages are found. */
+    {
+        check (perf::chartKindFor (File ("/x/lead.PDF")) == "pdf",       "a PDF is a pdf, whatever the case");
+        check (perf::chartKindFor (File ("/x/scan.jpeg")) == "image",    "a JPEG is an image");
+        check (perf::chartKindFor (File ("/x/song.cho")) == "chordpro",  "a .cho is ChordPro");
+        check (perf::chartKindFor (File ("/x/song.txt")) == "text",      "a .txt is text");
+        check (perf::chartKindFor (File ("/x/song.musicxml")).isEmpty(), "MusicXML is not (yet) a chart");
+        check (! perf::isChartFile (File ("/x/notes.docx")),             "a .docx is refused");
+        check (perf::chartContentTypeFor (File ("/x/a.pdf")) == "application/pdf", "PDF content type");
+        check (perf::chartContentTypeFor (File ("/x/a.png")) == "image/png",       "PNG content type");
+        check (perf::chartContentTypeFor (File ("/x/a.cho")).startsWith ("text/plain"), "ChordPro is served as text");
+        check (perf::chartPagesFolder (File ("/x/lead.pdf")).getFullPathName() == "/x/lead.pdf.pages", "pages live beside the PDF");
+
+        // Rendered pages come back in page order even past page 9.
+        const auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-charts-test");
+        tmp.deleteRecursively();
+        const auto pdf = tmp.getChildFile ("score.pdf");
+        const auto pages = perf::chartPagesFolder (pdf);
+        pages.createDirectory();
+        for (int i = 1; i <= 12; ++i)
+            pages.getChildFile ("page-" + String (i).paddedLeft ('0', 2) + ".png").replaceWithText ("x");
+        pages.getChildFile ("notes.txt").replaceWithText ("not a page");
+        const auto found = perf::chartPages (pdf);
+        check (found.size() == 12, "twelve rendered pages are found, and nothing else");
+        check (found.size() == 12 && found[9].getFileName() == "page-10.png", "page ten comes tenth");
+        check (perf::chartPages (File ("/nowhere/none.pdf")).isEmpty(), "an unrendered PDF has no pages");
+        tmp.deleteRecursively();
     }
 
     std::cout << (failures == 0 ? "\nall remote tests passed\n" : "\nremote tests FAILED\n");
