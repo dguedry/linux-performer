@@ -10,6 +10,11 @@
 #include <set>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <sys/syscall.h>
+#if defined (SYS_pidfd_open) && defined (SYS_pidfd_getfd)
+ #define HAVE_PIDFD 1
+#endif
 
 using namespace perf;
 using namespace juce;
@@ -739,6 +744,105 @@ int main()
         settle();
         auto* victim = engine.getPlugin (0, 40, 0);
         CHECK (victim != nullptr && victim->isAlive());
+        if (victim != nullptr && victim->isAlive())
+        {
+            /* No host may hold another host's control socket. The pair is made
+               on one loader thread while others are spawning; a copy that
+               leaked into a sibling would keep the socket from ever reaching
+               end-of-file when its owner dies. */
+            {
+                ChildProcess pgrep;
+                pgrep.start (StringArray { "pgrep", "-P", String ((int) ::getpid()), "-f", "plugin-host" });
+                auto hosts = StringArray::fromLines (pgrep.readAllProcessOutput().trim());
+                auto socketInodes = [] (const String& pidText)
+                {
+                    std::set<String> out;
+                    for (auto& f : File ("/proc/" + pidText.trim() + "/fd").findChildFiles (File::findFiles, false))
+                    {
+                        char buf[64] = {};
+                        const auto n = ::readlink (f.getFullPathName().toRawUTF8(), buf, sizeof (buf) - 1);
+                        if (n > 0 && String (buf).startsWith ("socket:")) out.insert (String (buf));
+                    }
+                    return out;
+                };
+                int shared = 0;
+                for (auto& a : hosts)
+                {
+                    char buf[64] = {};
+                    const auto n = ::readlink (("/proc/" + a.trim() + "/fd/3").toRawUTF8(), buf, sizeof (buf) - 1);
+                    if (n <= 0) continue;
+                    const String control (buf);
+                    for (auto& b : hosts)
+                        if (b != a && socketInodes (b).count (control) > 0) ++shared;
+                }
+                std::printf ("     %d plugin hosts; control sockets leaked into siblings: %d\n", hosts.size(), shared);
+                CHECK (hosts.size() >= 2);
+                CHECK (shared == 0);
+            }
+
+            /* A host that stops answering is put down after the state timeout,
+               not left to cost every later request the same wait. Freeze it:
+               alive, silent, like a bridged plugin whose Wine half has died. */
+            {
+                const auto frozen = victim->getHostPid();
+                CHECK (frozen > 0);
+                ::kill (frozen, SIGSTOP);
+                MemoryBlock mb;
+                const auto t0 = Time::getMillisecondCounterHiRes();
+                const bool got = victim->getState (mb, 1500);
+                const auto ms = Time::getMillisecondCounterHiRes() - t0;
+                std::printf ("     frozen host: getState returned %s after %.0f ms; %s\n", got ? "state" : "failure", ms,
+                             victim->getLastError().toRawUTF8());
+                CHECK (! got);
+                CHECK (ms >= 1400 && ms < 4000);
+                CHECK (! victim->isAlive());
+                CHECK (victim->getHostPid() == -1);
+                CHECK (::kill (frozen, 0) != 0 && errno == ESRCH);     // killed and reaped, not a zombie
+                pump (300);
+                CHECK (! engine.isPluginAlive (0, 40, 0));
+                engine.reloadPlugin (0, 40, 0);
+                settle();
+                victim = engine.getPlugin (0, 40, 0);
+                CHECK (victim != nullptr && victim->isAlive());
+            }
+
+            /* A host that dies while something else still holds its end of the
+               control socket -- no end-of-file will ever arrive -- is still
+               noticed within a moment, from the process table. */
+           #if HAVE_PIDFD
+            if (victim != nullptr && victim->isAlive())
+            {
+                const auto doomed = victim->getHostPid();
+                const int pidfd = (int) ::syscall (SYS_pidfd_open, doomed, 0u);
+                const int held  = pidfd >= 0 ? (int) ::syscall (SYS_pidfd_getfd, pidfd, 3, 0u) : -1;
+                if (held < 0)
+                {
+                    std::printf ("     skip held-socket check (pidfd_getfd: %s)\n", strerror (errno));
+                }
+                else
+                {
+                    ::kill (doomed, SIGKILL);
+                    MemoryBlock mb;
+                    const auto t0 = Time::getMillisecondCounterHiRes();
+                    const bool got = victim->getState (mb, 10000);
+                    const auto ms = Time::getMillisecondCounterHiRes() - t0;
+                    std::printf ("     killed host with its socket held open: getState returned %s after %.0f ms; %s\n",
+                                 got ? "state" : "failure", ms, victim->getLastError().toRawUTF8());
+                    CHECK (! got);
+                    CHECK (ms < 3000);
+                    CHECK (! victim->isAlive());
+                    CHECK (victim->getHostPid() == -1);
+                    ::close (held);
+                    pump (300);
+                    engine.reloadPlugin (0, 40, 0);
+                    settle();
+                    victim = engine.getPlugin (0, 40, 0);
+                    CHECK (victim != nullptr && victim->isAlive());
+                }
+                if (pidfd >= 0) ::close (pidfd);
+            }
+           #endif
+        }
         if (victim != nullptr && victim->isAlive())
         {
             engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));

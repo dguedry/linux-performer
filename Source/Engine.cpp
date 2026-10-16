@@ -396,9 +396,12 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
             }
             for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->requestQuit();
         }
+    const int patience = budgetMs < 0 ? 3000 : jmin (3000, remaining());
     for (auto& in : old)
         for (auto& [prog, rt] : in->loaded)
-            destroyProgramPlugins (*rt, budgetMs < 0 ? 3000 : jmin (3000, remaining()));
+            destroyProgramPlugins (*rt, patience);
+    // Every reaper gets its patience and then a SIGKILL; a little more covers the kill itself.
+    RemotePlugin::waitForReapers (patience + 2000);
 }
 
 //==============================================================================

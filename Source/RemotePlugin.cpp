@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <condition_variable>
 #include <unistd.h>
 #include <cstdio>
 
@@ -38,6 +39,31 @@ namespace
         int status = 0;
         ::waitpid (pid, &status, 0);
     }
+
+    /* Reaping happens off the calling thread so that many hosts can be given
+       their patience at once; the count lets a quit wait for the last of
+       them, or a detached reaper dies with the program and a host that
+       would not leave on its own is left running with nobody to serve. */
+    std::mutex reaperMutex;
+    std::condition_variable reaperDone;
+    int reapersInFlight = 0;
+
+    void reapInBackground (pid_t pid, int patienceMs)
+    {
+        { const std::lock_guard<std::mutex> l (reaperMutex); ++reapersInFlight; }
+        std::thread ([pid, patienceMs]
+        {
+            reapProcess (pid, patienceMs);
+            { const std::lock_guard<std::mutex> l (reaperMutex); --reapersInFlight; }
+            reaperDone.notify_all();
+        }).detach();
+    }
+}
+
+void RemotePlugin::waitForReapers (int maxWaitMs)
+{
+    std::unique_lock<std::mutex> l (reaperMutex);
+    reaperDone.wait_for (l, std::chrono::milliseconds (maxWaitMs), [] { return reapersInFlight == 0; });
 }
 
 //==============================================================================
@@ -143,8 +169,16 @@ bool RemotePlugin::spawn (String& error)
     shm = ipc::createSharedBlock (shmName);
     if (shm == nullptr) { error = "could not create shared memory " + shmName; return false; }
 
+    /* Close-on-exec from birth, not after the fact. Programs load on several
+       threads at once, so another spawn can happen between this socketpair
+       and the close of our copy of the child's end below; a host started in
+       that window inherits both ends of this pair, and as long as it lives
+       the socket never reaches end-of-file when this host dies -- its reader
+       sits in recv for ever, and every request waits out its full timeout on
+       the message thread. The kernel only clears the flag on the one fd the
+       child is meant to have, the dup2 to 3. */
     int fds[2];
-    if (::socketpair (AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+    if (::socketpair (AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0)
     {
         error = "socketpair failed";
         return false;
@@ -175,7 +209,6 @@ bool RemotePlugin::spawn (String& error)
         return false;
     }
 
-    ::fcntl (fds[0], F_SETFD, FD_CLOEXEC);
     socketFd = fds[0];
     alive.store (true);
     reader = std::thread ([this] { readerLoop(); });
@@ -318,7 +351,7 @@ bool RemotePlugin::setParameterValue (int index, float value)
 
 bool RemotePlugin::getState (MemoryBlock& state, int timeoutMs)
 {
-    return request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state);
+    return request (ipc::Msg::getState, {}, timeoutMs < 0 ? kStateTimeoutMs : timeoutMs, &state, true);
 }
 
 void RemotePlugin::requestQuit()
@@ -340,14 +373,14 @@ void RemotePlugin::requestQuit()
 
 bool RemotePlugin::setState (const MemoryBlock& state)
 {
-    return request (ipc::Msg::setState, state, kStateTimeoutMs);
+    return request (ipc::Msg::setState, state, kStateTimeoutMs, nullptr, true);
 }
 
 bool RemotePlugin::showEditor (const String& title)
 {
     MemoryOutputStream out;
     out.writeString (title);
-    const bool ok = request (ipc::Msg::showEditor, out.getMemoryBlock(), kEditorTimeoutMs);
+    const bool ok = request (ipc::Msg::showEditor, out.getMemoryBlock(), kEditorTimeoutMs, nullptr, true);
     if (ok) editorOpen.store (true);
     return ok;
 }
@@ -356,17 +389,17 @@ bool RemotePlugin::keepEditorOnTop (bool onTop)
 {
     MemoryOutputStream out;
     out.writeBool (onTop);
-    return request (ipc::Msg::keepEditorOnTop, out.getMemoryBlock(), kEditorTimeoutMs);
+    return request (ipc::Msg::keepEditorOnTop, out.getMemoryBlock(), kEditorTimeoutMs, nullptr, true);
 }
 
 bool RemotePlugin::hideEditor()
 {
     editorOpen.store (false);
-    return request (ipc::Msg::hideEditor, {}, kEditorTimeoutMs);
+    return request (ipc::Msg::hideEditor, {}, kEditorTimeoutMs, nullptr, true);
 }
 
 //==============================================================================
-bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeoutMs, MemoryBlock* response)
+bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeoutMs, MemoryBlock* response, bool killIfLate)
 {
     if (! alive.load()) return false;
 
@@ -383,7 +416,7 @@ bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeo
         sent = ipc::sendFrame (socketFd, type, id, payload);
     }
 
-    const bool arrived = sent && p.event.wait (timeoutMs);
+    const bool arrived = sent && waitForReply (p, timeoutMs);
     {
         const std::lock_guard<std::mutex> l (pendingMutex);
         pending.erase (id);
@@ -392,6 +425,19 @@ bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeo
     if (! sent) { markDead ("connection to plugin host lost"); return false; }
     if (! arrived)
     {
+        if (! alive.load()) return false;                      // the reader saw it go while we waited
+        if (hostExited()) { markDead ("plugin host process ended"); return false; }
+        if (killIfLate)
+        {
+            /* Alive and silent for this long means wedged -- typically a
+               bridged plugin whose Wine half has died, leaving the host
+               blocked for ever on a reply that will never come. Left alone
+               it would cost every later request the same full wait; put it
+               down now so the plugin reads as dead and can be reloaded. */
+            killHost();
+            markDead ("plugin host stopped responding");
+            return false;
+        }
         const std::lock_guard<std::mutex> l (errorMutex);
         lastError = "plugin host did not respond within " + String (timeoutMs / 1000) + " s";
         return false;
@@ -413,6 +459,45 @@ bool RemotePlugin::request (ipc::Msg type, const MemoryBlock& payload, int timeo
             response->copyFrom (static_cast<const char*> (p.response.getData()) + pos, 0, response->getSize());
     }
     return true;
+}
+
+bool RemotePlugin::waitForReply (Pending& p, int timeoutMs)
+{
+    /* Wait in slices and look at the process between them. A dead host
+       normally shows as end-of-file on the socket, but not while some other
+       process still holds the host's end of it; then the reply simply never
+       comes and the wait would run its full course. The process table is the
+       authority: exited means dead, whatever the socket says. */
+    const auto deadline = Time::getMillisecondCounterHiRes() + timeoutMs;
+    for (;;)
+    {
+        const auto remaining = deadline - Time::getMillisecondCounterHiRes();
+        if (remaining <= 0) return false;
+        if (p.event.wait ((int) jmin (200.0, remaining))) return true;
+        if (hostExited()) return false;
+    }
+}
+
+bool RemotePlugin::hostExited()
+{
+    const std::lock_guard<std::mutex> l (pidMutex);
+    if (pid <= 0) return hostGone;
+    int status = 0;
+    if (::waitpid (pid, &status, WNOHANG) == 0) return false;
+    pid = -1;           // reaped here; shutdown() has nothing left to wait for
+    hostGone = true;
+    return true;
+}
+
+void RemotePlugin::killHost()
+{
+    const std::lock_guard<std::mutex> l (pidMutex);
+    if (pid <= 0) return;
+    ::kill (pid, SIGKILL);
+    int status = 0;
+    ::waitpid (pid, &status, 0);
+    pid = -1;
+    hostGone = true;
 }
 
 void RemotePlugin::readerLoop()
@@ -480,6 +565,18 @@ void RemotePlugin::markDead (const String& why)
     {
         const std::lock_guard<std::mutex> l (errorMutex);
         lastError = why;
+    }
+    {
+        /* Collect the process, or it stays a zombie until shutdown(), which
+           for a crashed plugin may be hours away. Off this thread, with a
+           little patience: a crash is still writing its core. */
+        const std::lock_guard<std::mutex> l (pidMutex);
+        if (pid > 0)
+        {
+            reapInBackground (pid, 3000);
+            pid = -1;
+            hostGone = true;
+        }
     }
     {
         const std::lock_guard<std::mutex> l (pendingMutex);
@@ -602,11 +699,13 @@ void RemotePlugin::shutdown (int patienceMs)
         reader.join();
     }
 
-    if (pid > 0)
     {
-        const pid_t p = pid;
-        std::thread ([p, patienceMs] { reapProcess (p, patienceMs); }).detach();
-        pid = -1;
+        const std::lock_guard<std::mutex> l (pidMutex);
+        if (pid > 0)
+        {
+            reapInBackground (pid, patienceMs);
+            pid = -1;
+        }
     }
 
     if (shm != nullptr)

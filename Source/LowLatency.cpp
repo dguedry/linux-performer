@@ -13,7 +13,10 @@ static bool pipeWireJack = false;
 bool preloadPipeWireJack()
 {
     ChildProcess jackd;
-    if (jackd.start (StringArray { "pgrep", "-x", "jackd" }) && jackd.readAllProcessOutput().trim().isNotEmpty())
+    const bool realJack = jackd.start (StringArray { "pgrep", "-x", "jackd" })
+                          && jackd.readAllProcessOutput().trim().isNotEmpty();
+    jackd.waitForProcessToFinish (1000);    // collect it; ChildProcess alone leaves a zombie
+    if (realJack)
         return false;   // a real JACK server: leave JUCE to its normal libjack
 
     for (auto* dir : { "/usr/lib/x86_64-linux-gnu/pipewire-0.3/jack", "/usr/lib64/pipewire-0.3/jack", "/usr/lib/pipewire-0.3/jack",

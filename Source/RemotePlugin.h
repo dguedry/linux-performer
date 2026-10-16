@@ -68,6 +68,8 @@ public:
     bool hasEditor() const                                  { return editorAvailable; }
     bool isAlive() const                                    { return alive.load(); }
     juce::String getLastError() const;
+    /** The host process, or -1 once it has been reaped. For tests and diagnostics. */
+    pid_t getHostPid() const                                { const std::lock_guard<std::mutex> l (pidMutex); return pid; }
 
     // Parameters -------------------------------------------------------------------
     const ParamInfoList& getParameters() const              { return params; }
@@ -117,15 +119,11 @@ public:
     void requestQuit();
     /** Reaps the host, giving it `patienceMs` to exit on its own before SIGKILL. */
     void shutdown (int patienceMs = 3000);
+    /** Reaping runs in the background; a quit calls this last so no host is
+        left behind. Returns when every reaper is done or after `maxWaitMs`. */
+    static void waitForReapers (int maxWaitMs);
 
 private:
-    bool request (ipc::Msg, const juce::MemoryBlock& payload, int timeoutMs, juce::MemoryBlock* response = nullptr);
-    void readerLoop();
-    void handleNotification (const ipc::FrameHeader&, const juce::MemoryBlock&);
-    void markDead (const juce::String& why);
-    bool spawn (juce::String& error);
-    void drainDoneSemaphore();
-
     struct Pending
     {
         juce::WaitableEvent event;
@@ -133,13 +131,30 @@ private:
         bool ok = false;
     };
 
+    /** `killIfLate`: a host that stays silent for the whole timeout is wedged;
+        kill it and mark the plugin dead rather than leave it to cost every
+        later request the same wait. For the long state and editor requests. */
+    bool request (ipc::Msg, const juce::MemoryBlock& payload, int timeoutMs, juce::MemoryBlock* response = nullptr,
+                  bool killIfLate = false);
+    bool waitForReply (Pending&, int timeoutMs);
+    /** True once the host process has exited; reaps it the first time. */
+    bool hostExited();
+    void killHost();
+    void readerLoop();
+    void handleNotification (const ipc::FrameHeader&, const juce::MemoryBlock&);
+    void markDead (const juce::String& why);
+    bool spawn (juce::String& error);
+    void drainDoneSemaphore();
+
     juce::PluginDescription description;
     juce::String name, shmName;
     bool instrument = false, editorAvailable = false;
     ParamInfoList params;
     std::unique_ptr<std::atomic<float>[]> paramValues;   // sized after load
 
-    pid_t pid = -1;
+    mutable std::mutex pidMutex;
+    pid_t pid = -1;             // under pidMutex: reaped from whichever thread notices first
+    bool hostGone = false;      // under pidMutex
     int socketFd = -1;
     ipc::SharedBlock* shm = nullptr;
 

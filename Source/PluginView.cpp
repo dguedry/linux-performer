@@ -6,6 +6,18 @@ using namespace juce;
 namespace perf
 {
 
+/* Kill and collect. JUCE's ChildProcess::kill() sends the signal and no
+   more, and its destructor does not wait either, so a helper stopped that
+   way stays in the process table as a zombie for as long as Performer runs. */
+static void endProcess (std::unique_ptr<juce::ChildProcess>& p)
+{
+    if (p == nullptr) return;
+    p->kill();
+    p->waitForProcessToFinish (2000);
+    p.reset();
+}
+
+
 namespace
 {
     struct Running
@@ -185,8 +197,8 @@ PluginView::Session PluginView::start (const String& title, String& error)
                 return r->session;
             }
 
-            if (r->web != nullptr) r->web->kill();
-            if (r->vnc != nullptr) r->vnc->kill();
+            endProcess (r->web);
+            endProcess (r->vnc);
             sessions.removeObject (r);
             break;
         }
@@ -261,7 +273,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
             "127.0.0.1:" + String (webPort),
             "127.0.0.1:" + String (vncPort) }))
     {
-        running->vnc->kill();
+        endProcess (running->vnc);
         error = "Could not start websockify.";
         return {};
     }
@@ -277,8 +289,8 @@ void PluginView::stop (const String& title)
     for (auto* r : sessions)
         if (r->session.title == title)
         {
-            if (r->web != nullptr) r->web->kill();
-            if (r->vnc != nullptr) r->vnc->kill();
+            endProcess (r->web);
+            endProcess (r->vnc);
             sessions.removeObject (r);
             return;
         }
@@ -290,8 +302,8 @@ void PluginView::stopAll()
         const ScopedLock sl (lock);
         for (auto* r : sessions)
         {
-            if (r->web != nullptr) r->web->kill();
-            if (r->vnc != nullptr) r->vnc->kill();
+            endProcess (r->web);
+            endProcess (r->vnc);
         }
         sessions.clear();
     }
@@ -341,8 +353,8 @@ void PluginView::dropDeadSessions()
             && r->web != nullptr && r->web->isRunning())
             continue;
 
-        if (r->web != nullptr) r->web->kill();
-        if (r->vnc != nullptr) r->vnc->kill();
+        endProcess (r->web);
+        endProcess (r->vnc);
         sessions.remove (i);
     }
 }

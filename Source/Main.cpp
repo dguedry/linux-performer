@@ -30,6 +30,12 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        /* A tablet that drops its connection while a reply is still being
+           written would otherwise end the whole program: JUCE's socket write
+           is a plain send(), and SIGPIPE's default is to terminate, silently,
+           with no core. Treat it as the write error it is. */
+        std::signal (SIGPIPE, SIG_IGN);
+
         juce::PropertiesFile::Options opts;
         opts.applicationName = "Performer";
         opts.filenameSuffix = "settings";
