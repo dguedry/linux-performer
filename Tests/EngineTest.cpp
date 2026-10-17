@@ -1350,6 +1350,185 @@ int main()
         CHECK (std::abs (saved.songs[0].tempoBpm - 116.0) < 0.001);
     }
 
+    // --- two instances of one plugin keep their own state -----------------------------
+    /* Reported: with the same plugin in two programs, saving left both with the
+       state of the one edited last. Walk the reporter's steps: load, set each
+       differently, switch between them (which captures the one being left),
+       save, reload, and ask each plugin what it has. Run for the LV2 synth and,
+       when one is installed, for a native VST3 -- the reporter's format. */
+    auto twoInstances = [&] (const PluginDescription& desc, const char* label)
+    {
+        std::printf ("     --- two instances of %s (%s) ---\n", desc.name.toRawUTF8(), label);
+        engine.setPreloadAllPrograms (false);
+        engine.clearProgram (0, 50); engine.clearProgram (0, 51);
+        engine.selectProgram (0, 50); settle();
+        CHECK (engine.addSlot (0, 50, desc, err)); settle();
+        engine.selectProgram (0, 51); settle();
+        CHECK (engine.addSlot (0, 51, desc, err)); settle();
+        auto* a = engine.getPlugin (0, 50, 0);
+        auto* b = engine.getPlugin (0, 51, 0);
+        CHECK (a != nullptr && b != nullptr && a != b);
+        if (a == nullptr || b == nullptr) return;
+
+        int idx = -1;
+        for (auto& p : a->getParameters())
+            if (p.automatable && ! p.discrete && p.name.containsIgnoreCase ("cutoff")) { idx = p.index; break; }
+        if (idx < 0)
+            for (auto& p : a->getParameters())
+                if (p.automatable && ! p.discrete) { idx = p.index; break; }
+        CHECK (idx >= 0);
+        if (idx < 0) return;
+        std::printf ("     parameter %d '%s'\n", idx, a->getParameters()[(size_t) idx].name.toRawUTF8());
+
+        /* Set each with its program sounding and a block rendered, as a hand on
+           a knob would: an LV2 plugin's new value reaches it with the next block,
+           and its saved state reads the plugin's ports, not the host's cache. */
+        engine.selectProgram (0, 50); settle();
+        CHECK (a->setParameterValue (idx, 0.2f)); render (engine, 2);
+        engine.selectProgram (0, 51); settle();
+        CHECK (b->setParameterValue (idx, 0.8f)); render (engine, 2);
+        {
+            float fa = -1, fb = -1; a->fetchParameterValue (idx, fa); b->fetchParameterValue (idx, fb);
+            MemoryBlock ga, gb; a->getState (ga); b->getState (gb);
+            std::printf ("     right after set: a=%.3f b=%.3f  direct getState a %d bytes, b %d bytes, %s\n",
+                         fa, fb, (int) ga.getSize(), (int) gb.getSize(), ga == gb ? "IDENTICAL" : "different");
+        }
+        engine.selectProgram (0, 50); settle();        // leaving 51 captures it
+        engine.selectProgram (0, 51); settle();        // leaving 50 captures it
+
+        TemporaryFile two (".performer.json");
+        CHECK (engine.captureSetup().saveToFile (two.getFile()).wasOk());
+        Setup rl;
+        CHECK (Setup::loadFromFile (two.getFile(), rl).wasOk());
+        const auto& sa = rl.inputs[0].programs[50].slots[0].state;
+        const auto& sb = rl.inputs[0].programs[51].slots[0].state;
+        std::printf ("     saved states: program 50 %d bytes, program 51 %d bytes, %s\n",
+                     (int) sa.getSize(), (int) sb.getSize(), sa == sb ? "IDENTICAL" : "different");
+        CHECK (sa.getSize() > 0 && sb.getSize() > 0 && sa != sb);
+
+        engine.loadSetup (rl); settle();
+        engine.selectProgram (0, 50); settle();
+        engine.selectProgram (0, 51); settle();
+        float va = -1.0f, vb = -1.0f;
+        auto* ra = engine.getPlugin (0, 50, 0);
+        auto* rb = engine.getPlugin (0, 51, 0);
+        CHECK (ra != nullptr && rb != nullptr);
+        if (ra == nullptr || rb == nullptr) return;
+        CHECK (ra->fetchParameterValue (idx, va));
+        CHECK (rb->fetchParameterValue (idx, vb));
+        std::printf ("     after reload: program 50 -> %.3f (want 0.2), program 51 -> %.3f (want 0.8)\n", va, vb);
+        CHECK (std::abs (va - 0.2f) < 0.05f);
+        CHECK (std::abs (vb - 0.8f) < 0.05f);
+    };
+    twoInstances (synth, "LV2");
+    {
+        AudioPluginFormat* vst3 = nullptr;
+        for (auto* f : host.getFormatManager().getFormats())
+            if (f->getName() == "VST3") vst3 = f;
+        PluginDescription nativeVst3; bool haveVst3 = false;
+        if (vst3 != nullptr)
+            for (const char* path : { "/usr/lib/vst3/Surge XT.vst3", "/usr/local/lib/vst3/Surge XT.vst3" })
+                if (File (path).exists() && ! haveVst3)
+                {
+                    OwnedArray<PluginDescription> found;
+                    host.getKnownPlugins().scanAndAddFile (path, true, found, *vst3);
+                    for (auto* d : found)
+                        if (d->isInstrument) { nativeVst3 = *d; haveVst3 = true; break; }
+                }
+        if (haveVst3) twoInstances (nativeVst3, "VST3");
+        else std::printf ("     skip VST3 two-instance check (no native VST3 instrument found)\n");
+
+        /* More of the ways two instances of one plugin come about, with the
+           VST3: a layer (two slots in one program), copy-and-paste of a program,
+           and the editor path -- a change made with the window open, captured
+           when the window closes -- followed by a save with no program switch. */
+        if (haveVst3)
+        {
+            const auto& desc = nativeVst3;
+            auto param = [] (RemotePlugin* p)
+            {
+                for (auto& q : p->getParameters()) if (q.automatable && ! q.discrete && q.name.containsIgnoreCase ("cutoff")) return q.index;
+                return 0;
+            };
+            auto saveReload = [&] (const char* label, std::function<void()> checks)
+            {
+                TemporaryFile f (".performer.json");
+                CHECK (engine.captureSetup().saveToFile (f.getFile()).wasOk());
+                Setup rl; CHECK (Setup::loadFromFile (f.getFile(), rl).wasOk());
+                engine.loadSetup (rl); settle();
+                std::printf ("     --- %s: saved and reloaded ---\n", label);
+                checks();
+            };
+
+            // Layer: two slots in one program.
+            engine.clearProgram (0, 60); engine.selectProgram (0, 60); settle();
+            CHECK (engine.addSlot (0, 60, desc, err)); settle();
+            CHECK (engine.addSlot (0, 60, desc, err)); settle();
+            if (auto* s0 = engine.getPlugin (0, 60, 0)) if (auto* s1 = engine.getPlugin (0, 60, 1))
+            {
+                const int idx = param (s0);
+                s0->setParameterValue (idx, 0.3f); s1->setParameterValue (idx, 0.7f);
+                saveReload ("layer", [&]
+                {
+                    engine.selectProgram (0, 60); settle();
+                    float v0 = -1, v1 = -1;
+                    if (auto* r0 = engine.getPlugin (0, 60, 0)) r0->fetchParameterValue (idx, v0);
+                    if (auto* r1 = engine.getPlugin (0, 60, 1)) r1->fetchParameterValue (idx, v1);
+                    std::printf ("     layer: slot0 %.3f (want 0.3) slot1 %.3f (want 0.7)\n", v0, v1);
+                    CHECK (std::abs (v0 - 0.3f) < 0.05f && std::abs (v1 - 0.7f) < 0.05f);
+                });
+            }
+
+            // Copy and paste: program 61 from 60, then change the copy.
+            engine.selectProgram (0, 60); settle();
+            engine.copyProgram (0, 60, 61);
+            engine.selectProgram (0, 61); settle();
+            if (auto* c = engine.getPlugin (0, 61, 0))
+            {
+                const int idx = param (c);
+                c->setParameterValue (idx, 0.9f);
+                saveReload ("copy-paste", [&]
+                {
+                    engine.selectProgram (0, 60); settle(); engine.selectProgram (0, 61); settle();
+                    float v60 = -1, v61 = -1;
+                    if (auto* r = engine.getPlugin (0, 60, 0)) r->fetchParameterValue (idx, v60);
+                    if (auto* r = engine.getPlugin (0, 61, 0)) r->fetchParameterValue (idx, v61);
+                    std::printf ("     copy-paste: program 60 %.3f (want 0.3) program 61 %.3f (want 0.9)\n", v60, v61);
+                    CHECK (std::abs (v60 - 0.3f) < 0.05f && std::abs (v61 - 0.9f) < 0.05f);
+                });
+            }
+
+            // Editor path, no program switch before saving.
+            engine.clearProgram (0, 62); engine.clearProgram (0, 63);
+            engine.selectProgram (0, 62); settle(); CHECK (engine.addSlot (0, 62, desc, err)); settle();
+            engine.selectProgram (0, 63); settle(); CHECK (engine.addSlot (0, 63, desc, err)); settle();
+            auto* e62 = engine.getPlugin (0, 62, 0); auto* e63 = engine.getPlugin (0, 63, 0);
+            if (e62 != nullptr && e63 != nullptr)
+            {
+                const int idx = param (e62);
+                CHECK (e62->showEditor ("62")); pump (1500);
+                e62->setParameterValue (idx, 0.15f);
+                CHECK (e62->hideEditor()); pump (800);
+                CHECK (e63->showEditor ("63")); pump (1500);
+                e63->setParameterValue (idx, 0.85f);
+                CHECK (e63->hideEditor()); pump (800);
+                const auto& d62 = engine.getSetup().inputs[0].programs[62].slots[0].state;
+                const auto& d63 = engine.getSetup().inputs[0].programs[63].slots[0].state;
+                std::printf ("     after closing editors, model holds %d / %d bytes (%s)\n", (int) d62.getSize(), (int) d63.getSize(),
+                             d62 == d63 ? "IDENTICAL" : "different");
+                saveReload ("editor path", [&]
+                {
+                    engine.selectProgram (0, 62); settle(); engine.selectProgram (0, 63); settle();
+                    float v62 = -1, v63 = -1;
+                    if (auto* r = engine.getPlugin (0, 62, 0)) r->fetchParameterValue (idx, v62);
+                    if (auto* r = engine.getPlugin (0, 63, 0)) r->fetchParameterValue (idx, v63);
+                    std::printf ("     editor path: program 62 %.3f (want 0.15) program 63 %.3f (want 0.85)\n", v62, v63);
+                    CHECK (std::abs (v62 - 0.15f) < 0.05f && std::abs (v63 - 0.85f) < 0.05f);
+                });
+            }
+        }
+    }
+
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated
