@@ -78,6 +78,11 @@ public:
     Setup captureSetup (int budgetMs = -1);
     void setPreloadAllPrograms (bool);
     void setReleaseTailSeconds (double);
+    /** Whether a program change leaves the outgoing program's held notes and
+        sustain pedal to the player (it keeps sounding, taking note-offs and
+        pedals but no new notes, and its tail starts when the last is let go),
+        or releases everything at the change and lets the tail cover it. */
+    void setHoldAcrossChange (bool);
 
     // Tempo ----------------------------------------------------------------------
     /** One tempo for the whole rig, handed to every plugin so tempo-synced

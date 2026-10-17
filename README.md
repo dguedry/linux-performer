@@ -64,8 +64,10 @@ Licensed under the [GPL-3.0](LICENSE).
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Setup** | The whole document (inputs, programs, plugin states). Saved as `*.performer.json`. |
 
-Program switching keeps the outgoing program rendering for a configurable
-release tail so held notes fade naturally. With **Preload all programs** on,
+A program change leaves what you are holding to the previous program: keys
+down and the sustain pedal keep sounding there until you let go, and then a
+configurable release tail lets it ring out, so a pad held under the change or a
+pedal down over the bar line is never cut. With **Preload all programs** on,
 every used program stays loaded and changes are instant (at the cost of RAM).
 
 ## Install
@@ -153,7 +155,7 @@ keyboard, grouped, with a GUI button per input:
 
 Scan the square code with the tablet's camera, or type the address and the
 six-character code. The code survives a restart, so a home-screen shortcut keeps
-working, and **Print map** puts the same scannable code on the printed program
+working, and **Options ▸ Print program map** puts the same scannable code on the printed program
 sheet.
 
 ### The plugin itself, on the stand

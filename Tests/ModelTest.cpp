@@ -18,6 +18,7 @@ int main()
     Setup s = Setup::makeDefault();
     s.preloadAllPrograms = true;
     s.releaseTailSeconds = 2.5;
+    s.holdAcrossChange = false;
 
     auto& upper = s.inputs[0];
     upper.midiDeviceIdentifier = "alsa:24:0";
@@ -76,6 +77,7 @@ int main()
 
     CHECK (loaded.preloadAllPrograms == true);
     CHECK (std::abs (loaded.releaseTailSeconds - 2.5) < 1e-9);
+    CHECK (loaded.holdAcrossChange == false);
     CHECK (loaded.inputs.size() == 2);
     CHECK (loaded.inputs[1].name == "Lower");
     CHECK (loaded.inputs[1].channel == 2);

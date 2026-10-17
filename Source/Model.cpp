@@ -323,6 +323,7 @@ var Setup::toVar() const
     o->setProperty ("version", 1);
     o->setProperty ("preloadAllPrograms", preloadAllPrograms);
     o->setProperty ("releaseTailSeconds", releaseTailSeconds);
+    o->setProperty ("holdAcrossChange", holdAcrossChange);
     o->setProperty ("tempoBpm", tempoBpm);
     o->setProperty ("tapTempoCC", tapTempoCC);
     Array<var> arr;
@@ -355,6 +356,7 @@ Setup Setup::fromVar (const var& v)
     Setup s;
     s.preloadAllPrograms = prop<bool> (v, "preloadAllPrograms", false);
     s.releaseTailSeconds = prop<double> (v, "releaseTailSeconds", 4.0);
+    s.holdAcrossChange = prop<bool> (v, "holdAcrossChange", true);
     s.tempoBpm           = prop<double> (v, "tempoBpm", 120.0);   // absent in older setups
     s.tapTempoCC         = prop<int>    (v, "tapTempoCC", 0);
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("inputs").getArray() : nullptr)

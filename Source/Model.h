@@ -215,6 +215,7 @@ struct Setup
 
     bool preloadAllPrograms = false;  // keep every used program's plugins resident
     double releaseTailSeconds = 4.0;  // how long the outgoing program keeps sounding
+    bool holdAcrossChange = true;     // a program change leaves held notes and the pedal to the player
 
     /** Tempo handed to every plugin, for tempo-synced delays and arpeggiators.
         One tempo for the whole rig rather than one per program: a band plays a

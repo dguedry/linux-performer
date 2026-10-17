@@ -1460,7 +1460,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     for (auto* c : std::initializer_list<Component*> { inputsPanel.get(), programsPanel.get(), slotsPanel.get(), mappingsPanel.get() })
         addAndMakeVisible (c);
 
-    for (auto* b : { &newBtn, &openBtn, &saveBtn, &saveAsBtn, &audioBtn, &pluginsBtn, &midiRefreshBtn, &panicBtn })
+    for (auto* b : { &newBtn, &openBtn, &saveBtn, &saveAsBtn, &audioBtn, &pluginsBtn, &panicBtn })
         addAndMakeVisible (b);
     newBtn.onClick         = [this] { newSetup(); };
     openBtn.onClick        = [this] { openSetup(); };
@@ -1468,13 +1468,37 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     saveAsBtn.onClick      = [this] { saveSetup (true); };
     audioBtn.onClick       = [this] { showAudioSettings(); };
     pluginsBtn.onClick     = [this] { showPluginManager(); };
-    midiRefreshBtn.onClick = [this] { engine.refreshMidiDevices(); showStatus ("MIDI devices rescanned"); };
     panicBtn.onClick       = [this] { engine.panic(); showStatus ("Panic: all notes off"); };
     panicBtn.setColour (TextButton::buttonColourId, Colours::darkred);
 
-    addAndMakeVisible (preloadToggle);
-    preloadToggle.setTooltip ("Keep every used program's plugins loaded so program changes are instant (uses more RAM)");
-    preloadToggle.onClick = [this] { engine.setPreloadAllPrograms (preloadToggle.getToggleState()); };
+    /* What is set up once and then left alone -- the two switches and the two
+       occasional actions -- lives in a menu. As toolbar buttons they did not
+       fit a 1280-wide window: the tempo readout was squashed to nothing and
+       the preload checkbox hidden, on exactly the laptop this runs on. */
+    addAndMakeVisible (optionsBtn);
+    optionsBtn.setTooltip ("Preload all programs, hold notes across program changes, rescan MIDI, print the program map");
+    optionsBtn.onClick = [this]
+    {
+        const auto& setup = engine.getSetup();
+        PopupMenu m;
+        m.addItem (1, "Preload all programs", true, setup.preloadAllPrograms);
+        m.addItem (2, "Hold notes across program changes", true, setup.holdAcrossChange);
+        m.addSeparator();
+        m.addItem (3, "Rescan MIDI devices");
+        m.addItem (4, "Print program map...");
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
+        {
+            const auto& s = engine.getSetup();
+            switch (r)
+            {
+                case 1: engine.setPreloadAllPrograms (! s.preloadAllPrograms); break;
+                case 2: engine.setHoldAcrossChange (! s.holdAcrossChange); break;
+                case 3: engine.refreshMidiDevices(); showStatus ("MIDI devices rescanned"); break;
+                case 4: printProgramMap(); break;
+                default: break;
+            }
+        });
+    };
 
     keyboardPanel = std::make_unique<KeyboardPanel> (engine);
     addChildComponent (keyboardPanel.get());
@@ -1529,9 +1553,6 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
     songsBtn.setToggleState (settings.getBoolValue ("showSongs", false), dontSendNotification);
     songsPanel->setVisible (songsBtn.getToggleState());
 
-    addAndMakeVisible (printBtn);
-    printBtn.setTooltip ("Write a printable list of which program number plays which sound, and open it in your browser");
-    printBtn.onClick = [this] { printProgramMap(); };
 
     addAndMakeVisible (helpBtn);
     helpBtn.setTooltip ("The user manual, without leaving the app");
@@ -1681,33 +1702,23 @@ void MainComponent::resized()
     auto toolbar = r.removeFromTop (44).reduced (8, 8);
     for (auto* b : { &newBtn, &openBtn, &saveBtn, &saveAsBtn })
     {
-        b->setBounds (toolbar.removeFromLeft (74));
+        b->setBounds (toolbar.removeFromLeft (72));
         toolbar.removeFromLeft (3);
     }
-    toolbar.removeFromLeft (12);
-    printBtn.setBounds (toolbar.removeFromLeft (76));       toolbar.removeFromLeft (4);
+    toolbar.removeFromLeft (10);
     remoteBtn.setBounds (toolbar.removeFromLeft (66));      toolbar.removeFromLeft (8);
     helpBtn.setBounds (toolbar.removeFromLeft (52));        toolbar.removeFromLeft (8);
     audioBtn.setBounds (toolbar.removeFromLeft (74));       toolbar.removeFromLeft (4);
     pluginsBtn.setBounds (toolbar.removeFromLeft (74));     toolbar.removeFromLeft (4);
-    midiRefreshBtn.setBounds (toolbar.removeFromLeft (100)); toolbar.removeFromLeft (8);
-    panicBtn.setBounds (toolbar.removeFromRight (84));      toolbar.removeFromRight (10);
-    keyboardBtn.setBounds (toolbar.removeFromRight (82));   toolbar.removeFromRight (4);
+    optionsBtn.setBounds (toolbar.removeFromLeft (70));     toolbar.removeFromLeft (8);
+    panicBtn.setBounds (toolbar.removeFromRight (80));      toolbar.removeFromRight (6);
+    keyboardBtn.setBounds (toolbar.removeFromRight (78));   toolbar.removeFromRight (4);
     stageBtn.setBounds (toolbar.removeFromRight (72));      toolbar.removeFromRight (4);
     songsBtn.setBounds (toolbar.removeFromRight (66));     toolbar.removeFromRight (8);
     tailSlider.setBounds (toolbar.removeFromRight (60));    toolbar.removeFromRight (2);
     tailLabel.setBounds (toolbar.removeFromRight (26));     toolbar.removeFromRight (8);
     tapButton.setBounds (toolbar.removeFromRight (42));     toolbar.removeFromRight (2);
-    tempoLabel.setBounds (toolbar.removeFromRight (66));    toolbar.removeFromRight (6);
-
-    /* Whatever is left goes to the preload checkbox, and it is hidden rather
-       than squashed when there is nothing left. Taking a fixed 170 here is what
-       silently pushed it (and then the tempo readout) off the end of a
-       1280-wide window. */
-    const bool roomForPreload = toolbar.getWidth() >= 120;
-    preloadToggle.setVisible (roomForPreload);
-    if (roomForPreload)
-        preloadToggle.setBounds (toolbar.removeFromRight (jmin (170, toolbar.getWidth())));
+    tempoLabel.setBounds (toolbar.removeFromRight (66));    toolbar.removeFromRight (8);
 
     auto status = r.removeFromBottom (24).reduced (8, 2);
     cpuLabel.setBounds (status.removeFromRight (470));
@@ -1828,7 +1839,6 @@ void MainComponent::refreshAll()
 {
     const auto& setup = engine.getSetup();
     selectedInput = jlimit (0, jmax (0, (int) setup.inputs.size() - 1), selectedInput);
-    preloadToggle.setToggleState (setup.preloadAllPrograms, dontSendNotification);
     tailSlider.setValue (setup.releaseTailSeconds, dontSendNotification);
     inputsPanel->refresh();
     inputsPanel->setSelected (selectedInput);

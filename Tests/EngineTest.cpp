@@ -138,6 +138,32 @@ int main()
     const float silence = render (engine, 4);
     CHECK (silence < 1e-4f);
 
+    // --- a note held through a program change keeps sounding until it is let go ------------
+    {
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+        render (engine, 4);
+        engine.selectProgram (0, 1); settle();                       // program 1 is empty
+        const float heldAfterChange = render (engine, 24);           // about a quarter of a second later
+        std::printf ("     held through a change: rms %.3f\n", heldAfterChange);
+        CHECK (heldAfterChange > 0.02f);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+        render (engine, 40);                                         // release, then the 0.1 s tail
+        CHECK (render (engine, 4) < 1e-4f);
+
+        // Hold off: the change releases everything, and only the tail remains.
+        engine.setHoldAcrossChange (false);
+        engine.selectProgram (0, 0); settle();
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+        render (engine, 4);
+        engine.selectProgram (0, 1); settle();
+        render (engine, 24);
+        CHECK (render (engine, 4) < 1e-4f);
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+        engine.setHoldAcrossChange (true);
+        engine.selectProgram (0, 0); settle();
+        render (engine, 10);
+    }
+
     // --- note on channel 1 -> Upper sounds -----------------------------------------
     engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
     const float sounding = render (engine, 20);

@@ -66,7 +66,7 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Print map**, **Tablet**, **Audio...**, **Plugins...**, **Rescan MIDI**, **Preload all programs**, release **Tail**, **Stage**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Songs**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -80,7 +80,7 @@ whichever section answers what you typed.
 
 Each input has:
 
-- **MIDI device** — any ALSA MIDI source. **Rescan MIDI** in the toolbar picks
+- **MIDI device** — any ALSA MIDI source. **Options ▸ Rescan MIDI devices** picks
   up a keyboard you plugged in after starting. If a saved device is missing,
   the list shows it as *(disconnected)* and reconnects when it returns.
 - **Channel** — `Omni` accepts every channel, or pick one. Two inputs can share
@@ -115,14 +115,21 @@ has something in it.
   another number. This is the fast way to make a variation of a sound.
 - **Clear** empties a program.
 
-**Preload all programs** (toolbar) loads every non-empty program at start and
+**Preload all programs** (under **Options** in the toolbar) loads every non-empty program at start and
 keeps it loaded, so program changes are instant. Without it, a program loads
 when you select it, which takes as long as the plugin needs (Kontakt is several
 seconds). Preloading costs RAM: each plugin instance is a full copy.
 
-**Tail** is how long the outgoing program keeps rendering after a program
-change, so held notes and reverbs fade naturally instead of being cut off.
-Four seconds is a good default.
+**Hold notes across program changes** (under **Options**, on by default) means
+a program change leaves whatever you are holding to the previous program: keys still down and the sustain pedal keep
+sounding there, following the wheels and pedals, until you let go. New notes go
+to the new program from the moment of the change. Turn it off for a clean cut
+at the change -- percussive sounds, or a switch you want to land exactly on the
+beat.
+
+**Tail** is how long the outgoing program keeps rendering after that -- after
+you let go with Hold on, after the change with it off -- so releases and
+reverbs fade naturally instead of being cut off. Four seconds is a good default.
 
 ### Grouping programs
 
@@ -376,7 +383,7 @@ Performer shows the address and code to get here:
 
 There are two ways in, and the fast one is the square code. Point the tablet's
 camera at it and it opens Performer directly, with no address to read off a
-screen. **Print map** puts the same code on the printed sheet, so a page taped
+screen. **Options ▸ Print program map** puts the same code on the printed sheet, so a page taped
 to the keyboard is also the way in.
 
 To type it instead, enter the address once, then the six-character code. The
@@ -618,7 +625,7 @@ plugin asked and what it was told.
 
 ## Printing a program map
 
-**Print map** writes a sheet of which program number plays which sound, and
+**Options ▸ Print program map** writes a sheet of which program number plays which sound, and
 opens it in your browser; print it from there. Only programs you have filled in
 are listed, with each program's number, its name and the instruments in it,
 grouped by input with the MIDI device and channel. Tape it to the keyboard and
@@ -691,12 +698,13 @@ A setup file is plain JSON and safe to keep in version control.
 
 A short checklist:
 
-- Turn on **Preload all programs** and give Performer time to load everything
+- Turn on **Options ▸ Preload all programs** and give Performer time to load everything
   before the first song. The status bar stops showing loading activity when it
   is done.
 - Check that the status bar shows the block size you expect and no *late*
   count.
-- Set the **Tail** long enough that program changes do not cut your release.
+- Leave **Hold notes across program changes** on and set the **Tail** long
+  enough that program changes do not cut your release.
 - Learn where **PANIC** is.
 - Keep the set on one input per manual, with program numbers matching the
   patch numbers on your keyboard, so you never touch the computer.

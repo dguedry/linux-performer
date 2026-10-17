@@ -89,12 +89,11 @@ private:
 
     // toolbar
     juce::TextButton newBtn { "New" }, openBtn { "Open..." }, saveBtn { "Save" }, saveAsBtn { "Save As..." },
-                     audioBtn { "Audio..." }, pluginsBtn { "Plugins..." }, midiRefreshBtn { "Rescan MIDI" },
+                     audioBtn { "Audio..." }, pluginsBtn { "Plugins..." },
                      panicBtn { "PANIC" };
-    juce::ToggleButton preloadToggle { "Preload all programs" };
+    juce::TextButton optionsBtn { "Options" };
     juce::TextButton keyboardBtn { "Keyboard" };
     juce::TextButton stageBtn { "Stage" };
-    juce::TextButton printBtn { "Print map" };
     juce::TextButton remoteBtn { "Tablet" };
     juce::TextButton helpBtn { "Help" };
     std::unique_ptr<KeyboardPanel> keyboardPanel;

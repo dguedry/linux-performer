@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include <cstring>
 #include <cmath>
 #include <algorithm>
 
@@ -100,6 +101,50 @@ struct Engine::ProgramRuntime
     MidiBuffer programMidi;        // MIDI seen by the program chain
     int releaseSamplesLeft = 0;
     bool needsNotesOff = false;
+
+    /* What the player is holding on this program, kept on the audio thread
+       as the notes go through: one bit per key per channel, and the sustain
+       pedal per channel. A program change reads it to decide whether the
+       outgoing program can be left to finish on its own. */
+    uint64_t heldKeys[16][2] = {};
+    bool sustainDown[16] = {};
+    /* Left behind by a change with something held: it still gets note-offs,
+       pedals and wheels -- never a new note -- and its tail waits until the
+       last of them is let go. */
+    bool holding = false;
+
+    bool anythingHeld() const
+    {
+        for (int c = 0; c < 16; ++c)
+            if (heldKeys[c][0] != 0 || heldKeys[c][1] != 0 || sustainDown[c]) return true;
+        return false;
+    }
+    void clearHeld()
+    {
+        std::memset (heldKeys, 0, sizeof (heldKeys));
+        std::memset (sustainDown, 0, sizeof (sustainDown));
+    }
+    void track (const MidiMessage& m)
+    {
+        const int ch = m.getChannel() - 1;
+        if (ch < 0 || ch > 15) return;
+        if (m.isNoteOn())
+        {
+            const int n = m.getNoteNumber();
+            heldKeys[ch][n >> 6] |= (uint64_t) 1 << (n & 63);
+        }
+        else if (m.isNoteOff())
+        {
+            const int n = m.getNoteNumber();
+            heldKeys[ch][n >> 6] &= ~((uint64_t) 1 << (n & 63));
+        }
+        else if (m.isController())
+        {
+            const int cc = m.getControllerNumber();
+            if (cc == 64)                      sustainDown[ch] = m.getControllerValue() >= 64;
+            else if (cc == 123 || cc == 120)   heldKeys[ch][0] = heldKeys[ch][1] = 0;
+        }
+    }
 };
 
 struct Engine::InputRuntime
@@ -110,6 +155,7 @@ struct Engine::InputRuntime
     std::atomic<int> programChangeChannel { InputDef::pcChannelSameAsNotes };
     MidiMessageCollector collector;
     MidiBuffer block;
+    MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
     std::map<int, std::unique_ptr<ProgramRuntime>> loaded;
     ProgramRuntime* active = nullptr;
     std::vector<ProgramRuntime*> releasing;
@@ -264,6 +310,7 @@ Setup Engine::captureSetup (int budgetMs)
 
 void Engine::setPreloadAllPrograms (bool b)  { setup.preloadAllPrograms = b; }
 void Engine::setReleaseTailSeconds (double s) { setup.releaseTailSeconds = jlimit (0.0, 30.0, s); }
+void Engine::setHoldAcrossChange (bool b)     { setup.holdAcrossChange = b; }
 
 //==============================================================================
 void Engine::setTempoBpm (double bpm)
@@ -822,12 +869,20 @@ void Engine::selectProgram (int inputIndex, int program)
         {
             if (in.active != nullptr)
             {
-                in.active->needsNotesOff = true;
+                /* Leave it sounding. With a key or the pedal down it carries
+                   on receiving the note-offs and pedals until the player lets
+                   go, and only then starts its tail -- a pad held under the
+                   change, or the pedal down over a bar line, is not cut. The
+                   alternative releases everything now and lets the tail cover
+                   the ringing out. */
+                in.active->holding = setup.holdAcrossChange && in.active->anythingHeld();
+                in.active->needsNotesOff = ! in.active->holding;
                 in.active->releaseSamplesLeft = (int) (setup.releaseTailSeconds * sampleRate);
                 if (! in.isReleasing (in.active))
                     in.releasing.push_back (in.active);
             }
             in.stopReleasing (next);
+            next->holding = false;
             next->releaseSamplesLeft = 0;
             in.active = next;
         }
@@ -1949,10 +2004,28 @@ void Engine::processInput (InputRuntime& in, float* const* out, int numOut, int 
         processProgram (*in.active, in.block, out, numOut, numSamples, panicNow);
 
     static const MidiBuffer emptyMidi;
+    bool holdBlockBuilt = false;
     for (auto it = in.releasing.begin(); it != in.releasing.end();)
     {
         auto* p = *it;
-        processProgram (*p, emptyMidi, out, numOut, numSamples, panicNow);
+        const MidiBuffer* midi = &emptyMidi;
+        if (p->holding)
+        {
+            // Everything but new notes: the note-offs and pedal it is waiting for, and the wheels.
+            if (! holdBlockBuilt)
+            {
+                in.holdBlock.clear();
+                for (const auto meta : in.block)
+                    if (const auto m = meta.getMessage(); ! m.isNoteOn())
+                        in.holdBlock.addEvent (m, meta.samplePosition);
+                holdBlockBuilt = true;
+            }
+            midi = &in.holdBlock;
+        }
+        processProgram (*p, *midi, out, numOut, numSamples, panicNow);
+
+        if (p->holding && ! panicNow && p->anythingHeld()) { ++it; continue; }    // still held: the tail waits
+        p->holding = false;
         p->releaseSamplesLeft -= numSamples;
         if (p->releaseSamplesLeft <= 0 || panicNow)
             it = in.releasing.erase (it);
@@ -2017,6 +2090,8 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
     if (prog.needsNotesOff || panicNow)
     {
         prog.needsNotesOff = false;
+        prog.holding = false;
+        prog.clearHeld();
         for (auto& slot : prog.slots)
             addNotesOff (slot->midi, panicNow);
         addNotesOff (prog.programMidi, panicNow);
@@ -2027,6 +2102,7 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
     {
         const auto m = meta.getMessage();
         const int pos = meta.samplePosition;
+        prog.track (m);
 
         bool consumed = false;
         for (auto& map : prog.mappings)
