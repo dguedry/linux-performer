@@ -1,7 +1,7 @@
 #pragma once
 
 /*
-    Wire protocol between Performer and its plugin host processes.
+    Wire protocol between StageRig and its plugin host processes.
 
     Real-time data (audio, MIDI, parameter changes) goes through a shared memory
     block with two POSIX semaphores. Everything else (loading, state, parameter
@@ -54,7 +54,7 @@ struct SharedBlock
     uint32_t paramChangeCount;
 
     /* Tempo, so a delay or arpeggiator that syncs to the host has something to
-       sync to. Performer has no transport -- there is nothing to play along to
+       sync to. StageRig has no transport -- there is nothing to play along to
        on stage -- so the position advances continuously and "playing" is always
        true: a plugin that waits for a running transport before it will run its
        LFO would otherwise sit silent. */

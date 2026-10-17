@@ -76,17 +76,18 @@ RemotePlugin::~RemotePlugin()
 
 File RemotePlugin::findHostExecutable()
 {
-    const auto env = SystemStats::getEnvironmentVariable ("PERFORMER_PLUGIN_HOST", {});
+    const auto env = SystemStats::getEnvironmentVariable ("STAGERIG_PLUGIN_HOST",
+                                                          SystemStats::getEnvironmentVariable ("PERFORMER_PLUGIN_HOST", {}));
     if (env.isNotEmpty() && File (env).existsAsFile())
         return File (env);
 
     const auto exe = File::getSpecialLocation (File::currentExecutableFile);
     const auto dir = exe.getParentDirectory();
-    const String name ("performer-plugin-host");
+    const String name ("stagerig-plugin-host");
 
     for (auto& candidate : { dir.getChildFile (name),
-                             dir.getParentDirectory().getParentDirectory().getChildFile ("PerformerPluginHost_artefacts").getChildFile (dir.getFileName()).getChildFile (name),
-                             dir.getParentDirectory().getParentDirectory().getChildFile ("PerformerPluginHost_artefacts").getChildFile (name),
+                             dir.getParentDirectory().getParentDirectory().getChildFile ("StageRigPluginHost_artefacts").getChildFile (dir.getFileName()).getChildFile (name),
+                             dir.getParentDirectory().getParentDirectory().getChildFile ("StageRigPluginHost_artefacts").getChildFile (name),
                              File ("/usr/local/bin").getChildFile (name),
                              File ("/usr/bin").getChildFile (name) })
         if (candidate.existsAsFile())
@@ -161,11 +162,11 @@ bool RemotePlugin::spawn (String& error)
     const auto exe = findHostExecutable();
     if (exe == File())
     {
-        error = "performer-plugin-host executable not found (set PERFORMER_PLUGIN_HOST)";
+        error = "stagerig-plugin-host executable not found (set STAGERIG_PLUGIN_HOST)";
         return false;
     }
 
-    shmName = "/performer-" + String ((int) ::getpid()) + "-" + String (shmCounter++) + "-" + String::toHexString (Random::getSystemRandom().nextInt64());
+    shmName = "/stagerig-" + String ((int) ::getpid()) + "-" + String (shmCounter++) + "-" + String::toHexString (Random::getSystemRandom().nextInt64());
     shm = ipc::createSharedBlock (shmName);
     if (shm == nullptr) { error = "could not create shared memory " + shmName; return false; }
 
@@ -535,7 +536,7 @@ void RemotePlugin::handleNotification (const ipc::FrameHeader& header, const Mem
         {
             const int index = in.readInt();
             const float value = in.readFloat();
-            if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+            if (std::getenv ("STAGERIG_REPORT_PARAMS") != nullptr)
                 std::fprintf (stderr, "[host] %s reported param %d = %.3f\n",
                               name.toRawUTF8(), index, value);
             if (paramValues != nullptr && index >= 0 && index < (int) params.size())

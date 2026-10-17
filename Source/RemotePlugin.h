@@ -15,7 +15,7 @@ namespace perf
 {
 
 /**
-    A plugin running in its own performer-plugin-host process.
+    A plugin running in its own stagerig-plugin-host process.
 
     Non-realtime methods (load, state, parameters, editor) talk over a socket and
     block the calling thread for at most their timeout. Real-time methods
@@ -39,7 +39,7 @@ public:
     RemotePlugin();
     ~RemotePlugin();
 
-    /** Finds the helper executable: $PERFORMER_PLUGIN_HOST, next to this executable,
+    /** Finds the helper executable: $STAGERIG_PLUGIN_HOST, next to this executable,
         or in the sibling JUCE artefacts folder of a build tree. */
     static juce::File findHostExecutable();
 

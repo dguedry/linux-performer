@@ -20,11 +20,11 @@ namespace
     void onQuitSignal (int) { quitSignalled.store (true); }
 }
 
-class PerformerApplication : public juce::JUCEApplication,
+class StageRigApplication : public juce::JUCEApplication,
                              private juce::Timer
 {
 public:
-    const juce::String getApplicationName() override       { return "Performer"; }
+    const juce::String getApplicationName() override       { return "StageRig"; }
     const juce::String getApplicationVersion() override    { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override             { return false; }
 
@@ -37,21 +37,22 @@ public:
         std::signal (SIGPIPE, SIG_IGN);
 
         juce::PropertiesFile::Options opts;
-        opts.applicationName = "Performer";
+        opts.applicationName = "StageRig";
         opts.filenameSuffix = "settings";
        #if JUCE_LINUX || JUCE_BSD
-        opts.folderName = ".config/Performer";      // JUCE would otherwise use ~/Performer
+        opts.folderName = ".config/StageRig";      // JUCE would otherwise use ~/StageRig
         migrateOldSettingsFolder (opts);
+        migrateFromPerformer (opts);
        #else
-        opts.folderName = "Performer";
+        opts.folderName = "StageRig";
        #endif
         opts.osxLibrarySubFolder = "Application Support";
         opts.storageFormat = juce::PropertiesFile::storeAsXML;
         settings = std::make_unique<juce::PropertiesFile> (opts);
 
-        // Optional: `Performer path/to/setup.performer.json` opens that setup instead of the last one.
+        // Optional: `StageRig path/to/setup.stagerig.json` opens that setup instead of the last one.
         juce::File initialSetup;
-        juce::ArgumentList args ("Performer", commandLine);
+        juce::ArgumentList args ("StageRig", commandLine);
         for (int i = 0; i < args.size(); ++i)
         {
             auto f = args[i].resolveAsFile();
@@ -88,17 +89,45 @@ public:
             systemRequestedQuit();
     }
 
-    /** Early builds stored settings in ~/Performer; move them to ~/.config/Performer once. */
+    /** The program was called Performer until October 2026 and kept its
+        settings in ~/.config/Performer. The first run under the new name
+        copies them -- settings, autosave, mapping templates, crash list,
+        icon cache -- so nothing is set up twice. Copied rather than moved,
+        so an older build still finds its own. */
+    static void migrateFromPerformer (const juce::PropertiesFile::Options& opts)
+    {
+        auto newFile = opts.getDefaultFile();
+        auto oldDir  = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile (".config/Performer");
+        if (newFile.existsAsFile() || ! oldDir.isDirectory())
+            return;
+
+        auto newDir = newFile.getParentDirectory();
+        newDir.createDirectory();
+        const std::pair<const char*, juce::String> renamed[] = {
+            { "Performer.settings",      newFile.getFileName() },
+            { "autosave.performer.json", "autosave.stagerig.json" },
+        };
+        for (auto& [from, to] : renamed)
+            if (auto src = oldDir.getChildFile (from); src.existsAsFile())
+                src.copyFileTo (newDir.getChildFile (to));
+        for (auto& name : { "mapping-templates.json", "RecentlyCrashedPluginsList" })
+            if (auto src = oldDir.getChildFile (name); src.existsAsFile())
+                src.copyFileTo (newDir.getChildFile (name));
+        if (auto icons = oldDir.getChildFile ("icons"); icons.isDirectory())
+            icons.copyDirectoryTo (newDir.getChildFile ("icons"));
+    }
+
+    /** Early builds stored settings in ~/StageRig; move them to ~/.config/StageRig once. */
     static void migrateOldSettingsFolder (const juce::PropertiesFile::Options& opts)
     {
         auto newFile = opts.getDefaultFile();
-        auto oldDir  = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Performer");
+        auto oldDir  = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("StageRig");
         auto oldFile = oldDir.getChildFile (newFile.getFileName());
         if (newFile.existsAsFile() || ! oldFile.existsAsFile())
             return;
 
         newFile.getParentDirectory().createDirectory();
-        for (auto& name : { newFile.getFileName(), juce::String ("autosave.performer.json"), juce::String ("RecentlyCrashedPluginsList") })
+        for (auto& name : { newFile.getFileName(), juce::String ("autosave.stagerig.json"), juce::String ("RecentlyCrashedPluginsList") })
         {
             auto src = oldDir.getChildFile (name);
             if (src.existsAsFile())
@@ -143,7 +172,7 @@ public:
                creates the X window unmapped, so the icon goes on first and the
                map comes with it. DocumentWindow::setIcon only feeds JUCE's own
                title bar, so both are set. */
-            const auto icon = juce::ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize);
+            const auto icon = juce::ImageCache::getFromMemory (BinaryData::stagerig256_png, BinaryData::stagerig256_pngSize);
             setIcon (icon);
             addToDesktop (getDesktopWindowStyleFlags());
             if (auto* peer = getPeer()) peer->setIcon (icon);
@@ -174,4 +203,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION (PerformerApplication)
+START_JUCE_APPLICATION (StageRigApplication)

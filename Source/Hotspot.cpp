@@ -142,7 +142,7 @@ Hotspot::State Hotspot::state()
 }
 
 //==============================================================================
-static const char* kProfileName = "performer-stage";
+static const char* kProfileName = "stagerig-stage";
 
 String Hotspot::start (const Config& c)
 {
@@ -209,7 +209,7 @@ Hotspot::Config Hotspot::load (PropertiesFile& settings)
 {
     Config c;
     c.interfaceName = settings.getValue ("hotspotInterface");
-    c.networkName   = settings.getValue ("hotspotNetwork", "PerformerStage");
+    c.networkName   = settings.getValue ("hotspotNetwork", "StageRig");
     c.password      = settings.getValue ("hotspotPassword");
     if (c.password.isEmpty()) c.password = suggestPassword();
     return c;

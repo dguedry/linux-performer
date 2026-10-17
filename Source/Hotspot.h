@@ -52,7 +52,7 @@ public:
     struct Config
     {
         juce::String interfaceName;
-        juce::String networkName = "PerformerStage";
+        juce::String networkName = "StageRig";
         juce::String password;          // at least 8 characters, per WPA
     };
 

@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Performer
+Name=StageRig
 GenericName=Live plugin host
 Comment=MIDI-to-plugin host for live performance: programs per keyboard, VST3/LV2 instruments and effects, controller mappings
-Exec=Performer %f
-Icon=performer
+Exec=StageRig %f
+Icon=stagerig
 Terminal=false
 Categories=AudioVideo;Audio;Music;
 Keywords=MIDI;VST3;LV2;plugin;host;live;keyboard;
-StartupWMClass=Performer
+StartupWMClass=StageRig

@@ -96,10 +96,10 @@ int main()
 
     // The choice must survive a restart, which is the entire point of asking once.
     {
-        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-hotspot-test.settings");
+        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-hotspot-test.settings");
         tmp.deleteFile();
         PropertiesFile::Options o;
-        o.applicationName = "performer-hotspot-test";
+        o.applicationName = "stagerig-hotspot-test";
         {
             PropertiesFile pf (tmp, o);
             perf::Hotspot::Config c;
@@ -119,10 +119,10 @@ int main()
     // With nothing saved we still get a usable default, so the prompt can be
     // pre-filled rather than blank.
     {
-        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-hotspot-empty.settings");
+        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-hotspot-empty.settings");
         tmp.deleteFile();
         PropertiesFile::Options o;
-        o.applicationName = "performer-hotspot-empty";
+        o.applicationName = "stagerig-hotspot-empty";
         PropertiesFile pf (tmp, o);
         const auto fresh = perf::Hotspot::load (pf);
         check (fresh.networkName.isNotEmpty(), "a default network name is offered");
@@ -195,12 +195,12 @@ int main()
        has to be as real as one made on the laptop: it must change the engine AND
        survive being written out and read back. */
     {
-        auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-remote-persist");
+        auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-remote-persist");
         dir.deleteRecursively();
         dir.createDirectory();
 
         PropertiesFile::Options po;
-        po.applicationName = "performer-remote-persist";
+        po.applicationName = "stagerig-remote-persist";
         PropertiesFile props (dir.getChildFile ("p.settings"), po);
 
         perf::PluginHost host (props);
@@ -215,7 +215,7 @@ int main()
             const auto after = engine.getSetup().inputs[0].currentProgram;
             check (before != after && after == 1, "selecting a program changes the live setup");
 
-            const auto file = dir.getChildFile ("setup.performer.json");
+            const auto file = dir.getChildFile ("setup.stagerig.json");
             check (engine.captureSetup().saveToFile (file).wasOk(), "the setup writes to disk");
 
             perf::Setup reloaded;
@@ -238,10 +238,10 @@ int main()
        the app always came up with the server off, which looks like the tablet has
        broken rather than like a setting was forgotten. */
     {
-        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-remoteon.settings");
+        auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-remoteon.settings");
         tmp.deleteFile();
         PropertiesFile::Options o;
-        o.applicationName = "performer-remoteon";
+        o.applicationName = "stagerig-remoteon";
 
         {
             PropertiesFile pf (tmp, o);
@@ -272,7 +272,7 @@ int main()
         const auto manual = String::createStringFromData (BinaryData::MANUAL_md, BinaryData::MANUAL_mdSize);
         check (manual.isNotEmpty(), "the manual is embedded in the binary");
         check (manual.length() > 10000, "the whole manual is embedded, not a fragment");
-        check (manual.contains ("# Performer user manual"), "the manual starts with its title");
+        check (manual.contains ("# StageRig user manual"), "the manual starts with its title");
 
         // The sections someone needs when something is wrong at a venue.
         check (manual.contains ("If the tablet cannot connect"), "the firewall section is present");
@@ -299,7 +299,7 @@ int main()
         check (perf::chartPagesFolder (File ("/x/lead.pdf")).getFullPathName() == "/x/lead.pdf.pages", "pages live beside the PDF");
 
         // Rendered pages come back in page order even past page 9.
-        const auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("performer-charts-test");
+        const auto tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("stagerig-charts-test");
         tmp.deleteRecursively();
         const auto pdf = tmp.getChildFile ("score.pdf");
         const auto pages = perf::chartPagesFolder (pdf);

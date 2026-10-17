@@ -63,14 +63,14 @@ int main()
     // the settings file, and a plain temp file would share /tmp with every other run,
     // so an aborted run could blacklist a plugin for the next one.
     const File scratchDir = File::getSpecialLocation (File::tempDirectory)
-                                .getChildFile ("PerformerEngineTest-" + String (Time::currentTimeMillis()));
+                                .getChildFile ("StageRigEngineTest-" + String (Time::currentTimeMillis()));
     scratchDir.createDirectory();
     struct ScratchCleanup { File d; ~ScratchCleanup() { d.deleteRecursively(); } } scratchCleanup { scratchDir };
     TemporaryFile settingsTmp (scratchDir.getChildFile ("test.settings"));
     PropertiesFile::Options opts;
-    opts.applicationName = "PerformerEngineTest";
+    opts.applicationName = "StageRigEngineTest";
     opts.filenameSuffix = "settings";
-    opts.folderName = "PerformerEngineTest";
+    opts.folderName = "StageRigEngineTest";
     opts.storageFormat = PropertiesFile::storeAsXML;
     PropertiesFile settings (settingsTmp.getFile(), opts);
 
@@ -383,7 +383,7 @@ int main()
     // --- panic + save round trip ----------------------------------------------------------
     engine.panic();
     render (engine, 2);
-    TemporaryFile setupTmp (".performer.json");
+    TemporaryFile setupTmp (".stagerig.json");
     CHECK (engine.captureSetup().saveToFile (setupTmp.getFile()).wasOk());
     Setup reloaded;
     CHECK (Setup::loadFromFile (setupTmp.getFile(), reloaded).wasOk());
@@ -513,7 +513,7 @@ int main()
             render (engine, 20);
 
             // Effects survive a save/load round trip, including on the program chain.
-            TemporaryFile fxTmp (".performer.json");
+            TemporaryFile fxTmp (".stagerig.json");
             CHECK (engine.captureSetup().saveToFile (fxTmp.getFile()).wasOk());
             Setup rl;
             CHECK (Setup::loadFromFile (fxTmp.getFile(), rl).wasOk());
@@ -908,7 +908,7 @@ int main()
     }
 
     // --- optional: write a demo setup for eyeballing the UI ----------------------------------
-    if (auto outPath = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_WRITE_SETUP", {}); outPath.isNotEmpty())
+    if (auto outPath = SystemStats::getEnvironmentVariable ("STAGERIG_TEST_WRITE_SETUP", {}); outPath.isNotEmpty())
     {
         PluginDescription fx; bool haveFx = false;
         for (auto& d : host.getKnownPlugins().getTypes())
@@ -931,9 +931,9 @@ int main()
     }
 
     // --- optional: an arbitrary VST3 (e.g. a yabridge-bridged plugin) --------------------
-    // PERFORMER_TEST_VST3=/path/to/Plugin.vst3 loads it, plays a note and renders blocks;
+    // STAGERIG_TEST_VST3=/path/to/Plugin.vst3 loads it, plays a note and renders blocks;
     // this reproduces the multi-out / inactive-bus crash seen with Kontakt via yabridge.
-    if (auto vst3Path = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_VST3", {}); vst3Path.isNotEmpty())
+    if (auto vst3Path = SystemStats::getEnvironmentVariable ("STAGERIG_TEST_VST3", {}); vst3Path.isNotEmpty())
     {
         // A tempo no default would produce, so the helper's report proves this
         // value reached the plugin rather than 120 being a coincidence.
@@ -985,9 +985,9 @@ int main()
                             CHECK (std::abs (b2 - a2) < 1e-3f);
                         }
                     }
-                    // PERFORMER_TEST_TWO_INPUTS=1 loads the same plugin into a second input as
+                    // STAGERIG_TEST_TWO_INPUTS=1 loads the same plugin into a second input as
                     // well: two instances of one bridged plugin, which is what a two-manual rig does.
-                    if (SystemStats::getEnvironmentVariable ("PERFORMER_TEST_TWO_INPUTS", "0").getIntValue() > 0)
+                    if (SystemStats::getEnvironmentVariable ("STAGERIG_TEST_TWO_INPUTS", "0").getIntValue() > 0)
                     {
                         std::printf ("     loading a SECOND instance of %s on input 1\n", desc.name.toRawUTF8()); std::fflush (stdout);
                         const auto t0b = Time::getMillisecondCounterHiRes();
@@ -1009,9 +1009,9 @@ int main()
                         engine.injectMidi (1, MidiMessage::noteOff (2, 60));
                     }
 
-                    // PERFORMER_TEST_EDITOR_SECONDS=N keeps the plugin's editor open for N seconds so a
+                    // STAGERIG_TEST_EDITOR_SECONDS=N keeps the plugin's editor open for N seconds so a
                     // script can drive and screenshot it (GUI/mouse investigations).
-                    if (const int hold = SystemStats::getEnvironmentVariable ("PERFORMER_TEST_EDITOR_SECONDS", "0").getIntValue(); hold > 0)
+                    if (const int hold = SystemStats::getEnvironmentVariable ("STAGERIG_TEST_EDITOR_SECONDS", "0").getIntValue(); hold > 0)
                     {
                         std::printf ("     opening editor 'PERFTEST %s' for %d s\n", desc.name.toRawUTF8(), hold); std::fflush (stdout);
                         CHECK (x->showEditor ("PERFTEST " + desc.name));
@@ -1422,7 +1422,7 @@ int main()
         engine.selectProgram (0, 50); settle();        // leaving 51 captures it
         engine.selectProgram (0, 51); settle();        // leaving 50 captures it
 
-        TemporaryFile two (".performer.json");
+        TemporaryFile two (".stagerig.json");
         CHECK (engine.captureSetup().saveToFile (two.getFile()).wasOk());
         Setup rl;
         CHECK (Setup::loadFromFile (two.getFile(), rl).wasOk());
@@ -1478,7 +1478,7 @@ int main()
             };
             auto saveReload = [&] (const char* label, std::function<void()> checks)
             {
-                TemporaryFile f (".performer.json");
+                TemporaryFile f (".stagerig.json");
                 CHECK (engine.captureSetup().saveToFile (f.getFile()).wasOk());
                 Setup rl; CHECK (Setup::loadFromFile (f.getFile(), rl).wasOk());
                 engine.loadSetup (rl); settle();

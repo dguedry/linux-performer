@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 # Version: CI passes the tag (v1.2.3 -> 1.2.3); local builds use the default.
-set(PERFORMER_VERSION "0.1.52" CACHE STRING "Performer version")
-project(Performer VERSION ${PERFORMER_VERSION} LANGUAGES C CXX)
+set(STAGERIG_VERSION "0.1.52" CACHE STRING "StageRig version")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,11 +8,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(external/JUCE EXCLUDE_FROM_ALL)   # keeps JUCE's own install rules out of ours
 
-juce_add_gui_app(Performer
-    PRODUCT_NAME "Performer"
+juce_add_gui_app(StageRig
+    PRODUCT_NAME "StageRig"
     COMPANY_NAME "dguedry"
-    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/performer-512.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/performer-64.png"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/stagerig-512.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/stagerig-64.png"
     VERSION ${PROJECT_VERSION})
 
 # App icon, plus the user manual: embedding docs/MANUAL.md rather than copying it
@@ -22,11 +21,11 @@ juce_add_gui_app(Performer
 add_library(ClapHeaders INTERFACE)
 target_include_directories(ClapHeaders INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include)
 
-juce_add_binary_data(PerformerAssets
-    SOURCES Resources/performer-512.png Resources/performer-256.png Resources/performer-64.png
+juce_add_binary_data(StageRigAssets
+    SOURCES Resources/stagerig-512.png Resources/stagerig-256.png Resources/stagerig-64.png
             docs/MANUAL.md)
 
-target_sources(Performer PRIVATE
+target_sources(StageRig PRIVATE
     Source/Main.cpp
     Source/Model.cpp
     Source/PluginHost.cpp
@@ -43,16 +42,16 @@ target_sources(Performer PRIVATE
     Source/Engine.cpp
     Source/MainComponent.cpp)
 
-target_include_directories(Performer PRIVATE Source)
+target_include_directories(StageRig PRIVATE Source)
 
-target_compile_definitions(Performer PRIVATE
-    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:Performer,JUCE_PRODUCT_NAME>"
-    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:Performer,JUCE_VERSION>"
+target_compile_definitions(StageRig PRIVATE
+    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:StageRig,JUCE_PRODUCT_NAME>"
+    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:StageRig,JUCE_VERSION>"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_ALSA=1
     JUCE_JACK=1
-    JUCE_JACK_CLIENT_NAME="Performer"
+    JUCE_JACK_CLIENT_NAME="StageRig"
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_LV2=1
     JUCE_PLUGINHOST_LADSPA=1
@@ -60,9 +59,9 @@ target_compile_definitions(Performer PRIVATE
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
-target_link_libraries(Performer PRIVATE
+target_link_libraries(StageRig PRIVATE
     ClapHeaders
-    PerformerAssets
+    StageRigAssets
     ${CMAKE_DL_LIBS}
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -80,21 +79,21 @@ target_link_libraries(Performer PRIVATE
     juce::juce_recommended_warning_flags)
 
 #------------------------------------------------------------------------------
-# performer-plugin-host: one plugin per process
-juce_add_gui_app(PerformerPluginHost
-    PRODUCT_NAME "performer-plugin-host"
+# stagerig-plugin-host: one plugin per process
+juce_add_gui_app(StageRigPluginHost
+    PRODUCT_NAME "stagerig-plugin-host"
     COMPANY_NAME "dguedry"
     VERSION ${PROJECT_VERSION})
 
-target_sources(PerformerPluginHost PRIVATE
+target_sources(StageRigPluginHost PRIVATE
     Source/PluginHostProcess/PluginHostMain.cpp
     Source/ClapPluginFormat.cpp
     Source/Ipc/Protocol.cpp)
 
-target_include_directories(PerformerPluginHost PRIVATE Source
+target_include_directories(StageRigPluginHost PRIVATE Source
     external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK)
 
-target_compile_definitions(PerformerPluginHost PRIVATE
+target_compile_definitions(StageRigPluginHost PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST3=1
@@ -104,9 +103,9 @@ target_compile_definitions(PerformerPluginHost PRIVATE
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
-target_link_libraries(PerformerPluginHost PRIVATE
+target_link_libraries(StageRigPluginHost PRIVATE
     ClapHeaders
-    PerformerAssets
+    StageRigAssets
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
@@ -122,23 +121,23 @@ target_link_libraries(PerformerPluginHost PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
-add_dependencies(Performer PerformerPluginHost)
+add_dependencies(StageRig StageRigPluginHost)
 
 # Put the helper next to the main executable so it is found at runtime.
 #
-# Done when the HELPER relinks, not only when Performer does: a change to the
+# Done when the HELPER relinks, not only when StageRig does: a change to the
 # host alone used to leave the stale copy in place, so the app kept launching
 # an old helper while the new one sat unused in its own artefacts directory --
 # and every test of the new code was silently running the old one.
-# Performer's own post-build copy is kept for the first build, when its
+# StageRig's own post-build copy is kept for the first build, when its
 # directory may not exist yet when the helper is linked.
-add_custom_command(TARGET PerformerPluginHost POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:Performer>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:PerformerPluginHost> $<TARGET_FILE_DIR:Performer>/performer-plugin-host
-    COMMENT "Copying performer-plugin-host next to Performer")
-add_custom_command(TARGET Performer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:PerformerPluginHost> $<TARGET_FILE_DIR:Performer>/performer-plugin-host
-    COMMENT "Copying performer-plugin-host next to Performer")
+add_custom_command(TARGET StageRigPluginHost POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:StageRig>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/stagerig-plugin-host
+    COMMENT "Copying stagerig-plugin-host next to StageRig")
+add_custom_command(TARGET StageRig POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:StageRigPluginHost> $<TARGET_FILE_DIR:StageRig>/stagerig-plugin-host
+    COMMENT "Copying stagerig-plugin-host next to StageRig")
 
 #------------------------------------------------------------------------------
 # Tests
@@ -164,7 +163,7 @@ target_compile_definitions(RemoteTest PRIVATE
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_LV2=1 JUCE_PLUGINHOST_LADSPA=1 JUCE_PLUGINHOST_VST=0)
 target_link_libraries(RemoteTest PRIVATE
     ClapHeaders
-    PerformerAssets
+    StageRigAssets
     juce::juce_audio_basics juce::juce_audio_devices juce::juce_audio_formats
     juce::juce_audio_processors juce::juce_audio_utils
     juce::juce_core juce::juce_data_structures juce::juce_events
@@ -185,19 +184,19 @@ target_link_libraries(EngineTest PRIVATE
     juce::juce_core juce::juce_data_structures juce::juce_events
     juce::juce_graphics juce::juce_gui_basics juce::juce_gui_extra
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
-add_dependencies(EngineTest PerformerPluginHost)
+add_dependencies(EngineTest StageRigPluginHost)
 add_test(NAME EngineTest COMMAND EngineTest)
-set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "PERFORMER_PLUGIN_HOST=$<TARGET_FILE:PerformerPluginHost>")
+set_tests_properties(EngineTest PROPERTIES ENVIRONMENT "STAGERIG_PLUGIN_HOST=$<TARGET_FILE:StageRigPluginHost>")
 
 #------------------------------------------------------------------------------
 # Install: `cmake --install build --prefix ~/.local` (or /usr/local) puts the two
-# binaries side by side (Performer finds its helper next to itself), plus the
+# binaries side by side (StageRig finds its helper next to itself), plus the
 # launcher entry and icon.
-install(TARGETS Performer PerformerPluginHost RUNTIME DESTINATION bin)
-install(FILES Resources/performer.desktop DESTINATION share/applications)
-install(FILES Resources/performer.svg DESTINATION share/icons/hicolor/scalable/apps)
+install(TARGETS StageRig StageRigPluginHost RUNTIME DESTINATION bin)
+install(FILES Resources/stagerig.desktop DESTINATION share/applications)
+install(FILES Resources/stagerig.svg DESTINATION share/icons/hicolor/scalable/apps)
 foreach(size 16 24 32 48 64 128 256 512)
-    install(FILES Resources/performer-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME performer.png)
+    install(FILES Resources/stagerig-${size}.png DESTINATION share/icons/hicolor/${size}x${size}/apps RENAME stagerig.png)
 endforeach()
 
 #------------------------------------------------------------------------------
@@ -205,17 +204,17 @@ endforeach()
 # does both and attaches them to releases). Linked libraries are picked up
 # automatically; the X11/GL libraries JUCE opens at runtime with dlopen are listed
 # by hand.
-set(CPACK_PACKAGE_NAME "performer")
+set(CPACK_PACKAGE_NAME "stagerig")
 set(CPACK_PACKAGE_VENDOR "dguedry")
 set(CPACK_PACKAGE_CONTACT "Donnie Guedry <dguedry@gmail.com>")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/dguedry/linux-performer")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/dguedry/stagerig")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Live-performance plugin host for Linux")
-set(CPACK_PACKAGE_DESCRIPTION "Performer is a live-performance MIDI-to-plugin host: 128 programs per keyboard selected by MIDI Program Change, VST3/LV2/LADSPA instruments and effects with splits and velocity layers, MIDI learn, every plugin in its own process, low-latency PipeWire/JACK audio.")
+set(CPACK_PACKAGE_DESCRIPTION "StageRig is a live-performance MIDI-to-plugin host: 128 programs per keyboard selected by MIDI Program Change, VST3/LV2/LADSPA instruments and effects with splits and velocity layers, MIDI learn, every plugin in its own process, low-latency PipeWire/JACK audio.")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_STRIP_FILES ON)
-set(CPACK_PACKAGE_FILE_NAME "performer-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_FILE_NAME "stagerig-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
 
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "sound")

@@ -226,7 +226,7 @@ bool PluginHost::OutOfProcessScanner::findPluginTypesFor (AudioPluginFormat& for
                 if (d->loadFromXml (*xml)) { result.add (d.release()); ++parsed; }
             }
 
-    if (SystemStats::getEnvironmentVariable ("PERFORMER_SCAN_DEBUG", {}).isNotEmpty())
+    if (SystemStats::getEnvironmentVariable ("STAGERIG_SCAN_DEBUG", {}).isNotEmpty())
         std::fprintf (stderr, "[scan] %s %s: %s in %.1f s, %d bytes of output, %d descriptions\n",
                       format.getName().toRawUTF8(), fileOrIdentifier.toRawUTF8(),
                       res == HelperResult::finished ? "ok" : res == HelperResult::timedOut ? "TIMED OUT" : "stopped before finishing",

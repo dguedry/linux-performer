@@ -1,9 +1,9 @@
 /*
-    performer-plugin-host: hosts exactly one plugin for Performer in a separate
+    stagerig-plugin-host: hosts exactly one plugin for StageRig in a separate
     process.
 
-        performer-plugin-host --serve <shm-name> <socket-fd>
-        performer-plugin-host --scan  <format-name> <file-or-identifier>
+        stagerig-plugin-host --serve <shm-name> <socket-fd>
+        stagerig-plugin-host --scan  <format-name> <file-or-identifier>
 
     See Source/Ipc/Protocol.h for the wire protocol.
 */
@@ -85,10 +85,10 @@ using namespace perf;
 
 /** Loading a plugin is the slowest thing this process does, so the timings that
     went into tuning it are worth keeping -- but not on every load. Set
-    PERFORMER_TIME_PARAMS=1 to see them. */
+    STAGERIG_TIME_PARAMS=1 to see them. */
 static bool timeParams()
 {
-    static const bool on = [] { auto* v = std::getenv ("PERFORMER_TIME_PARAMS"); return v != nullptr && *v != '0'; }();
+    static const bool on = [] { auto* v = std::getenv ("STAGERIG_TIME_PARAMS"); return v != nullptr && *v != '0'; }();
     return on;
 }
 
@@ -108,8 +108,8 @@ public:
     {
         /* Whether the plugin ever asked for tempo, and what it last got. Worth
            keeping: "my delay is not syncing" is otherwise impossible to tell
-           apart from "this plugin never asks". PERFORMER_REPORT_TEMPO=1. */
-        if (playHead != nullptr && std::getenv ("PERFORMER_REPORT_TEMPO") != nullptr)
+           apart from "this plugin never asks". STAGERIG_REPORT_TEMPO=1. */
+        if (playHead != nullptr && std::getenv ("STAGERIG_REPORT_TEMPO") != nullptr)
             std::fprintf (stderr, "[tempo] plugin asked %d times, last bpm %.2f\n",
                           playHead->asked.load(), playHead->lastBpm.load());
         stopAudioThread();
@@ -466,7 +466,7 @@ private:
         /* Log every one, including the ones we drop, with the parameter's name:
            "does this plugin report its own edits" cannot be answered without
            seeing what it reports and what we discard. */
-        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+        if (std::getenv ("STAGERIG_REPORT_PARAMS") != nullptr)
         {
             String pname;
             if (instance != nullptr)
@@ -484,8 +484,8 @@ private:
     {
         /* Logged because "my plugin's own edits do not reach the tablet" is
            otherwise indistinguishable from "this plugin never tells the host".
-           PERFORMER_REPORT_PARAMS=1. */
-        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+           STAGERIG_REPORT_PARAMS=1. */
+        if (std::getenv ("STAGERIG_REPORT_PARAMS") != nullptr)
             std::fprintf (stderr, "[gesture] begin on param %d\n", index);
         if (! MessageManager::getInstance()->isThisTheMessageThread()) return;
         auto* p = paramAt (index);
@@ -494,7 +494,7 @@ private:
     }
     void audioProcessorChanged (AudioProcessor*, const ChangeDetails& d) override
     {
-        if (std::getenv ("PERFORMER_REPORT_PARAMS") != nullptr)
+        if (std::getenv ("STAGERIG_REPORT_PARAMS") != nullptr)
             std::fprintf (stderr, "[changed] params=%d program=%d latency=%d\n",
                           (int) d.parameterInfoChanged, (int) d.programChanged, (int) d.latencyChanged);
     }
@@ -522,7 +522,7 @@ private:
             // Icon before the map, for the same reason as the main window: the
             // panel reads it once, when the window appears.
             addToDesktop (getDesktopWindowStyleFlags());
-            if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::performer256_png, BinaryData::performer256_pngSize));
+            if (auto* peer = getPeer()) peer->setIcon (ImageCache::getFromMemory (BinaryData::stagerig256_png, BinaryData::stagerig256_pngSize));
             setVisible (true);
 
             // yabridge (Wine-bridged plugins) only learns where the embedded window is on
@@ -558,7 +558,7 @@ private:
 
         void closeButtonPressed() override
         {
-            /* Hidden rather than deleted, so reopening is instant. Performer is
+            /* Hidden rather than deleted, so reopening is instant. StageRig is
                told it closed either way: as far as the rest of the app is
                concerned the editor is shut. */
             server.notify (ipc::Msg::notifyEditorClosed, MemoryOutputStream());
@@ -580,7 +580,7 @@ private:
     //==============================================================================
     /** Tells the plugin the tempo the host is keeping.
 
-        Performer has no transport: there is no timeline on stage, nothing to
+        StageRig has no transport: there is no timeline on stage, nothing to
         start or stop. But a plugin that syncs a delay or an arpeggiator asks the
         host for tempo, and with no playhead at all it either guesses 120 or does
         nothing. So this reports a position that advances continuously and a
@@ -663,7 +663,7 @@ private:
             ::sem_post (&shm->request);              // in case it is between waits
             audioThread->waitForThreadToExit (50);
             if (waited > 0 && waited % 5000 == 0)
-                std::fprintf (stderr, "performer-plugin-host: waiting for the plugin to finish its block (%ds)\n", waited / 1000);
+                std::fprintf (stderr, "stagerig-plugin-host: waiting for the plugin to finish its block (%ds)\n", waited / 1000);
         }
         audioThread.reset();
     }
@@ -813,7 +813,7 @@ static void killDescendants (pid_t root)
         ::kill (pid, SIGKILL);
 }
 
-/** If Performer dies while our message thread is stuck inside a plugin call, the
+/** If StageRig dies while our message thread is stuck inside a plugin call, the
     control thread never sees the connection close. Watch the parent directly. */
 static void armParentWatchdog()
 {
@@ -825,7 +825,7 @@ static void armParentWatchdog()
             std::this_thread::sleep_for (std::chrono::milliseconds (300));
             if (::getppid() != parent)
             {
-                std::cerr << "performer-plugin-host: Performer is gone, exiting\n";
+                std::cerr << "stagerig-plugin-host: StageRig is gone, exiting\n";
                 killDescendants (::getpid());
                 ::kill (-::getpid(), SIGKILL);
             }
@@ -849,18 +849,18 @@ static void armExitWatchdog (int graceMs)
 class PluginHostApplication : public JUCEApplication
 {
 public:
-    const String getApplicationName() override       { return "performer-plugin-host"; }
+    const String getApplicationName() override       { return "stagerig-plugin-host"; }
     const String getApplicationVersion() override    { return "1.0"; }
     bool moreThanOneInstanceAllowed() override       { return true; }
 
     void initialise (const String& commandLine) override
     {
         // Own process group: lets the watchdog take stuck Wine children down with us,
-        // without touching Performer.
+        // without touching StageRig.
         ::setpgid (0, 0);
         armParentWatchdog();
 
-        ArgumentList args ("performer-plugin-host", commandLine);
+        ArgumentList args ("stagerig-plugin-host", commandLine);
 
         if (args.containsOption ("--scan"))
         {
@@ -883,7 +883,7 @@ public:
                 std::this_thread::sleep_for (std::chrono::seconds (30));
                 if (! probeDone.load())
                 {
-                    std::cerr << "performer-plugin-host: probe still running after 30 s, killing bridge processes\n";
+                    std::cerr << "stagerig-plugin-host: probe still running after 30 s, killing bridge processes\n";
                     killDescendants (::getpid());
                 }
             }).detach();
@@ -917,7 +917,7 @@ public:
         const int i = args.indexOfOption ("--serve");
         if (i < 0 || i + 2 >= args.size())
         {
-            std::cerr << "usage: performer-plugin-host --serve <shm-name> <socket-fd> | --scan <format> <file>\n";
+            std::cerr << "usage: stagerig-plugin-host --serve <shm-name> <socket-fd> | --scan <format> <file>\n";
             setApplicationReturnValue (2);
             quit();
             return;
@@ -928,7 +928,7 @@ public:
         if (fd >= 0) ::fcntl (fd, F_SETFD, FD_CLOEXEC);   // Wine children must not hold the control socket open
         if (shm == nullptr || fd < 0)
         {
-            std::cerr << "performer-plugin-host: cannot open shared block\n";
+            std::cerr << "stagerig-plugin-host: cannot open shared block\n";
             setApplicationReturnValue (1);
             quit();
             return;

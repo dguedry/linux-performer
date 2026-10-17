@@ -753,7 +753,7 @@ private:
 class HelpDocumentWindow : public DocumentWindow
 {
 public:
-    HelpDocumentWindow() : DocumentWindow ("Performer manual", bgDark, DocumentWindow::allButtons)
+    HelpDocumentWindow() : DocumentWindow ("StageRig manual", bgDark, DocumentWindow::allButtons)
     {
         setUsingNativeTitleBar (true);
         auto* c = new HelpComponent();

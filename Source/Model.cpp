@@ -288,7 +288,7 @@ ChartRef ChartRef::fromVar (const var& v)
 File chartsFolderFor (const File& setupFile)
 {
     if (setupFile == File()) return {};
-    // "MySetup.performer.json" -> "MySetup.performer.charts"
+    // "MySetup.stagerig.json" -> "MySetup.stagerig.charts"
     return setupFile.getSiblingFile (setupFile.getFileNameWithoutExtension() + ".charts");
 }
 
@@ -358,7 +358,7 @@ SetDef SetDef::fromVar (const var& v)
 var Setup::toVar() const
 {
     auto* o = new DynamicObject();
-    o->setProperty ("format", "performer-setup");
+    o->setProperty ("format", "stagerig-setup");
     o->setProperty ("version", 1);
     o->setProperty ("preloadAllPrograms", preloadAllPrograms);
     o->setProperty ("releaseTailSeconds", releaseTailSeconds);
@@ -466,8 +466,9 @@ Result Setup::loadFromFile (const File& f, Setup& out)
     auto r = JSON::parse (f.loadFileAsString(), parsed);
     if (r.failed())
         return r;
-    if (propStr (parsed, "format") != "performer-setup")
-        return Result::fail ("Not a Performer setup file");
+    // "performer-setup" is what the program wrote under its old name; those files are the same thing.
+    if (propStr (parsed, "format") != "stagerig-setup" && propStr (parsed, "format") != "performer-setup")
+        return Result::fail ("Not a StageRig setup file");
 
     out = fromVar (parsed);
     return Result::ok();

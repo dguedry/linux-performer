@@ -49,7 +49,7 @@ void MappingTemplates::remove (const PluginDescription& d)
 Result MappingTemplates::save() const
 {
     auto* root = new DynamicObject();
-    root->setProperty ("format", "performer-mapping-templates");
+    root->setProperty ("format", "stagerig-mapping-templates");
     root->setProperty ("version", 1);
     auto* plugins = new DynamicObject();
     for (auto& [key, e] : entries)
@@ -82,7 +82,8 @@ Result MappingTemplates::load()
     auto r = JSON::parse (file.loadFileAsString(), parsed);
     if (r.failed()) return r;
     auto* root = parsed.getDynamicObject();
-    if (root == nullptr || root->getProperty ("format").toString() != "performer-mapping-templates")
+    const auto format = root != nullptr ? root->getProperty ("format").toString() : String();
+    if (root == nullptr || (format != "stagerig-mapping-templates" && format != "performer-mapping-templates"))
         return Result::fail ("Not a mapping template file");
     if (auto* plugins = root->getProperty ("plugins").getDynamicObject())
         for (auto& prop : plugins->getProperties())

@@ -11,7 +11,7 @@ namespace perf
     JUCE has no CLAP implementation -- it ships AudioUnit, LADSPA, LV2, VST and
     VST3 and nothing else -- so this is a format written against the CLAP C API
     directly. It is deliberately shaped like JUCE's own formats so the rest of
-    Performer (scanning, the known-plugin list, the out-of-process host) does
+    StageRig (scanning, the known-plugin list, the out-of-process host) does
     not have to know which format a plugin is.
 
     CLAP matters on Linux because it is where new plugins increasingly appear

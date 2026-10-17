@@ -27,11 +27,11 @@ public:
         for (int q : { 32, 64, 128, 256, 512, 1024 })
             quantumBox.addItem (juce::String (q) + " samples  (" + juce::String (1000.0 * q / 48000.0, 2) + " ms @ 48 kHz)", q);
         quantumBox.setSelectedId (settings.getIntValue ("pipewireQuantum", 128), juce::dontSendNotification);
-        quantumBox.setTooltip ("Buffer size Performer asks PipeWire for. Smaller = lower latency, more CPU headroom needed. 128 is a good live default; 64 if the machine is quiet.");
+        quantumBox.setTooltip ("Buffer size StageRig asks PipeWire for. Smaller = lower latency, more CPU headroom needed. 128 is a good live default; 64 if the machine is quiet.");
 
         addAndMakeVisible (takeover);
         takeover.setToggleState (settings.getBoolValue ("pipewireTakeover", true), juce::dontSendNotification);
-        takeover.setTooltip ("Pin PipeWire's whole graph to this quantum and 48 kHz while Performer runs (restored on quit). Other audio apps follow; needed when something else has forced a large quantum.");
+        takeover.setTooltip ("Pin PipeWire's whole graph to this quantum and 48 kHz while StageRig runs (restored on quit). Other audio apps follow; needed when something else has forced a large quantum.");
 
         addAndMakeVisible (applyBtn);
         applyBtn.onClick = [this] { apply(); };
@@ -118,7 +118,7 @@ private:
     std::function<void (const juce::String&)> onStatus;
     juce::Label title { {}, "LIVE LATENCY" }, quantumLabel { {}, "PipeWire quantum" }, status;
     juce::ComboBox quantumBox;
-    juce::ToggleButton takeover { "Take over the PipeWire clock while Performer runs" };
+    juce::ToggleButton takeover { "Take over the PipeWire clock while StageRig runs" };
     juce::TextButton applyBtn { "Apply" };
     juce::AudioDeviceSelectorComponent selector;
 };

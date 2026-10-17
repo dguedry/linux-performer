@@ -1,6 +1,6 @@
-# Performer user manual
+# StageRig user manual
 
-Performer is a live-performance plugin host for Linux. You point your keyboards
+StageRig is a live-performance plugin host for Linux. You point your keyboards
 at it, build a program for each sound you need, and change sounds from the
 keyboard while you play.
 
@@ -22,7 +22,7 @@ and the code layout, see the [README](../README.md).
 - [Playing live](#playing-live)
 - [Windows plugins](#windows-plugins)
 - [When something goes wrong](#when-something-goes-wrong)
-- [Files Performer uses](#files-performer-uses)
+- [Files StageRig uses](#files-stagerig-uses)
 - [Keyboard and mouse reference](#keyboard-and-mouse-reference)
 
 ## The idea in one minute
@@ -44,8 +44,8 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
 
 ## First run
 
-1. Start Performer. It opens with two empty inputs, **Upper** and **Lower**.
-2. Open **Audio...** and choose your output. Performer defaults to the JACK
+1. Start StageRig. It opens with two empty inputs, **Upper** and **Lower**.
+2. Open **Audio...** and choose your output. StageRig defaults to the JACK
    device type at 48 kHz, which on a PipeWire system is the lowest-latency
    path. See [Audio settings and latency](#audio-settings-and-latency).
 3. Open **Plugins...** and press **Scan VST3**, **Scan LV2** or **Scan LADSPA**.
@@ -57,7 +57,7 @@ Keyboard ──> Input "Lower" (ch 2) ──> Program 002 "Bass" ──> Slot 1 
    **+ Add instrument...**.
 6. Play. Press **Save As...** when the set is worth keeping.
 
-**Help** in the toolbar opens this manual inside Performer, so the answer to
+**Help** in the toolbar opens this manual inside StageRig, so the answer to
 "why won't the tablet connect" is reachable from the stage without finding a
 browser. The list on the left jumps to a section, and the search box narrows to
 whichever section answers what you typed.
@@ -101,7 +101,7 @@ Each keyboard input has:
   workstations send program changes on a fixed channel instead of the one they
   play on: a Roland Jupiter-50, for example, sends its registration changes on
   channel 16 while its keyboard parts play on 1, 3 and 4, so setting **PC on**
-  to *Ch 16* makes the front-panel registration buttons select Performer
+  to *Ch 16* makes the front-panel registration buttons select StageRig
   programs while the notes still arrive on their own channel. *Any channel*
   accepts program changes from anywhere on that MIDI port, which is the setting
   to try when program changes are not getting through and you do not know what
@@ -260,8 +260,8 @@ ChordPro file (`.cho`, `.crd`, `.chordpro`) has its chords set above the
 words. A song may have several; they appear as tabs.
 
 The file is copied, not referred to: it goes into a folder beside the setup
-named after it -- `MySetup.performer.json` keeps its charts in
-`MySetup.performer.charts/` -- so the pair can be moved or backed up
+named after it -- `MySetup.stagerig.json` keeps its charts in
+`MySetup.stagerig.charts/` -- so the pair can be moved or backed up
 together, and **Save As** brings the folder along. Removing a chart from a
 song takes it off the song and leaves the file in the folder.
 
@@ -387,7 +387,7 @@ to the program, so the same knob can do different things in different sounds.
 6. Press **Add**.
 
 **Use touched parameter** is often faster: open the plugin's GUI, move the knob
-you care about, press the button, and Performer selects that parameter.
+you care about, press the button, and StageRig selects that parameter.
 
 **Suggest...** proposes a whole set at once. If you saved a template for that
 plugin it offers that; otherwise it matches parameter names against the General
@@ -435,23 +435,23 @@ of each block is what a keyboard would send as a Program Change. Tapping a
 program switches to it immediately, and the page follows along if you change
 programs at the laptop instead.
 
-Performer shows the address and code to get here:
+StageRig shows the address and code to get here:
 
 ![The Tablet control dialog](images/tablet-control.png)
 
 There are two ways in, and the fast one is the square code. Point the tablet's
-camera at it and it opens Performer directly, with no address to read off a
+camera at it and it opens StageRig directly, with no address to read off a
 screen. **Options ▸ Print program map** puts the same code on the printed sheet, so a page taped
 to the keyboard is also the way in.
 
 To type it instead, enter the address once, then the six-character code. The
-tablet remembers the code, and it does not change when Performer restarts, so a
+tablet remembers the code, and it does not change when StageRig restarts, so a
 home-screen shortcut keeps working. It is case-insensitive and avoids characters
 that misread, so `0`/`O` and `1`/`I` never appear.
 
 ![Entering the code on the tablet](images/tablet-code.png)
 
-Tablet control stays on across restarts. If it was on when you quit, Performer
+Tablet control stays on across restarts. If it was on when you quit, StageRig
 starts the web app again at launch, so a tablet on a stand keeps working without
 anyone going back to the laptop. Turning it off is remembered the same way.
 
@@ -483,7 +483,7 @@ Input travels back to the plugin, so the tablet works as a second screen and
 mouse rather than a remote with a fixed set of buttons -- and a laptop or phone
 on the same network does the same, because it is only a web page.
 
-Performer used to offer faders you picked per plugin and labelled by hand, and
+StageRig used to offer faders you picked per plugin and labelled by hand, and
 they are gone: what you get now is whatever the plugin shows, with nothing to
 set up first.
 
@@ -496,10 +496,10 @@ on the tablet could drive that organ but never follow it. Mirroring the window
 sidesteps that, because what you see is what the plugin is showing -- and it
 needs no setting up for each plugin, which matters when a rig has a dozen.
 
-This needs `x11vnc`, `websockify`, `xdotool` and `novnc` installed; Performer
+This needs `x11vnc`, `websockify`, `xdotool` and `novnc` installed; StageRig
 says so if any are missing.
 
-It works on a Wayland desktop as well as an X11 one. Performer is an X11
+It works on a Wayland desktop as well as an X11 one. StageRig is an X11
 application and plugin editors are X11 windows, so both run through XWayland,
 which every Wayland desktop provides and which `x11vnc` can read and write like
 any other X display. This is tested: a plugin's own window mirrors to the
@@ -508,11 +508,11 @@ tablet under XWayland exactly as it does on X11.
 A Wayland session without XWayland is the one case that does not work, because
 everything here reads the screen through X. The tools are still installed and
 still start, so rather than leave the tablet showing a black rectangle,
-Performer checks that an X display is actually reachable and says what to
+StageRig checks that an X display is actually reachable and says what to
 install. Install `xwayland` and log back in, or use an X11 session.
 
 The stream travels on the same port as the tablet app, so nothing extra has to
-be opened in a firewall, and it stops when Performer does.
+be opened in a firewall, and it stops when StageRig does.
 
 The tab is named after the program, so several open plugin windows are told
 apart at a glance, and pressing **GUI** again for the same instrument brings its
@@ -540,16 +540,16 @@ drag the plugin around, and stops sending them to it; press it again to play.
 **Full** next to it hides the browser's address bar, which is worth doing on any
 screen: the bar costs a fifth of the height on a small one, and a plugin window
 wants all of it. Android and desktop browsers have this. iPhones and iPads do not --
-Safari offers no way for a page to go fullscreen -- so on those, add Performer
+Safari offers no way for a page to go fullscreen -- so on those, add StageRig
 to the home screen and open plugin windows from there, which has the same
 effect and is described below.
 
 **The plugin window has to be uncovered on the computer.** The tablet's taps
 are delivered to the computer's screen as real mouse clicks, and a click goes
-to whatever window is on top at that spot. If the browser, Performer's own
+to whatever window is on top at that spot. If the browser, StageRig's own
 window or anything else overlaps the plugin's editor, the pointer will visibly
 move to the right place and the click will land on the wrong window -- which
-looks like the plugin ignoring you. Performer brings the editor to the front
+looks like the plugin ignoring you. StageRig brings the editor to the front
 each time you press GUI, but if you then click something else on the computer
 and it covers the editor, move it aside. Trying it from the computer's own
 browser is the classic case: the browser you are clicking in is exactly what is
@@ -562,11 +562,11 @@ precisely and to miss sometimes.
 ### If the tablet cannot connect
 
 The most common cause is a firewall on the computer, not anything wrong with
-Performer or the tablet. The symptom is confusing, because the desktop can open
+StageRig or the tablet. The symptom is confusing, because the desktop can open
 the address itself perfectly well while the tablet just times out: traffic from
 the same machine never passes the firewall, so only the tablet is blocked.
 
-Performer warns about this when it can detect it. To allow the port from your
+StageRig warns about this when it can detect it. To allow the port from your
 own networks only, and not from the internet:
 
 ```
@@ -576,7 +576,7 @@ sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
 ```
 
 Those three ranges are the private address blocks, so the rule covers your home
-wifi, a venue's network and Performer's own hotspot, while refusing anything
+wifi, a venue's network and StageRig's own hotspot, while refusing anything
 from outside. If you use a different firewall the principle is the same: open
 TCP 7777 for private networks.
 
@@ -596,7 +596,7 @@ does not offer an automatic prompt for this.
 
 If no automatic prompt appears on Android, the menu item still works. Browsers
 only volunteer the prompt on an address they consider secure, which in practice
-means `https`, and Performer serves plain `http` on your own network. That is a
+means `https`, and StageRig serves plain `http` on your own network. That is a
 deliberate trade: a certificate for a private address is not something a stage
 tool should be demanding of you. The manual route works regardless, and the
 installed shortcut behaves identically.
@@ -610,7 +610,7 @@ and needs nothing from the venue.
 
 ![Serving our own wifi network](images/tablet-control-hotspot.png)
 
-The first time, Performer asks which wifi adapter to use and remembers the
+The first time, StageRig asks which wifi adapter to use and remembers the
 answer, along with the network name and password. There is nothing to set up on
 the tablet: it gets an address automatically when it joins, exactly like joining
 any other wifi, and it still has internet through whatever this computer is
@@ -619,7 +619,7 @@ connected to.
 One radio usually cannot be a client and an access point at once, so if this
 computer has a single wifi adapter it will leave its current network while the
 hotspot runs. That is normally what you want on stage. If you would rather keep
-both, a cheap USB wifi adapter gives you a second radio, and Performer prefers
+both, a cheap USB wifi adapter gives you a second radio, and StageRig prefers
 whichever adapter is free. The adapter list marks which is which, so the choice
 is not a guess.
 
@@ -675,10 +675,10 @@ across the gap, so you can stop, think, and start again without a stale tempo
 dragging the result. Only the last eight taps count, so speeding up is followed
 rather than averaged away.
 
-Performer has no transport: there is nothing to start or stop. Plugins are told
+StageRig has no transport: there is nothing to start or stop. Plugins are told
 the music is always running, which is what a live rig looks like from inside a
 plugin. If a plugin's delay still does not sync, it may simply never ask the
-host; running Performer with `PERFORMER_REPORT_TEMPO=1` prints whether each
+host; running StageRig with `STAGERIG_REPORT_TEMPO=1` prints whether each
 plugin asked and what it was told.
 
 ## Printing a program map
@@ -709,12 +709,12 @@ to shift octave.
 
 ## Audio settings and latency
 
-**Audio...** has two parts. The top is Performer's own **Live latency** section:
+**Audio...** has two parts. The top is StageRig's own **Live latency** section:
 
 - **PipeWire quantum** — the block size to ask for. 128 samples is 2.7 ms at
   48 kHz and a good live default; 64 if the machine is quiet and has realtime
   scheduling.
-- **Take over the PipeWire clock while Performer runs** — forces the graph to
+- **Take over the PipeWire clock while StageRig runs** — forces the graph to
   that block size at start and restores the previous value on quit.
 - A status line shows the device, the block size actually delivered, the
   resulting latency, whether realtime scheduling is available, and warnings.
@@ -728,14 +728,14 @@ and buffer size.
 
 **For the lowest latency:**
 
-- Use the **JACK** device type. On PipeWire this makes Performer a native node
+- Use the **JACK** device type. On PipeWire this makes StageRig a native node
   in the graph, with no resampling and no extra buffering. The ALSA type goes
   through PipeWire's ALSA emulation.
 - Give yourself **realtime scheduling**. Run `ulimit -r`; if it prints 0, add
   yourself to the `pipewire` group with `sudo usermod -aG pipewire $USER` and
   log out and back in. Small blocks without realtime priority cause dropouts.
 - **Close other audio applications.** A DAW such as Bitwig forces the PipeWire
-  clock to its own block size every few seconds; Performer then shows *clock
+  clock to its own block size every few seconds; StageRig then shows *clock
   held by another app* in the status bar and cannot get its own block size.
 
 *late N* in the status bar counts blocks where a plugin did not answer in time.
@@ -744,14 +744,14 @@ block size is too small for the plugins in that program.
 
 ## Saving, autosave and plugin state
 
-A setup is one `.performer.json` file holding every input, program, plugin and
+A setup is one `.stagerig.json` file holding every input, program, plugin and
 mapping, including each plugin's own state.
 
 - **Save** / **Save As...** write the file. The last file reopens next start.
 - Plugin state is captured whenever a program is unloaded and whenever you save,
   so tweaks made inside a plugin GUI persist.
-- Performer autosaves about once a minute to
-  `~/.config/Performer/autosave.performer.json` and again on quit. If that file
+- StageRig autosaves about once a minute to
+  `~/.config/StageRig/autosave.stagerig.json` and again on quit. If that file
   is newer than the setup you open, the status bar tells you.
 
 A setup file is plain JSON and safe to keep in version control.
@@ -760,7 +760,7 @@ A setup file is plain JSON and safe to keep in version control.
 
 A short checklist:
 
-- Turn on **Options ▸ Preload all programs** and give Performer time to load everything
+- Turn on **Options ▸ Preload all programs** and give StageRig time to load everything
   before the first song. The status bar stops showing loading activity when it
   is done.
 - Check that the status bar shows the block size you expect and no *late*
@@ -773,7 +773,7 @@ A short checklist:
 
 ## Plugin formats
 
-Performer hosts **VST3**, **CLAP**, **LV2** and **LADSPA** natively. Windows
+StageRig hosts **VST3**, **CLAP**, **LV2** and **LADSPA** natively. Windows
 VST3s and CLAPs bridged with yabridge appear as ordinary plugins of that format.
 
 **CLAP** plugins are scanned from `~/.clap`, `/usr/lib/clap` and
@@ -782,7 +782,7 @@ slot, MIDI reaches the plugin, audio comes back, the plugin's own window opens,
 and its state is saved with your setup. Both native Linux CLAP plugins and
 Windows ones bridged by yabridge work.
 
-JUCE itself has no CLAP support, so Performer talks to the CLAP API directly.
+JUCE itself has no CLAP support, so StageRig talks to the CLAP API directly.
 One thing follows from that: a `.clap` bundle can hold several plugins -- Surge
 XT ships the synth and its effects rack in one file -- so each entry in the
 Plugins window is one plugin from a bundle, not one file.
@@ -802,23 +802,23 @@ Setting the Wine side up by hand is the fiddly part, and
 provisions its own Wine, installs the vendor manager applications (Native
 Access, IK Product Manager, Steinberg Download Assistant, Audio Modeling
 Software Center) and the products they deliver, and bridges everything into
-`~/.vst3/yabridge` for Performer to scan. Nothing in Performer depends on it --
+`~/.vst3/yabridge` for StageRig to scan. Nothing in StageRig depends on it --
 any yabridge setup works -- but it saves a lot of tedium.
 
 A prefix vstenv manages records which Wine belongs to it, and yabridge is taught
 to read that record, so the right Wine runs the plugin whatever started it. That
 matters because the wrong Wine version would try to update the prefix and
-corrupt it. Performer needs to do nothing for this to work.
+corrupt it. StageRig needs to do nothing for this to work.
 
 For a prefix set up the older way -- by hand, or by
-[nilinux](https://github.com/dguedry/nilinux), which vstenv succeeds -- Performer
+[nilinux](https://github.com/dguedry/nilinux), which vstenv succeeds -- StageRig
 still follows the convention that relies on the session: it puts `~/.local/bin`
 first on a helper's PATH when a `wine` shim is there, and applies `WINELOADER`
 and `WINEFSYNC` from `~/.config/environment.d/*.conf`, since a desktop launcher
 and a terminal do not always agree about those.
 
 While a vendor's installer replaces a plugin, the bridged file is briefly
-missing. Performer reports *yabridge link points to a missing file* rather than
+missing. StageRig reports *yabridge link points to a missing file* rather than
 blacklisting the plugin; scan again once the install has finished.
 
 ## When something goes wrong
@@ -834,18 +834,18 @@ blacklisting the plugin; scan again once the install has finished.
 | The parameter list seems endless | A VST3 with thousands of per-channel controller parameters. | Type in the search box; see the mapping section above. |
 | An empty plugin editor that will not respond | An ARA-only plugin outside an ARA host. | Use the plugin's non-ARA version. |
 
-## Files Performer uses
+## Files StageRig uses
 
 | Path | What it is |
 |---|---|
-| `~/.config/Performer/Performer.settings` | Window, audio device, scan folders, known plugins, tuning options. |
-| `~/.config/Performer/autosave.performer.json` | The rolling autosave. |
-| `~/.config/Performer/mapping-templates.json` | Your saved per-plugin mapping templates. |
-| `~/.config/Performer/icons/` | Cached plugin icons. |
-| `~/.config/Performer/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
-| your `*.performer.json` | Your set. Keep it wherever you like. |
+| `~/.config/StageRig/StageRig.settings` | Window, audio device, scan folders, known plugins, tuning options. |
+| `~/.config/StageRig/autosave.stagerig.json` | The rolling autosave. |
+| `~/.config/StageRig/mapping-templates.json` | Your saved per-plugin mapping templates. |
+| `~/.config/StageRig/icons/` | Cached plugin icons. |
+| `~/.config/StageRig/RecentlyCrashedPluginsList` | Plugins that crashed while scanning. |
+| your `*.stagerig.json` | Your set. Keep it wherever you like. |
 
-Advanced options can be set in `Performer.settings`: `parallelLoads` (how many
+Advanced options can be set in `StageRig.settings`: `parallelLoads` (how many
 plugins load at once, default 4), `parallelBridgedLoads`, `bridgedColdStartSolo`,
 `pipewireQuantum` and `pipewireTakeover`.
 

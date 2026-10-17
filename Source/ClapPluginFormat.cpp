@@ -139,7 +139,7 @@ namespace
 /** One parameter of a CLAP plugin.
 
     CLAP parameters carry plain values in their own range; JUCE wants 0..1. The
-    conversion lives here so the rest of Performer -- MIDI learn, mappings,
+    conversion lives here so the rest of StageRig -- MIDI learn, mappings,
     the tablet -- sees parameters exactly as it does for VST3. */
 class ClapParameter final : public HostedAudioProcessorParameter
 {
@@ -222,9 +222,9 @@ public:
     {
         host.host_data = this;
         host.clap_version = CLAP_VERSION;
-        host.name = "Performer";
+        host.name = "StageRig";
         host.vendor = "dguedry";
-        host.url = "https://github.com/dguedry/linux-performer";
+        host.url = "https://github.com/dguedry/stagerig";
         host.version = "1.0";
         host.get_extension = &hostGetExtension;
         host.request_restart = &hostRequestRestart;
@@ -968,7 +968,7 @@ void ClapInstance::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
     clap_process_t proc {};
     proc.steady_time = steadyTime;
     proc.frames_count = (uint32_t) numSamples;
-    proc.transport = nullptr;           // Performer has no transport; CLAP allows null
+    proc.transport = nullptr;           // StageRig has no transport; CLAP allows null
     proc.audio_inputs = mainInChannels > 0 ? &ab_in : nullptr;
     proc.audio_inputs_count = mainInChannels > 0 ? 1u : 0u;
     proc.audio_outputs = &ab_out;

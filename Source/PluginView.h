@@ -25,7 +25,7 @@ public:
     /** Everything needed to serve one plugin window. */
     struct Session
     {
-        juce::String title;        // the editor window's title, as Performer set it
+        juce::String title;        // the editor window's title, as StageRig set it
         unsigned long windowId = 0;
         int vncPort = 0;
         int webPort = 0;
@@ -35,7 +35,7 @@ public:
     /** True when the tools to do this are installed. */
     static bool available (juce::String& whatIsMissing);
 
-    /** Finds the X window of an editor Performer opened with this title. */
+    /** Finds the X window of an editor StageRig opened with this title. */
     static unsigned long findWindow (const juce::String& title);
 
     /** Starts serving that window, or returns a session that is not valid with

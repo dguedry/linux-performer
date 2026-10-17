@@ -8,7 +8,7 @@ namespace perf
 
 /* Kill and collect. JUCE's ChildProcess::kill() sends the signal and no
    more, and its destructor does not wait either, so a helper stopped that
-   way stays in the process table as a zombie for as long as Performer runs. */
+   way stays in the process table as a zombie for as long as StageRig runs. */
 static void endProcess (std::unique_ptr<juce::ChildProcess>& p)
 {
     if (p == nullptr) return;
@@ -59,7 +59,7 @@ namespace
         a Wayland session without Xwayland they are present, they start, and
         they see nothing -- the tablet would show a black rectangle instead of
         a plugin, with no hint as to why. JUCE itself is X11-only on Linux, so
-        if Performer is running at all there is normally an X display here;
+        if StageRig is running at all there is normally an X display here;
         this catches the case where there is not. */
     bool hasUsableXDisplay()
     {
@@ -128,7 +128,7 @@ unsigned long PluginView::findWindow (const String& title)
 {
     /* Ask the window manager rather than the plugin: the editor belongs to a
        helper process, and its X window is not ours to look up directly. The
-       title is one Performer chose and is unique per slot. */
+       title is one StageRig chose and is unique per slot. */
     auto xdotool = findTool ("xdotool");
     if (xdotool == File()) return 0;
 
@@ -160,7 +160,7 @@ unsigned long PluginView::findWindow (const String& title)
 //==============================================================================
 /* Brings the editor to the front. x11vnc injects the tablet's clicks with
    XTest at screen coordinates, so they land on whatever window is on top at
-   that spot -- if the browser, or Performer's own window, overlaps the editor,
+   that spot -- if the browser, or StageRig's own window, overlaps the editor,
    the pointer visibly moves to the right place and the click goes to the wrong
    window. Measured: a covered button never fires; uncover it and the same
    click does. Raising the editor whenever the tablet asks for it is the most
@@ -268,7 +268,7 @@ PluginView::Session PluginView::start (const String& title, String& error)
     if (! running->web->start (StringArray {
             findTool ("websockify").getFullPathName(),
             "--web=" + findNoVncRoot().getFullPathName(),
-            // Loopback only: the tablet reaches this through Performer's own
+            // Loopback only: the tablet reaches this through StageRig's own
             // port, so the bridge itself never needs to be on the network.
             "127.0.0.1:" + String (webPort),
             "127.0.0.1:" + String (vncPort) }))
@@ -313,7 +313,7 @@ void PluginView::stopAll()
 void PluginView::sweepStrays()
 {
     /* Anything of ours still holding a port after its ChildProcess has gone --
-       after a crash, or a websockify that outlived Performer, which once kept
+       after a crash, or a websockify that outlived StageRig, which once kept
        port 7777 bound so the next run could not start its tablet server at
        all. The patterns are the exact argument shapes this file launches, on
        our port range only, so nothing else on the machine can match: a VNC

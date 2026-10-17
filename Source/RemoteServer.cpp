@@ -31,7 +31,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>Performer</title>
+<title>StageRig</title>
 <style>
   :root { --bg:#15161c; --panel:#1e1f24; --row:#272931; --accent:#5aa9ff; --dim:#9aa0ab; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -166,7 +166,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 </style></head>
 <body>
 <header>
-  <h1>PERFORMER</h1>
+  <h1>STAGERIG</h1>
   <div class="hdr">
     <span class="bpm" id="bpm">--<i>bpm</i></span>
     <button id="tap">TAP</button>
@@ -176,7 +176,7 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
 <div id="err"></div>
 <div id="gate">
   <form id="codeform">
-    <p>Enter the code shown in Performer</p>
+    <p>Enter the code shown in StageRig</p>
     <input id="code" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="6" placeholder="ABC123">
     <button type="submit">Connect</button>
     <p class="hint" id="gatemsg"></p>
@@ -211,7 +211,7 @@ if (token) localStorage.setItem("t", token);
 let rev = -1;
 
 // Asking for the code beats putting it in the URL: you can add this page to the home
-// screen once and type the six characters shown by Performer, rather than re-scanning
+// screen once and type the six characters shown by StageRig, rather than re-scanning
 // a link every time the app restarts.
 function askForCode(message) {
   document.getElementById("gate").style.display = "flex";
@@ -269,7 +269,7 @@ function renderSets(s) {
   const sets = s.sets || [], songs = s.songs || [];
   if (!sets.length) {
     const e = document.createElement("div"); e.className = "empty";
-    e.textContent = "No sets yet. Build one in Performer: group your programs into songs, then order the songs into a set.";
+    e.textContent = "No sets yet. Build one in StageRig: group your programs into songs, then order the songs into a set.";
     host.appendChild(e);
     return;
   }
@@ -366,7 +366,7 @@ function renderSets(s) {
       ch.textContent = "Chart";
       ch.onclick = (ev) => {
         ev.stopPropagation();
-        const w = window.open("/chart.html?song=" + songIndex + "&t=" + encodeURIComponent(token), "performer-chart");
+        const w = window.open("/chart.html?song=" + songIndex + "&t=" + encodeURIComponent(token), "stagerig-chart");
         if (w) w.focus();
       };
       b.appendChild(ch);
@@ -633,8 +633,8 @@ async function openPluginWindow(i, slot, effect, fallbackName, btn, restore, bus
        window targets by name, so this costs nothing. */
     const state = lastState && lastState.inputs && lastState.inputs[i];
     const label = state ? (state.currentName || ("Program " + state.current)) : fallbackName;
-    const target = bus >= 0 ? "performer-output-" + bus + "-fx" + effect
-                            : "performer-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
+    const target = bus >= 0 ? "stagerig-output-" + bus + "-fx" + effect
+                            : "stagerig-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
 
     const base = "/view/" + r.port;
     const url = base + "/plugin.html?path="
@@ -674,7 +674,7 @@ async function refresh(force) {
     syncLevelPolling();
     show("");
   } catch (e) {
-    if (e.gate) askForCode("That code was not accepted — check Performer and try again.");
+    if (e.gate) askForCode("That code was not accepted — check StageRig and try again.");
     else show(e.message);
   }
 }
@@ -692,7 +692,7 @@ if ('serviceWorker' in navigator)
 </script></body></html>)HTML";
 
 static const char* kManifest = R"JSON({
-  "name": "Performer", "short_name": "Performer",
+  "name": "StageRig", "short_name": "StageRig",
   "start_url": ".", "display": "standalone",
   "background_color": "#15161c", "theme_color": "#15161c",
   "icons": [
@@ -705,7 +705,7 @@ static const char* kManifest = R"JSON({
 
 //==============================================================================
 RemoteServer::RemoteServer (Engine& e, PropertiesFile& s)
-    : Thread ("performer-remote"), engine (e), settings (s)
+    : Thread ("stagerig-remote"), engine (e), settings (s)
 {
     engine.addListener (this);
 }
@@ -785,7 +785,7 @@ if (token) localStorage.setItem("t", token);
 document.getElementById("back").href = "/?t=" + encodeURIComponent(token);
 async function api(path) {
   const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token));
-  if (!r.ok) throw new Error("Performer answered " + r.status);
+  if (!r.ok) throw new Error("StageRig answered " + r.status);
   return r.json();
 }
 const withToken = (u) => u + "?t=" + encodeURIComponent(token);
@@ -1204,7 +1204,7 @@ bool RemoteServer::relayToPluginView (StreamingSocket& client, const String& fir
 bool RemoteServer::start (int p)
 {
     /* Anything of ours left over from a crash. x11vnc runs with -forever and
-       websockify never exits on its own, so after Performer dies they keep the
+       websockify never exits on its own, so after StageRig dies they keep the
        ports, and every GUI press on the tablet would fail until someone found
        and killed them by hand. That must not be the state of things on stage
        after a relaunch. */
@@ -1227,7 +1227,7 @@ bool RemoteServer::start (int p)
     }
     listener = std::make_unique<StreamingSocket>();
     /* Close this on exec, or every child we start inherits it. An orphaned
-       websockify held port 7777 open after Performer had gone, so the next
+       websockify held port 7777 open after StageRig had gone, so the next
        start could not bind and the tablet was unreachable until the stray
        process was found by hand. */
     if (! listener->createListener (p))
@@ -1362,7 +1362,7 @@ static bool produceOnMessageThread (std::function<String()> produce, String& out
 
 static void sendBusy (StreamingSocket& sock, void (*send) (StreamingSocket&, const String&, const String&, const String&))
 {
-    send (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
+    send (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
 }
 
 String RemoteServer::stateJson() const
@@ -1617,7 +1617,7 @@ static void sendResponse (StreamingSocket& s, const String& status, const String
    only falls back to a cached shell when the network is gone, which is the
    honest behaviour for something whose whole job is to reflect live state. */
 static const char* kServiceWorker = R"JS(
-const SHELL = 'performer-shell-v1';
+const SHELL = 'stagerig-shell-v1';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(['./'])).then(() => self.skipWaiting()));
@@ -1668,20 +1668,20 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     // before it will offer to install, and 512 for the splash screen.
     if (path.startsWith ("/icon"))
     {
-        const void* src = BinaryData::performer256_png;
-        int srcSize = BinaryData::performer256_pngSize;
+        const void* src = BinaryData::stagerig256_png;
+        int srcSize = BinaryData::stagerig256_pngSize;
         int resize = 0;
 
         if (path.startsWith ("/icon-512"))
         {
-            src = BinaryData::performer512_png;
-            srcSize = BinaryData::performer512_pngSize;
+            src = BinaryData::stagerig512_png;
+            srcSize = BinaryData::stagerig512_pngSize;
         }
         else if (path.startsWith ("/icon-192"))
         {
             // No 192 asset: scale the 512 down, which is sharper than scaling up.
-            src = BinaryData::performer512_png;
-            srcSize = BinaryData::performer512_pngSize;
+            src = BinaryData::stagerig512_png;
+            srcSize = BinaryData::stagerig512_pngSize;
             resize = 192;
         }
 
@@ -1770,7 +1770,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (produceOnMessageThread ([this] { return stateJson(); }, body, 2000))
             sendResponse (sock, "200 OK", "application/json", body);
         else
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
         return;
     }
     if (path.startsWith ("/api/select"))
@@ -1829,7 +1829,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         if (produceOnMessageThread ([this, input] { return slotsJson (input); }, body, 2000))
             sendResponse (sock, "200 OK", "application/json", body);
         else
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
         return;
     }
     if (path.startsWith ("/api/tap"))
@@ -1851,7 +1851,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         });
         if (! done->wait (500))
         {
-            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"Performer is busy; try again.\"}");
+            sendResponse (sock, "503 Service Unavailable", "application/json", "{\"error\":\"StageRig is busy; try again.\"}");
             return;
         }
         ++revision;
@@ -1941,7 +1941,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         DynamicObject::Ptr o (new DynamicObject());
         if (! got)
         {
-            o->setProperty ("error", "Performer is busy; try again.");
+            o->setProperty ("error", "StageRig is busy; try again.");
         }
         else if (error->isNotEmpty() || title->isEmpty())
         {

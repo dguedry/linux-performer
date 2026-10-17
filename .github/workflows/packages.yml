@@ -41,8 +41,8 @@ jobs:
             *"[no-release]") echo "subject ends with [no-release]; not releasing"; exit 0 ;;
           esac
 
-          CURRENT="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"
-          if [ -z "$CURRENT" ]; then echo "could not read PERFORMER_VERSION"; exit 1; fi
+          CURRENT="$(sed -n 's/^set(STAGERIG_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"
+          if [ -z "$CURRENT" ]; then echo "could not read STAGERIG_VERSION"; exit 1; fi
           MAJOR="${CURRENT%%.*}"; REST="${CURRENT#*.}"
           MINOR="${REST%%.*}";    PATCH="${REST#*.}"
           VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
@@ -53,10 +53,10 @@ jobs:
 
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          sed -i "s/^set(PERFORMER_VERSION \"[^\"]*\"/set(PERFORMER_VERSION \"$VERSION\"/" CMakeLists.txt
+          sed -i "s/^set(STAGERIG_VERSION \"[^\"]*\"/set(STAGERIG_VERSION \"$VERSION\"/" CMakeLists.txt
           git add CMakeLists.txt
           printf '%s\n\n%s\n' "Release $VERSION [no-release]" "$SUBJECT" | git commit -F -
-          git tag -a "v$VERSION" -m "Performer $VERSION"
+          git tag -a "v$VERSION" -m "StageRig $VERSION"
           git push origin HEAD:main
           git push origin "v$VERSION"
 
@@ -88,10 +88,10 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"
           elif [[ -n "${{ needs.auto-tag.outputs.version }}" ]]; then V="${{ needs.auto-tag.outputs.version }}"
-          else V="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
+          else V="$(sed -n 's/^set(STAGERIG_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
           echo "v=$V" >> "$GITHUB_OUTPUT"
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTAGERIG_VERSION=${{ steps.ver.outputs.v }}
       - name: Build
         run: cmake --build build
       - name: Test
@@ -100,7 +100,7 @@ jobs:
         run: cd build && cpack -G DEB && ls -la *.deb && dpkg-deb -I *.deb && dpkg-deb -c *.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: performer-deb
+          name: stagerig-deb
           path: build/*.deb
 
   rpm:
@@ -125,10 +125,10 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"
           elif [[ -n "${{ needs.auto-tag.outputs.version }}" ]]; then V="${{ needs.auto-tag.outputs.version }}"
-          else V="$(sed -n 's/^set(PERFORMER_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
+          else V="$(sed -n 's/^set(STAGERIG_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)"; fi
           echo "v=$V" >> "$GITHUB_OUTPUT"
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPERFORMER_VERSION=${{ steps.ver.outputs.v }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTAGERIG_VERSION=${{ steps.ver.outputs.v }}
       - name: Build
         run: cmake --build build
       - name: Test
@@ -142,7 +142,7 @@ jobs:
           ls -la *.rpm && rpm -qip *.rpm && rpm -qlp *.rpm
       - uses: actions/upload-artifact@v4
         with:
-          name: performer-rpm
+          name: stagerig-rpm
           path: build/*.x86_64.rpm
 
   release:
@@ -164,5 +164,5 @@ jobs:
         run: |
           ls -la pkgs
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Performer $TAG" --generate-notes
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "StageRig $TAG" --generate-notes
           gh release upload "$TAG" pkgs/* --repo "$GITHUB_REPOSITORY" --clobber

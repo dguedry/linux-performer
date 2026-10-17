@@ -1,4 +1,4 @@
-# Performer
+# StageRig
 
 **A live-performance plugin host for Linux.** Point your keyboards at it, build
 a program for each sound in your set, and change sounds from the keyboard while
@@ -10,10 +10,10 @@ with every knob, drawbar and menu live under your finger. Pull a drawbar on the
 tablet and the organ on stage moves.
 
 <p align="center">
-  <img src="docs/images/performer.png" alt="Performer: songs with their tempos and chart markers, a set list, two keyboards as inputs, a program list grouped by kind, a SWAM Trumpet loaded with an exciter effect and its key and velocity ranges, and the on-screen keyboard with pitch and mod wheels" width="900">
+  <img src="docs/images/stagerig.png" alt="StageRig: songs with their tempos and chart markers, a set list, two keyboards as inputs, a program list grouped by kind, a SWAM Trumpet loaded with an exciter effect and its key and velocity ranges, and the on-screen keyboard with pitch and mod wheels" width="900">
 </p>
 
-Performer exists because the live hosts keyboard players rely on -- MainStage,
+StageRig exists because the live hosts keyboard players rely on -- MainStage,
 Gig Performer, Cantabile, Camelot -- have no Linux version. It hosts **VST3**,
 **CLAP**, **LV2** and **LADSPA** plugins natively, and Windows VST3s and CLAPs
 bridged with [yabridge](https://github.com/robbert-vdh/yabridge) work like any
@@ -48,7 +48,7 @@ other plugin.
   mirrored and fully interactive, so you can reach a Kontakt library's every
   page or a B-3X's drawbars without walking back to the computer. Nothing to
   install -- scan the code or type a short one, and add it to the home screen if
-  you like. Performer can serve its own wifi network when the venue has none.
+  you like. StageRig can serve its own wifi network when the venue has none.
 - **Charts on the stand.** Attach a lead sheet, a scan or a chord chart to a
   song -- PDF, image, text or ChordPro -- and the tablet shows it, turning
   PDF pages a tap at a time and following the set from song to song. Files
@@ -71,7 +71,7 @@ Licensed under the [GPL-3.0](LICENSE).
 | **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
 | **Output** | A pair of the interface's channels with a master effects chain and a volume. Every input lands on one; the default setup has one, "Main", on channels 1-2. |
-| **Setup** | The whole document (inputs, outputs, programs, plugin states). Saved as `*.performer.json`. |
+| **Setup** | The whole document (inputs, outputs, programs, plugin states). Saved as `*.stagerig.json`. |
 
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a
@@ -81,9 +81,9 @@ every used program stays loaded and changes are instant (at the cost of RAM).
 
 ## Install
 
-**[Download the latest release](https://github.com/dguedry/linux-performer/releases/latest)**
+**[Download the latest release](https://github.com/dguedry/stagerig/releases/latest)**
 — a `.deb` for Debian/Ubuntu and an `.rpm` for Fedora, both x86-64. They install
-`Performer` and `performer-plugin-host` into `/usr/bin`, plus a launcher entry
+`StageRig` and `stagerig-plugin-host` into `/usr/bin`, plus a launcher entry
 and the icon.
 
 Verified on Ubuntu 24.04, Linux Mint 22.3 (Cinnamon) and Fedora 43, with native
@@ -95,19 +95,19 @@ lists rather than hard-coding a number:
 
 ```sh
 # Debian / Ubuntu
-gh release download --repo dguedry/linux-performer --pattern '*.deb'
-sudo apt install ./performer_*_amd64.deb
+gh release download --repo dguedry/stagerig --pattern '*.deb'
+sudo apt install ./stagerig_*_amd64.deb
 
 # Fedora
-gh release download --repo dguedry/linux-performer --pattern '*.rpm'
-sudo dnf install ./performer-*.x86_64.rpm
+gh release download --repo dguedry/stagerig --pattern '*.rpm'
+sudo dnf install ./stagerig-*.x86_64.rpm
 ```
 
 Without the GitHub CLI, open the releases page above and download the file
 directly; both packages are attached to every release.
 
 Every push also builds both packages as workflow artifacts under
-[Actions](https://github.com/dguedry/linux-performer/actions), if you want a
+[Actions](https://github.com/dguedry/stagerig/actions), if you want a
 build from `main` rather than the last release.
 
 For plugins you will also want `calf-plugins` (or any LV2/VST3 instruments),
@@ -115,7 +115,7 @@ For plugins you will also want `calf-plugins` (or any LV2/VST3 instruments),
 [yabridge](https://github.com/robbert-vdh/yabridge) for Windows plugins.
 [vstenv](https://github.com/dguedry/vstenv) sets up the Wine side and bridges
 Windows plugins (Native Instruments, Steinberg, iZotope and others) into the
-folders Performer scans, if you would rather not configure Wine and yabridge by
+folders StageRig scans, if you would rather not configure Wine and yabridge by
 hand.
 
 ## Build
@@ -125,15 +125,15 @@ libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev
 libxcursor-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev ladspa-sdk`.
 
 ```sh
-git clone --recurse-submodules https://github.com/dguedry/linux-performer.git
-cd linux-performer
+git clone --recurse-submodules https://github.com/dguedry/stagerig.git
+cd stagerig
 # if you cloned without --recurse-submodules:
 git submodule update --init --depth 1 external/JUCE
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/Performer_artefacts/Release/Performer            # opens the last setup
-./build/Performer_artefacts/Release/Performer my.performer.json
+./build/StageRig_artefacts/Release/StageRig            # opens the last setup
+./build/StageRig_artefacts/Release/StageRig my.stagerig.json
 cmake --install build --prefix ~/.local                  # optional: binaries, launcher entry and icon
 ```
 
@@ -141,7 +141,7 @@ cmake --install build --prefix ~/.local                  # optional: binaries, l
 
 See the **[user manual](docs/MANUAL.md)**: inputs and keyboards, programs,
 slots, splits and layers, effects, MIDI mappings, the on-screen keyboard, audio
-settings and latency, live checklist, troubleshooting and the files Performer
+settings and latency, live checklist, troubleshooting and the files StageRig
 uses.
 
 The short version: **Audio...** to pick an output, **Plugins...** to scan for
@@ -184,7 +184,7 @@ second screen and mouse for it rather than a remote with a fixed set of buttons.
 A laptop or phone on the same network does the same job -- it is a web page, so
 whatever you point at it is a full editor for every plugin in the rig.
 
-That matters most for plugins nothing else can reach. Performer used to offer
+That matters most for plugins nothing else can reach. StageRig used to offer
 faders you picked and labelled per plugin; they are gone, because they could not
 tell the truth. Kontakt's host-visible parameters are MIDI controller inputs --
 values go in and nothing comes back -- so a fader on the tablet could drive an
@@ -196,13 +196,13 @@ A touch holds for as long as your finger does, so the plugin's own keyboard
 plays properly -- one finger at a time, since the mirror is a single pointer. **+**/**-** and **Fit** handle zoom, **Move**
 switches to panning and pinching, and **Full** hides the browser's address bar.
 Taps arrive on the computer as real clicks, so the plugin window must not be
-covered by another window there -- Performer keeps it above everything else for
+covered by another window there -- StageRig keeps it above everything else for
 as long as a tablet is looking at it. Each plugin gets its own tab, named after the
 program. Needs `x11vnc`, `websockify`, `xdotool` and `novnc`, and works on
-Wayland desktops as well as X11 ones -- Performer and plugin editors are X11
+Wayland desktops as well as X11 ones -- StageRig and plugin editors are X11
 windows, so they run through XWayland, which `x11vnc` reads and writes
 normally. A Wayland session with no XWayland is the one case that does not
-work, and Performer says so rather than showing a black screen.
+work, and StageRig says so rather than showing a black screen.
 
 If the tablet cannot connect, the usual cause is a firewall on the computer
 rather than anything else; the desktop can still open the address itself, which
@@ -216,14 +216,14 @@ sudo ufw allow from 172.16.0.0/12 to any port 7777 proto tcp
 ```
 
 No wifi at the venue? **Create a wifi network** makes the computer serve its
-own, which the tablet joins directly. Performer asks once which wifi adapter to
+own, which the tablet joins directly. StageRig asks once which wifi adapter to
 use and remembers it; a spare USB adapter lets the machine stay on its normal
 network at the same time. See the [manual](docs/MANUAL.md) for the details.
 
 ## Windows plugins via yabridge and vstenv
 
 Windows VST3s and CLAPs bridged with yabridge appear as normal plugins of that
-format, and Performer does not care how the Wine side was set up. yabridge
+format, and StageRig does not care how the Wine side was set up. yabridge
 bridges both, so a Windows CLAP is scanned from `~/.clap/yabridge` and hosted
 like any other -- its own window and all.
 
@@ -231,12 +231,12 @@ like any other -- its own window and all.
 provisions its own Wine, installs each vendor's manager application (Native
 Access, IK Product Manager, Steinberg Download Assistant, Audio Modeling
 Software Center) and the products they deliver, and bridges the result into the
-folders Performer scans. A prefix it manages records which wine belongs to it,
+folders StageRig scans. A prefix it manages records which wine belongs to it,
 and vstenv teaches `yabridge-host.exe` to read that record -- so the right wine
 is used whatever starts the plugin, with nothing on `PATH` and nothing set in
-the session. Performer needs to do nothing special for it.
+the session. StageRig needs to do nothing special for it.
 
-Performer does still accommodate the older convention, for a prefix set up by
+StageRig does still accommodate the older convention, for a prefix set up by
 [nilinux](https://github.com/dguedry/nilinux) (which vstenv succeeds) or by
 hand: `~/.local/bin` goes first on a helper's `PATH` when a `wine` shim is
 there, and variables from `~/.config/environment.d/*.conf` (`WINELOADER`,
@@ -244,13 +244,13 @@ there, and variables from `~/.config/environment.d/*.conf` (`WINELOADER`,
 desktop launcher and a terminal do not always agree about the environment.
 
 While a vendor's installer replaces a plugin file, the yabridge bundle briefly
-points at nothing. Performer reports that as "yabridge link points to a missing
+points at nothing. StageRig reports that as "yabridge link points to a missing
 file" rather than blacklisting the plugin; once the install finishes and
 `yabridgectl sync` has run, scan again and the plugin comes back.
 
 ## Process model
 
-Every plugin runs in its own `performer-plugin-host` process. Performer talks to
+Every plugin runs in its own `stagerig-plugin-host` process. StageRig talks to
 each one over a shared-memory block (audio, MIDI and parameter changes, one
 block at a time, with two semaphores) plus a socket for everything that is not
 real-time: loading, state, parameter lists, editor windows and notifications.
@@ -259,17 +259,17 @@ real-time: loading, state, parameter lists, editor windows and notifications.
   the UI marks it red, and its **Reload** button starts a fresh process with
   the saved state.
 - A plugin that hangs (a stuck editor, a bridge waiting on Wine) can't freeze
-  Performer: requests to it time out, and the audio thread waits for each
+  StageRig: requests to it time out, and the audio thread waits for each
   process only until 85 % of the block period has passed. Late blocks are
   counted in the status bar as "late N".
 - Plugin editors are windows of the host process, so they survive independently
-  of Performer's UI. Instruments of one program render in parallel, one process
+  of StageRig's UI. Instruments of one program render in parallel, one process
   per core; effect chains run in order.
-- Plugin scanning also happens in helper processes (`performer-plugin-host --scan`),
+- Plugin scanning also happens in helper processes (`stagerig-plugin-host --scan`),
   so a crashing plugin can't kill the scan.
 
-The helper is looked for next to the `Performer` executable, then in the build
-tree, then via `$PERFORMER_PLUGIN_HOST`.
+The helper is looked for next to the `StageRig` executable, then in the build
+tree, then via `$STAGERIG_PLUGIN_HOST`.
 
 ## Layout of the code
 
@@ -281,7 +281,7 @@ tree, then via `$PERFORMER_PLUGIN_HOST`.
 - `Source/Engine.*` – audio/MIDI engine: device management, program loading and switching, MIDI routing, mappings, learn.
 - `Source/RemotePlugin.*` – host-side proxy for one plugin process (spawn, control channel, real-time block exchange).
 - `Source/Ipc/Protocol.*` – shared-memory layout and framing shared by both executables.
-- `Source/PluginHostProcess/PluginHostMain.cpp` – the `performer-plugin-host` executable.
+- `Source/PluginHostProcess/PluginHostMain.cpp` – the `stagerig-plugin-host` executable.
 - `Source/MainComponent.*` – the UI (inputs, programs, slots, mappings panels).
 - `Source/KeyboardPanel.h` – on-screen keyboard and test controllers.
 - `Source/ParamPicker.h` – searchable parameter picker; `Source/AudioSettingsComponent.h` – the Audio window.
@@ -293,36 +293,36 @@ tree, then via `$PERFORMER_PLUGIN_HOST`.
 ```sh
 ctest --test-dir build
 # Optionally exercise a specific VST3 (e.g. a yabridge-bridged plugin) through the engine:
-PERFORMER_TEST_VST3="$HOME/.vst3/yabridge/Kontakt 8.vst3" ./build/EngineTest_artefacts/Release/EngineTest
+STAGERIG_TEST_VST3="$HOME/.vst3/yabridge/Kontakt 8.vst3" ./build/EngineTest_artefacts/Release/EngineTest
 ```
 
 All plugin buses are kept active and rendered into a full-size buffer; only the
 main bus is mixed. Disabling aux buses makes JUCE pass null channel pointers,
 which crashes plugins that write to them regardless (Kontakt via yabridge).
 
-Settings live in `~/.config/Performer/`.
+Settings live in `~/.config/StageRig/`.
 
 ## Low latency (live use)
 
-Performer is meant to be played live, so it goes for the smallest safe block:
+StageRig is meant to be played live, so it goes for the smallest safe block:
 
 * It loads PipeWire's JACK client library itself (`pipewire-jack`, package
   `pipewire-jack` on Debian/Ubuntu), so it does not need to be started with
   `pw-jack`, and it defaults to the **JACK** device type at 48 kHz. That makes
-  Performer a direct node in the PipeWire graph; the ALSA type goes through
+  StageRig a direct node in the PipeWire graph; the ALSA type goes through
   PipeWire's ALSA emulation with its own buffering and resampling.
 * **Audio...** has a *Live latency* section: the block size (quantum) to ask
   for (default 128 samples = 2.7 ms at 48 kHz; 64 if the machine is quiet) and
-  *Take over the PipeWire clock while Performer runs*. With the takeover on,
-  Performer forces the PipeWire graph to that quantum at start
+  *Take over the PipeWire clock while StageRig runs*. With the takeover on,
+  StageRig forces the PipeWire graph to that quantum at start
   (`clock.force-quantum`) and restores the previous value when it quits, so
   the desktop's `min-quantum`/`default.clock.quantum` settings do not get in
   the way. The status bar shows the block size actually delivered and the
   resulting latency.
 * **Another application can hold the clock.** Bitwig Studio, for example,
   forces `clock.force-quantum` to its own block size every few seconds while
-  it runs; Performer then reports *clock held by another app* in the status
-  bar. Close that application or set its block size to Performer's.
+  it runs; StageRig then reports *clock held by another app* in the status
+  bar. Close that application or set its block size to StageRig's.
 * **Realtime scheduling.** Small blocks only stay glitch-free when the audio
   thread can run at realtime priority. Check `ulimit -r`: if it prints 0, add
   yourself to the `pipewire` group (`sudo usermod -aG pipewire $USER`, then
@@ -330,7 +330,7 @@ Performer is meant to be played live, so it goes for the smallest safe block:
   `/etc/security/limits.d/`. The Audio dialog reports whether realtime
   scheduling is available.
 * Plugins load in parallel (four at a time by default; `parallelLoads` in
-  `~/.config/Performer/Performer.settings` changes it), so *Preload all
+  `~/.config/StageRig/StageRig.settings` changes it), so *Preload all
   programs* fills a set quickly. Wine-bridged plugins load in parallel too
   (`parallelBridgedLoads`, default the same); two Kontakts starting together on
   a cold prefix both come up in the time one takes. If a machine stalls on

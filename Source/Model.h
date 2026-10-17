@@ -181,8 +181,8 @@ struct ChartRef
     static ChartRef fromVar (const juce::var&);
 };
 
-/** The sidecar folder for a setup file: MySetup.performer.json keeps its
-    charts in MySetup.performer.charts/, beside it. */
+/** The sidecar folder for a setup file: MySetup.stagerig.json keeps its
+    charts in MySetup.stagerig.charts/, beside it. */
 juce::File chartsFolderFor (const juce::File& setupFile);
 
 struct SongDef

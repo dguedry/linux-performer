@@ -1,4 +1,4 @@
-// Round-trip test for the Performer setup file format.
+// Round-trip test for the StageRig setup file format.
 #include "Model.h"
 #include "ProgramMap.h"
 #include "MappingSuggestions.h"
@@ -76,7 +76,7 @@ int main()
     // Name-only program (no slots) must survive too.
     upper.programs[9].name = "Empty but named";
 
-    juce::TemporaryFile tmp (".performer.json");
+    juce::TemporaryFile tmp (".stagerig.json");
     CHECK (s.saveToFile (tmp.getFile()).wasOk());
 
     Setup loaded;
@@ -217,10 +217,10 @@ int main()
         CHECK (html.contains ("No programs yet."));                    // the second, empty input
         std::printf ("     program map: %d bytes\n", html.length());
 
-        // PERFORMER_MAP_FROM=setup.json PERFORMER_MAP_TO=out.html renders a real setup,
+        // STAGERIG_MAP_FROM=setup.json STAGERIG_MAP_TO=out.html renders a real setup,
         // for eyeballing the printed sheet.
-        const auto from = juce::SystemStats::getEnvironmentVariable ("PERFORMER_MAP_FROM", {});
-        const auto to   = juce::SystemStats::getEnvironmentVariable ("PERFORMER_MAP_TO", {});
+        const auto from = juce::SystemStats::getEnvironmentVariable ("STAGERIG_MAP_FROM", {});
+        const auto to   = juce::SystemStats::getEnvironmentVariable ("STAGERIG_MAP_TO", {});
         if (from.isNotEmpty() && to.isNotEmpty())
         {
             Setup real;
@@ -381,7 +381,7 @@ int main()
         CHECK (! plain.toVar().getDynamicObject()->hasProperty ("charts"));
 
         // The folder sits beside the setup, named after it.
-        CHECK (chartsFolderFor (juce::File ("/x/MySetup.performer.json")).getFullPathName() == "/x/MySetup.performer.charts");
+        CHECK (chartsFolderFor (juce::File ("/x/MySetup.stagerig.json")).getFullPathName() == "/x/MySetup.stagerig.charts");
         CHECK (chartsFolderFor (juce::File()) == juce::File());
     }
 

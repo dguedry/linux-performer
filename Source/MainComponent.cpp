@@ -33,7 +33,7 @@ namespace
 
     String araWarning (const String& name)
     {
-        return name + " looks like an ARA-only plugin. ARA plugins need an ARA host (Reaper, Logic...); here the editor may be empty and can freeze Performer. Prefer the non-ARA version.";
+        return name + " looks like an ARA-only plugin. ARA plugins need an ARA host (Reaper, Logic...); here the editor may be empty and can freeze StageRig. Prefer the non-ARA version.";
     }
 
     void styleHeader (Label& l)
@@ -2152,7 +2152,7 @@ void MainComponent::timerCallback()
         cpuLabel.setText ("CPU " + String (engine.getCpuUsage() * 100.0, 1) + "%  |  " + dev
                           + (clockHeld ? "  |  clock held by another app" : String())
                           + (engine.getLateBlockCount() > 0 ? "  |  late " + String (engine.getLateBlockCount()) : String()), dontSendNotification);
-        cpuLabel.setTooltip (clockHeld ? "Performer asked PipeWire for " + String (wanted) + " samples but the graph runs bigger blocks: another application (e.g. Bitwig) is forcing the PipeWire clock. Close it, or set its block size to " + String (wanted) + "." : String());
+        cpuLabel.setTooltip (clockHeld ? "StageRig asked PipeWire for " + String (wanted) + " samples but the graph runs bigger blocks: another application (e.g. Bitwig) is forcing the PipeWire clock. Close it, or set its block size to " + String (wanted) + "." : String());
         cpuLabel.setColour (Label::textColourId, (engine.getLateBlockCount() > 0 || clockHeld) ? Colours::orange : textDim);
     }
     if (statusText.isNotEmpty() && now - statusTime > 8000.0)
@@ -2301,7 +2301,7 @@ void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int
 //==============================================================================
 File MainComponent::getAutosaveFile() const
 {
-    return settings.getFile().getSiblingFile ("autosave.performer.json");
+    return settings.getFile().getSiblingFile ("autosave.stagerig.json");
 }
 
 void MainComponent::setCurrentFile (const File& f)
@@ -2358,9 +2358,9 @@ bool MainComponent::writeSetupFile (const File& f, int captureBudgetMs)
 
 void MainComponent::openSetup()
 {
-    fileChooser = std::make_unique<FileChooser> ("Open Performer setup",
+    fileChooser = std::make_unique<FileChooser> ("Open StageRig setup",
                                                  currentFile.exists() ? currentFile.getParentDirectory() : File::getSpecialLocation (File::userHomeDirectory),
-                                                 "*.performer.json;*.json");
+                                                 "*.stagerig.json;*.performer.json;*.json");
     fileChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
     {
         auto f = fc.getResult();
@@ -2375,14 +2375,14 @@ void MainComponent::saveSetup (bool forceAskForFile)
         if (writeSetupFile (currentFile)) showStatus ("Saved " + currentFile.getFileName());
         return;
     }
-    fileChooser = std::make_unique<FileChooser> ("Save Performer setup",
-                                                 currentFile != File() ? currentFile : File::getSpecialLocation (File::userHomeDirectory).getChildFile ("MySetup.performer.json"),
-                                                 "*.performer.json");
+    fileChooser = std::make_unique<FileChooser> ("Save StageRig setup",
+                                                 currentFile != File() ? currentFile : File::getSpecialLocation (File::userHomeDirectory).getChildFile ("MySetup.stagerig.json"),
+                                                 "*.stagerig.json");
     fileChooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting, [this] (const FileChooser& fc)
     {
         auto f = fc.getResult();
         if (f == File()) return;
-        if (! f.hasFileExtension ("json")) f = f.withFileExtension ("performer.json");
+        if (! f.hasFileExtension ("json")) f = f.withFileExtension ("stagerig.json");
         if (writeSetupFile (f))
         {
             // The charts travel with the setup: copy the folder to the new name.
@@ -2508,7 +2508,7 @@ void MainComponent::chooseHotspotAdapter (std::function<void (bool)> done)
             cfg.networkName   = w->getTextEditorContents ("network").trim();
             cfg.password      = w->getTextEditorContents ("password").trim();
 
-            if (cfg.networkName.isEmpty()) cfg.networkName = "PerformerStage";
+            if (cfg.networkName.isEmpty()) cfg.networkName = "StageRig";
             if (cfg.password.length() < 8)
             {
                 AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Password too short",
@@ -2554,7 +2554,7 @@ bool MainComponent::startRemote()
     {
         remoteBtn.setToggleState (false, dontSendNotification);
         settings.setValue ("remoteOn", false);
-        showStatus ("Could not listen on port " + String (port) + " — is another copy of Performer running?");
+        showStatus ("Could not listen on port " + String (port) + " — is another copy of StageRig running?");
         return false;
     }
 
@@ -2684,11 +2684,11 @@ void MainComponent::showRemote()
 
             const auto note = network.isNotEmpty()
                 ? "The tablet must join this computer's wifi network, \"" + network + "\". It remembers "
-                  "the code, and the code does not change when Performer restarts, so \"Add to Home "
+                  "the code, and the code does not change when StageRig restarts, so \"Add to Home "
                   "Screen\" gives you a one-tap program selector.\n\n"
                   "Anyone on that network who has the code can change your sounds."
                 : "The tablet must be on the same wifi as this computer. It remembers the code, "
-                  "and the code does not change when Performer restarts, so \"Add to Home Screen\" "
+                  "and the code does not change when StageRig restarts, so \"Add to Home Screen\" "
                   "gives you a one-tap program selector.\n\n"
                   "No wifi at the venue? Use \"Create a wifi network\" below and the tablet joins this "
                   "computer directly.";
@@ -2760,10 +2760,10 @@ void MainComponent::showRemote()
 void MainComponent::printProgramMap()
 {
     const auto setup = engine.captureSetup();
-    const auto title = currentFile.existsAsFile() ? currentFile.getFileNameWithoutExtension() : String ("Performer");
+    const auto title = currentFile.existsAsFile() ? currentFile.getFileNameWithoutExtension() : String ("StageRig");
     // JUCE cannot print on Linux; write HTML styled for paper and let the browser print it.
     auto out = File::getSpecialLocation (File::tempDirectory)
-                   .getChildFile ("performer-program-map-" + String (Time::currentTimeMillis()) + ".html");
+                   .getChildFile ("stagerig-program-map-" + String (Time::currentTimeMillis()) + ".html");
     // Include the tablet address only while the server is actually running: a
     // printed code pointing at a closed port would be worse than none.
     const auto tabletUrl = (remote != nullptr && remote->isRunning()) ? remote->getUrl() : String();

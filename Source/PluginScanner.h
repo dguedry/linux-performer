@@ -14,7 +14,7 @@ class PluginHost;
     time. Lives for the whole application (owned by PluginHost), so closing the Plugins
     window doesn't interrupt a scan; the window just shows progress while it's open.
 
-    Probing happens in performer-plugin-host processes (see PluginHost::OutOfProcessScanner).
+    Probing happens in stagerig-plugin-host processes (see PluginHost::OutOfProcessScanner).
     Cancelling stops taking new files and lets in-flight probes finish; shutdown() kills
     them so the app can exit promptly.
 */
