@@ -66,7 +66,7 @@ whichever section answers what you typed.
 
 | Area | What it does |
 |---|---|
-| **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Songs**, **Stage**, **Keyboard**, **PANIC**. |
+| **Toolbar** (top) | New / Open / Save / Save As, **Tablet**, **Help**, **Audio...**, **Plugins...**, **Options** (preload all programs, hold notes across program changes, outputs and master effects, rescan MIDI, print the program map), the tempo and **Tap**, release **Tail**, **Songs**, **Stage**, **Keyboard**, **PANIC**. |
 | **Inputs** (left) | Your keyboards. Select one to edit its programs; its device, channel and Program Change setting are below the list. |
 | **Programs** (middle) | The 128 programs of the selected input. Clicking one activates it. The name box, **Copy**, **Paste** and **Clear** are below. |
 | **Plugins** (right, top) | The slots of the current program, each with its controls and effect chain, plus the program effect chain. |
@@ -279,6 +279,31 @@ to the new song's chart, and says so when the new song has none. Press
 **Follow** to pin it to the song you are looking at instead. A song's
 `notes` line is still the place for a key or a count-in; a chart is for what
 does not fit on one line.
+
+## Outputs and the master chain
+
+Everything an input makes lands on an **output**: a pair of the audio
+interface's channels. A new setup has one, *Main*, on channels 1-2, and that is
+all most rigs need. **Options ▸ Outputs & master effects...** is where there
+can be more:
+
+- **+ Add** makes an output on the next free pair -- *Output 2* on 3-4, say. If
+  the interface has not opened those channels yet, open **Audio...** and tick
+  them; the **Device channels** list offers only channels that are open.
+- Each input has an **Output** chooser in its editor. Put the lower manual on
+  its own output and the desk gets it on its own channels; put a click track's
+  input on the in-ear pair.
+- Every output has a **master volume** and a **master effects** chain, applied
+  to everything that lands on it: a limiter or EQ on the way to the desk. These
+  effects are not part of any program, so a program change never restarts
+  them.
+- **Learn volume CC** waits for the next pedal or knob you move, on any
+  keyboard and channel, and makes it that output's volume -- a master fader
+  without touching a plugin. A fader taper: half way is -12 dB.
+
+The tablet's **GUI** chooser lists an output's master effects under every input
+that lands on it. Removing an output moves its inputs to the first one; the
+last output cannot be removed.
 
 ## Slots: instruments inside a program
 

@@ -91,7 +91,29 @@ struct ProgramDef
 };
 
 //==============================================================================
-/** A MIDI source such as "Upper" or "Lower" keyboard. */
+/** An output: a pair of the device's channels, with a master chain and a
+    volume on the way out. Every input lands on one. The default setup has a
+    single "Main" on channels 1-2, which is the old behaviour exactly; a second
+    one puts, say, the lower manual on 3-4 so the desk gets it on its own
+    channel, or a click on the in-ear feed. Only the chain's effects are used
+    of the ProgramDef inside -- it is a ProgramDef so the same chain code,
+    addressed through Engine::outputAddress(), serves both. */
+struct OutputDef
+{
+    juce::String name { "Main" };
+    int left = 0, right = 1;          // device output channels, 0-based
+    float gainDb = 0.0f;              // the master volume
+    int volumeCC = 0;                 // controller that moves it, on any input and channel; 0 = none
+    ProgramDef chain;
+
+    bool isDefault() const { return name == "Main" && left == 0 && right == 1 && gainDb == 0.0f && volumeCC == 0 && chain.effects.empty(); }
+
+    juce::var toVar() const;
+    static OutputDef fromVar (const juce::var&);
+};
+
+//==============================================================================
+/** A MIDI source such as "Upper" or "Lower" keyboard, or an audio input. */
 struct InputDef
 {
     static constexpr int numPrograms = 128;
@@ -110,6 +132,8 @@ struct InputDef
         open in Audio settings. audioRight = -1 is mono: the one channel feeds
         both sides. */
     int audioLeft = 0, audioRight = 1;
+    /** Which of the setup's outputs this input lands on. */
+    int output = 0;
 
     juce::String midiDeviceIdentifier;
     juce::String midiDeviceName;      // used to re-find a device if identifiers change
@@ -211,6 +235,8 @@ struct SetDef
 struct Setup
 {
     std::vector<InputDef> inputs;
+    /** Where the sound goes: at least one, "Main" on channels 1-2 by default. */
+    std::vector<OutputDef> outputs = std::vector<OutputDef> (1);
 
     /** Every song this setup knows, in no particular order: the sets decide
         the order they are played in. */

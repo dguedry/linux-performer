@@ -1629,6 +1629,72 @@ int main()
         CHECK (feed (2) < 1e-3f);
     }
 
+    // --- outputs: an input on its own device channels, through a master chain, at a master volume --
+    {
+        CHECK (engine.getSetup().outputs.size() == 1);
+        const int mon = engine.addOutput ("Monitors", 2, 3);
+        CHECK (mon == 1);
+        engine.clearProgram (0, 70);
+        engine.selectProgram (0, 70); settle();
+        CHECK (engine.addSlot (0, 70, synth, err)); settle();
+        engine.setInputOutput (0, mon);
+
+        AudioBuffer<float> out4 (4, kBlock);
+        auto levels = [&] (int blocks)
+        {
+            std::array<float, 4> peak {};
+            for (int b = 0; b < blocks; ++b)
+            {
+                out4.clear();
+                engine.renderBlockForTesting (out4.getArrayOfWritePointers(), 4, kBlock);
+                for (int c = 0; c < 4; ++c) peak[(size_t) c] = jmax (peak[(size_t) c], out4.getRMSLevel (c, 0, kBlock));
+            }
+            return peak;
+        };
+        engine.injectMidi (0, MidiMessage::noteOn (1, 60, (uint8) 100));
+        const auto p = levels (8);
+        std::printf ("     on Monitors (3+4): ch1 %.3f ch2 %.3f ch3 %.3f ch4 %.3f\n", p[0], p[1], p[2], p[3]);
+        CHECK (p[2] > 0.02f && p[3] > 0.02f && p[0] < 1e-4f && p[1] < 1e-4f);
+
+        engine.setOutputGainDb (mon, -6.0f);
+        const auto q = levels (8);
+        std::printf ("     master -6 dB: ch3 %.3f (was %.3f)\n", q[2], p[2]);
+        CHECK (std::abs (q[2] - p[2] * 0.5f) < p[2] * 0.15f);
+
+        PluginDescription masterFx; bool haveMasterFx = false;
+        for (auto& d : host.getKnownPlugins().getTypes())
+            if (! d.isInstrument && d.name.containsIgnoreCase ("Stereo Tools")) { masterFx = d; haveMasterFx = true; }
+        if (haveMasterFx)
+        {
+            CHECK (engine.addEffect (Engine::outputAddress (mon), 0, -1, masterFx, err)); settle();
+            CHECK (engine.isPluginAlive (Engine::outputAddress (mon), 0, -1, 0));
+            const auto r = levels (8);
+            std::printf ("     through the master chain: ch3 %.3f\n", r[2]);
+            CHECK (r[2] > 0.01f);
+            CHECK (engine.getSetup().outputs[(size_t) mon].chain.effects.size() == 1);
+        }
+
+        // A volume controller, on any input: CC 7 at 0 is silence, at 127 full.
+        engine.setOutputVolumeCC (mon, 7);
+        engine.injectMidi (1, MidiMessage::controllerEvent (3, 7, 0));
+        pump (60);
+        CHECK (levels (4)[2] < 1e-3f);
+        engine.injectMidi (1, MidiMessage::controllerEvent (3, 7, 127));
+        pump (60);
+        CHECK (levels (4)[2] > 0.02f);
+        CHECK (std::abs (engine.getSetup().outputs[(size_t) mon].gainDb) < 0.01f);     // the model followed the pedal
+
+        // Removing the output puts its input back on Main (1+2).
+        engine.removeOutput (mon); settle();
+        CHECK (engine.getSetup().outputs.size() == 1 && engine.getSetup().inputs[0].output == 0);
+        const auto back = levels (8);
+        std::printf ("     after removing Monitors: ch1 %.3f ch3 %.3f\n", back[0], back[2]);
+        CHECK (back[0] > 0.02f && back[2] < 1e-4f);
+
+        engine.injectMidi (0, MidiMessage::noteOff (1, 60));
+        render (engine, 30);
+    }
+
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated

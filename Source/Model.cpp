@@ -181,6 +181,31 @@ ProgramDef ProgramDef::fromVar (const var& v)
 }
 
 //==============================================================================
+var OutputDef::toVar() const
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("name", name);
+    o->setProperty ("left", left);
+    o->setProperty ("right", right);
+    if (gainDb != 0.0f) o->setProperty ("gainDb", gainDb);
+    if (volumeCC > 0)   o->setProperty ("volumeCC", volumeCC);
+    o->setProperty ("effects", effectsToVar (chain.effects));
+    return var (o);
+}
+
+OutputDef OutputDef::fromVar (const var& v)
+{
+    OutputDef d;
+    d.name     = propStr (v, "name", "Main");
+    d.left     = jlimit (0, 63, prop<int> (v, "left", 0));
+    d.right    = jlimit (-1, 63, prop<int> (v, "right", 1));
+    d.gainDb   = (float) prop<double> (v, "gainDb", 0.0);
+    d.volumeCC = jlimit (0, 127, prop<int> (v, "volumeCC", 0));
+    d.chain.effects = effectsFromVar (v);
+    return d;
+}
+
+//==============================================================================
 var InputDef::toVar() const
 {
     auto* o = new DynamicObject();
@@ -192,6 +217,7 @@ var InputDef::toVar() const
         o->setProperty ("audioLeft", audioLeft);
         o->setProperty ("audioRight", audioRight);
     }
+    if (output != 0) o->setProperty ("output", output);
     o->setProperty ("midiDeviceIdentifier", midiDeviceIdentifier);
     o->setProperty ("midiDeviceName", midiDeviceName);
     o->setProperty ("channel", channel);
@@ -220,6 +246,7 @@ InputDef InputDef::fromVar (const var& v)
     in.kind                   = propStr (v, "kind", "midi") == "audio" ? Kind::audio : Kind::midi;
     in.audioLeft              = jlimit (0, 63, prop<int> (v, "audioLeft", 0));
     in.audioRight             = jlimit (-1, 63, prop<int> (v, "audioRight", 1));
+    in.output                 = jmax (0, prop<int> (v, "output", 0));
     in.midiDeviceIdentifier   = propStr (v, "midiDeviceIdentifier");
     in.midiDeviceName         = propStr (v, "midiDeviceName");
     in.channel                = prop<int>  (v, "channel", 0);
@@ -342,6 +369,14 @@ var Setup::toVar() const
     for (auto& i : inputs) arr.add (i.toVar());
     o->setProperty ("inputs", arr);
 
+    // Only when there is more to say than "Main on 1-2": older setups stay byte-identical.
+    if (! (outputs.size() == 1 && outputs[0].isDefault()))
+    {
+        Array<var> outArr;
+        for (auto& out : outputs) outArr.add (out.toVar());
+        o->setProperty ("outputs", outArr);
+    }
+
     /* Songs and sets are only written when there are any, so every setup made
        before this existed still saves and loads byte-identically. */
     if (! songs.empty())
@@ -373,6 +408,15 @@ Setup Setup::fromVar (const var& v)
     s.tapTempoCC         = prop<int>    (v, "tapTempoCC", 0);
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("inputs").getArray() : nullptr)
         for (auto& iv : *arr) s.inputs.push_back (InputDef::fromVar (iv));
+    if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("outputs").getArray() : nullptr)
+        if (arr->size() > 0)
+        {
+            s.outputs.clear();
+            for (auto& ov : *arr) s.outputs.push_back (OutputDef::fromVar (ov));
+        }
+    // An input on an output that is not there lands on the first one rather than nowhere.
+    for (auto& in : s.inputs)
+        if (in.output >= (int) s.outputs.size()) in.output = 0;
 
     s.nextSongCC = prop<int> (v, "nextSongCC", 0);
     s.prevSongCC = prop<int> (v, "prevSongCC", 0);

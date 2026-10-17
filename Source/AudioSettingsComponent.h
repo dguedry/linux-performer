@@ -95,6 +95,7 @@ private:
                 txt << "  -- pick the JACK type for PipeWire's graph with no resampling";
         }
         else txt << "no audio device open";
+        for (const auto& w : engine.deviceWarnings()) txt << "\nWARNING: " << w;
         txt << "\n" << LowLatency::realtimeSchedulingHint();
         const auto clock = LowLatency::readClock();
         if (clock.forceQuantum.isNotEmpty() && clock.forceQuantum != "0")

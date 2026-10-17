@@ -1,4 +1,6 @@
 #include "Engine.h"
+#include "LowLatency.h"
+#include <pthread.h>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -158,6 +160,7 @@ struct Engine::InputRuntime
     std::atomic<int> audioLeft { 0 }, audioRight { 1 };      // device input channels; right -1 = mono
     std::atomic<float> levelL { 0.0f }, levelR { 0.0f };     // the meter: pre-trim peaks, falling 20 dB/s
     std::atomic<uint32_t> clipMs { 0 };                      // when the input last touched full scale
+    std::atomic<int> output { 0 };                           // which output it lands on
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
@@ -173,6 +176,16 @@ struct Engine::InputRuntime
     {
         releasing.erase (std::remove (releasing.begin(), releasing.end(), p), releasing.end());
     }
+};
+
+/** An output: what its inputs add up to, through the master chain, at the
+    master volume, onto two device channels. */
+struct Engine::OutputRuntime
+{
+    ProgramRuntime chain;                        // only its effects are used
+    std::atomic<float> gain { 1.0f };
+    std::atomic<int> left { 0 }, right { 1 }, volumeCC { 0 };
+    AudioBuffer<float> mix;
 };
 
 //==============================================================================
@@ -272,11 +285,47 @@ void Engine::changeListenerCallback (ChangeBroadcaster*)
     else
         settings.removeValue ("audioDeviceState");
     settings.saveIfNeeded();
+
+    // Said once, where it will be seen: the Audio window repeats it for as long as it is true.
+    const auto warnings = deviceWarnings();
+    if (warnings != lastDeviceWarnings)
+    {
+        lastDeviceWarnings = warnings;
+        if (! warnings.isEmpty())
+            listeners.call ([w = warnings.joinIntoString ("  ")] (Listener& l) { l.statusMessage ("Audio: " + w); });
+    }
+}
+
+StringArray Engine::deviceWarnings() const
+{
+    StringArray out;
+    auto* d = deviceManager.getCurrentAudioDevice();
+    if (d == nullptr) return out;
+    const auto s = deviceManager.getAudioDeviceSetup();
+
+    /* A hardware interface driven directly, with nothing between it and this
+       process: the two settings that are easy to pick and sound like a broken
+       cable. 48 samples is one USB packet -- a full-speed interface cannot
+       keep that up -- and an input on another device is a second clock, so
+       the two drift and the stream resyncs with a crackle. */
+    if (! audioThreadRealtime.load())
+        out.add ("the audio thread could not be made realtime: " + LowLatency::realtimeSchedulingHint());
+    if (d->getTypeName() == "ALSA")
+    {
+        if (d->getCurrentBufferSizeSamples() < 128)
+            out.add (String (d->getCurrentBufferSizeSamples()) + "-sample buffer on a direct ALSA device: expect dropouts and crackle. 256 is safe on a USB interface, 128 on a good PCI one.");
+        if (s.inputDeviceName.isNotEmpty() && s.inputDeviceName != s.outputDeviceName && s.inputChannels.countNumberOfSetBits() > 0)
+            out.add ("input (" + s.inputDeviceName + ") and output (" + s.outputDeviceName + ") are different devices, so their clocks drift and the audio crackles. Use the same interface for both, or untick the input channels.");
+    }
+    return out;
 }
 
 void Engine::notifyContent (int inputIndex, int program)
 {
-    listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
+    if (isOutputAddress (inputIndex))
+        listeners.call ([] (Listener& l) { l.outputsChanged(); });
+    else
+        listeners.call ([=] (Listener& l) { l.programContentChanged (inputIndex, program); });
 }
 
 //==============================================================================
@@ -289,6 +338,9 @@ void Engine::loadSetup (Setup newSetup)
     // A setup with an audio input needs the device's inputs; a keyboard rig does not pay for them.
     for (auto& in : setup.inputs)
         if (in.isAudio()) { ensureAudioInputsOpen(); break; }
+    int outChannels = 0;
+    for (auto& o : setup.outputs) outChannels = jmax (outChannels, o.left + 1, o.right + 1);
+    if (outChannels > 2) ensureAudioOutputsOpen (outChannels);
     // The audio thread reads the tap controller from its own copy.
     tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
     nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
@@ -313,6 +365,17 @@ Setup Engine::captureSetup (int budgetMs)
             }
             captureProgramState (i, *rt, timeout);
         }
+    for (int o = 0; o < (int) outputs.size(); ++o)
+    {
+        int timeout = -1;
+        if (budgetMs >= 0)
+        {
+            const auto now = Time::getMillisecondCounter();
+            if (now >= deadline) break;
+            timeout = (int) jmin ((uint32) 30000, deadline - now);
+        }
+        captureProgramState (outputAddress (o), outputs[(size_t) o]->chain, timeout);
+    }
     return setup;
 }
 
@@ -344,6 +407,9 @@ void Engine::setTempoBpm (double bpm)
                 if (e->plugin != nullptr) e->plugin->setTempo (clamped, 4, 4);
         }
     }
+    for (auto& o : outputs)
+        for (auto& e : o->chain.effects)
+            if (e->plugin != nullptr) e->plugin->setTempo (clamped, 4, 4);
 
     listeners.call ([] (Listener& l) { l.setupChanged(); });
 }
@@ -393,6 +459,7 @@ void Engine::setTapTempoCC (int cc)
 
 void Engine::rebuildRuntimes()
 {
+    buildOutputs();
     for (int i = 0; i < (int) setup.inputs.size(); ++i)
     {
         auto rt = std::make_unique<InputRuntime>();
@@ -415,10 +482,13 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
 {
     // Take everything away from the audio thread first.
     std::vector<std::unique_ptr<InputRuntime>> old;
+    std::vector<std::unique_ptr<OutputRuntime>> oldOutputs;
     {
         const ScopedLock sl (lock);
         old = std::move (runtimes);
         runtimes.clear();
+        oldOutputs = std::move (outputs);
+        outputs.clear();
     }
 
     const auto deadline = Time::getMillisecondCounter() + (uint32) jmax (0, budgetMs);
@@ -434,6 +504,9 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
                 if (i < (int) setup.inputs.size())
                     captureProgramState (i, *rt, remaining());
     }
+    if (captureFirst)
+        for (int o = 0; o < (int) oldOutputs.size() && o < (int) setup.outputs.size(); ++o)
+            captureProgramState (outputAddress (o), oldOutputs[(size_t) o]->chain, remaining());
 
     /* Two phases. Every host is told to quit first, so they all wind down at
        the same time; then each is reaped with what patience is left. One
@@ -449,10 +522,14 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
             }
             for (auto& e : rt->effects) if (e->plugin != nullptr) e->plugin->requestQuit();
         }
+    for (auto& o : oldOutputs)
+        for (auto& e : o->chain.effects) if (e->plugin != nullptr) e->plugin->requestQuit();
     const int patience = budgetMs < 0 ? 3000 : jmin (3000, remaining());
     for (auto& in : old)
         for (auto& [prog, rt] : in->loaded)
             destroyProgramPlugins (*rt, patience);
+    for (auto& o : oldOutputs)
+        destroyProgramPlugins (o->chain, patience);
     // Every reaper gets its patience and then a SIGKILL; a little more covers the kill itself.
     RemotePlugin::waitForReapers (patience + 2000);
 }
@@ -468,6 +545,173 @@ void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
     rt.audio.store (def.isAudio());
     rt.audioLeft.store (def.audioLeft);
     rt.audioRight.store (def.audioRight);
+    rt.output.store (def.output);
+}
+
+ProgramDef* Engine::defFor (int inputIndex, int program)
+{
+    if (isOutputAddress (inputIndex))
+    {
+        const int o = outputFromAddress (inputIndex);
+        return o >= 0 && o < (int) setup.outputs.size() ? &setup.outputs[(size_t) o].chain : nullptr;
+    }
+    return validInput (inputIndex) && validProgram (program) ? &setup.inputs[(size_t) inputIndex].programs[(size_t) program] : nullptr;
+}
+
+//==============================================================================
+// Outputs
+//==============================================================================
+void Engine::buildOutputs()
+{
+    std::vector<std::unique_ptr<OutputRuntime>> built;
+    for (int o = 0; o < (int) setup.outputs.size(); ++o)
+    {
+        const auto& def = setup.outputs[(size_t) o];
+        auto rt = std::make_unique<OutputRuntime>();
+        rt->chain.program = 0;
+        rt->chain.mix.setSize (2, blockSize);
+        rt->chain.programMidi.ensureSize (64);
+        rt->mix.setSize (2, blockSize);
+        rt->gain.store (Decibels::decibelsToGain (def.gainDb, -60.0f));
+        rt->left.store (def.left);
+        rt->right.store (def.right);
+        rt->volumeCC.store (def.volumeCC);
+        for (int e = 0; e < (int) def.chain.effects.size(); ++e)
+            rt->chain.effects.push_back (buildEffect (outputAddress (o), 0, -1, e, def.chain.effects[(size_t) e]));
+        built.push_back (std::move (rt));
+    }
+    const ScopedLock sl (lock);
+    outputs = std::move (built);
+}
+
+int Engine::addOutput (const String& name, int left, int right)
+{
+    OutputDef def;
+    def.name = name;
+    def.left = jlimit (0, 63, left);
+    def.right = jlimit (-1, 63, right);
+    setup.outputs.push_back (def);
+    const int idx = (int) setup.outputs.size() - 1;
+
+    auto rt = std::make_unique<OutputRuntime>();
+    rt->chain.program = 0;
+    rt->chain.mix.setSize (2, blockSize);
+    rt->chain.programMidi.ensureSize (64);
+    rt->mix.setSize (2, blockSize);
+    rt->left.store (def.left);
+    rt->right.store (def.right);
+    {
+        const ScopedLock sl (lock);
+        outputs.push_back (std::move (rt));
+    }
+    ensureAudioOutputsOpen (jmax (def.left, def.right) + 1);
+    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+    return idx;
+}
+
+void Engine::removeOutput (int output)
+{
+    if (output < 0 || output >= (int) setup.outputs.size() || setup.outputs.size() <= 1) return;
+
+    std::unique_ptr<OutputRuntime> gone;
+    {
+        const ScopedLock sl (lock);
+        gone = std::move (outputs[(size_t) output]);
+        outputs.erase (outputs.begin() + output);
+        // Inputs on it land on the first output; those on later outputs follow their output's new index.
+        for (int i = 0; i < (int) runtimes.size(); ++i)
+        {
+            auto& def = setup.inputs[(size_t) i];
+            if (def.output == output) def.output = 0;
+            else if (def.output > output) --def.output;
+            runtimes[(size_t) i]->output.store (def.output);
+        }
+        for (int o = output; o < (int) outputs.size(); ++o)
+            for (auto& e : outputs[(size_t) o]->chain.effects)
+                e->inputIndex.store (outputAddress (o));
+    }
+    destroyProgramPlugins (gone->chain);
+    setup.outputs.erase (setup.outputs.begin() + output);
+    listeners.call ([] (Listener& l) { l.outputsChanged(); l.setupChanged(); });
+}
+
+void Engine::setOutputName (int output, const String& name)
+{
+    if (output < 0 || output >= (int) setup.outputs.size()) return;
+    setup.outputs[(size_t) output].name = name;
+}
+
+void Engine::setOutputChannels (int output, int left, int right)
+{
+    if (output < 0 || output >= (int) setup.outputs.size()) return;
+    auto& def = setup.outputs[(size_t) output];
+    def.left = jlimit (0, 63, left);
+    def.right = jlimit (-1, 63, right);
+    outputs[(size_t) output]->left.store (def.left);
+    outputs[(size_t) output]->right.store (def.right);
+    ensureAudioOutputsOpen (jmax (def.left, def.right) + 1);
+    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+}
+
+void Engine::setOutputGainDb (int output, float dB)
+{
+    if (output < 0 || output >= (int) setup.outputs.size()) return;
+    dB = jlimit (-60.0f, 12.0f, dB);
+    setup.outputs[(size_t) output].gainDb = dB;
+    outputs[(size_t) output]->gain.store (Decibels::decibelsToGain (dB, -60.0f));
+}
+
+void Engine::setOutputVolumeCC (int output, int cc)
+{
+    if (output < 0 || output >= (int) setup.outputs.size()) return;
+    cc = jlimit (0, 127, cc);
+    setup.outputs[(size_t) output].volumeCC = cc;
+    outputs[(size_t) output]->volumeCC.store (cc);
+    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+}
+
+void Engine::armOutputVolumeLearn (int output)
+{
+    outputLearn.store (output >= 0 && output < (int) setup.outputs.size() ? output : -1);
+}
+
+void Engine::setInputOutput (int inputIndex, int output)
+{
+    if (! validInput (inputIndex) || output < 0 || output >= (int) setup.outputs.size()) return;
+    setup.inputs[(size_t) inputIndex].output = output;
+    runtimes[(size_t) inputIndex]->output.store (output);
+    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+}
+
+StringArray Engine::getAudioOutputChannelNames() const
+{
+    StringArray out;
+    if (auto* d = deviceManager.getCurrentAudioDevice())
+    {
+        const auto names = d->getOutputChannelNames();
+        const auto active = d->getActiveOutputChannels();
+        for (int i = 0; i < names.size(); ++i)
+            if (active[i]) out.add (names[i]);
+    }
+    return out;
+}
+
+bool Engine::ensureAudioOutputsOpen (int channelsNeeded)
+{
+    auto* d = deviceManager.getCurrentAudioDevice();
+    if (d == nullptr) return false;
+    if (d->getActiveOutputChannels().countNumberOfSetBits() >= channelsNeeded) return true;
+    if (channelsNeeded > d->getOutputChannelNames().size()) return false;     // the device has no such channel
+
+    auto s = deviceManager.getAudioDeviceSetup();
+    s.useDefaultOutputChannels = false;
+    s.outputChannels.clear();
+    s.outputChannels.setRange (0, channelsNeeded, true);
+    const auto err = deviceManager.setAudioDeviceSetup (s, true);
+    const auto open = getAudioOutputChannelNames();
+    std::fprintf (stderr, "[audio] opening %d output channels on '%s': %s, %d open\n", channelsNeeded,
+                  s.outputDeviceName.toRawUTF8(), err.isEmpty() ? "ok" : err.toRawUTF8(), open.size());
+    return err.isEmpty() && open.size() >= channelsNeeded;
 }
 
 int Engine::addInput (const String& name, InputDef::Kind kind)
@@ -679,6 +923,11 @@ void Engine::openMidiDevices()
 //==============================================================================
 Engine::ProgramRuntime* Engine::getLoaded (int inputIndex, int program) const
 {
+    if (isOutputAddress (inputIndex))
+    {
+        const int o = outputFromAddress (inputIndex);
+        return o >= 0 && o < (int) outputs.size() ? &outputs[(size_t) o]->chain : nullptr;
+    }
     if (! validInput (inputIndex)) return nullptr;
     auto& m = runtimes[(size_t) inputIndex]->loaded;
     auto it = m.find (program);
@@ -1286,8 +1535,9 @@ void Engine::destroyNode (PluginNode* node, int patienceMs)
 
 bool Engine::captureProgramState (int inputIndex, ProgramRuntime& rt, int timeoutMs)
 {
-    if (! validInput (inputIndex)) return false;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) rt.program];
+    auto* defPtr = defFor (inputIndex, rt.program);
+    if (defPtr == nullptr) return false;
+    auto& def = *defPtr;
 
     bool changed = false;
     auto capture = [&changed, timeoutMs] (PluginNode& node, MemoryBlock& dest)
@@ -1472,8 +1722,9 @@ void Engine::renumberChain (std::vector<std::unique_ptr<EffectRuntime>>& chain)
 
 bool Engine::addEffect (int inputIndex, int program, int slot, const PluginDescription& desc, String& error)
 {
-    if (! validInput (inputIndex) || ! validProgram (program)) return false;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* defPtr = defFor (inputIndex, program);
+    if (defPtr == nullptr) return false;
+    auto& def = *defPtr;
     auto* chainDef = defChainFor (def, slot);
     if (chainDef == nullptr) return false;
 
@@ -1497,8 +1748,9 @@ bool Engine::addEffect (int inputIndex, int program, int slot, const PluginDescr
 
 void Engine::removeEffect (int inputIndex, int program, int slot, int effect)
 {
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* defPtr = defFor (inputIndex, program);
+    if (defPtr == nullptr) return;
+    auto& def = *defPtr;
     auto* chainDef = defChainFor (def, slot);
     if (chainDef == nullptr || effect < 0 || effect >= (int) chainDef->size()) return;
 
@@ -1530,8 +1782,9 @@ void Engine::removeEffect (int inputIndex, int program, int slot, int effect)
 
 void Engine::moveEffect (int inputIndex, int program, int slot, int from, int to)
 {
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* defPtr = defFor (inputIndex, program);
+    if (defPtr == nullptr) return;
+    auto& def = *defPtr;
     auto* chainDef = defChainFor (def, slot);
     if (chainDef == nullptr) return;
     const int n = (int) chainDef->size();
@@ -1569,8 +1822,9 @@ void Engine::moveEffect (int inputIndex, int program, int slot, int from, int to
 
 void Engine::setEffectBypassed (int inputIndex, int program, int slot, int effect, bool b)
 {
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* defPtr = defFor (inputIndex, program);
+    if (defPtr == nullptr) return;
+    auto& def = *defPtr;
     auto* chainDef = defChainFor (def, slot);
     if (chainDef == nullptr || effect < 0 || effect >= (int) chainDef->size()) return;
     (*chainDef)[(size_t) effect].bypassed = b;
@@ -1624,10 +1878,10 @@ String Engine::getPluginLoadError (int inputIndex, int program, int slot, int ef
 
 void Engine::reloadPlugin (int inputIndex, int program, int slot, int effect)
 {
-    if (! validInput (inputIndex) || ! validProgram (program)) return;
     auto* node = getNode (inputIndex, program, slot, effect);
-    if (node == nullptr) return;
-    auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    auto* defPtr = defFor (inputIndex, program);
+    if (node == nullptr || defPtr == nullptr) return;
+    auto& def = *defPtr;
 
     const PluginDescription* desc = nullptr;
     const MemoryBlock* state = nullptr;
@@ -1783,6 +2037,21 @@ void Engine::handleAsyncUpdate()
             case Event::tapLearn:
                 setTapTempoCC (e.a);
                 listeners.call ([cc = e.a] (Listener& l) { l.tapTempoLearned (cc); });
+                break;
+
+            case Event::outputLearn:
+                setOutputVolumeCC (e.input, e.a);
+                listeners.call ([o = e.input, cc = e.a] (Listener& l) { l.outputVolumeLearned (o, cc); });
+                break;
+
+            case Event::outputVolume:
+                // The audio thread already moved the gain; this keeps the model and the fader with it.
+                if (e.input >= 0 && e.input < (int) setup.outputs.size())
+                {
+                    const float f = (float) e.a / 127.0f;
+                    setup.outputs[(size_t) e.input].gainDb = Decibels::gainToDecibels (f * f, -60.0f);
+                    listeners.call ([] (Listener& l) { l.outputsChanged(); });
+                }
                 break;
 
             case Event::tapTempo:
@@ -2000,6 +2269,28 @@ void Engine::routeMidi (InputRuntime& in, int i, const MidiMessage& m)
     /* Tap tempo, outside the channel filter: the tempo belongs to the rig, so a
        footswitch taps it whatever this input is set to play on and whatever
        program is loaded. Only the press counts, not the release. */
+    if (m.isController())
+    {
+        /* An output's volume control, and learning one: like the tap pedal,
+           it works on any input and channel, because a master fader belongs
+           to the rig and not to one sound. */
+        if (const int learn = outputLearn.load (std::memory_order_relaxed); learn >= 0)
+        {
+            outputLearn.store (-1);
+            postEvent ({ Event::outputLearn, learn, m.getControllerNumber(), 0, 0, 0 });
+            return;
+        }
+        const int cc = m.getControllerNumber();
+        for (int o = 0; o < (int) outputs.size(); ++o)
+            if (cc > 0 && outputs[(size_t) o]->volumeCC.load (std::memory_order_relaxed) == cc)
+            {
+                const float f = (float) m.getControllerValue() / 127.0f;
+                outputs[(size_t) o]->gain.store (f * f);          // a fader's taper: half way is -12 dB
+                postEvent ({ Event::outputVolume, o, m.getControllerValue(), 0, 0, 0 });
+                return;
+            }
+    }
+
     if (const int tap = tapCC.load (std::memory_order_relaxed);
         tap > 0 && m.isController() && m.getControllerNumber() == tap && m.getControllerValue() >= 64)
     {
@@ -2061,6 +2352,13 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
             for (auto& e : rt->effects) prep (*e);
         }
     }
+    for (auto& o : outputs)
+    {
+        o->mix.setSize (2, blockSize, false, false, true);
+        o->chain.mix.setSize (2, blockSize, false, false, true);
+        for (auto& e : o->chain.effects)
+            if (e->alive()) e->plugin->prepare (sampleRate, blockSize);
+    }
 }
 
 void Engine::audioDeviceStopped() {}
@@ -2069,6 +2367,20 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
                                                float* const* out, int numOut, int numSamples,
                                                const AudioIODeviceCallbackContext&)
 {
+    /* JUCE's ALSA thread is an ordinary high-priority thread, while the plugin
+       hosts' audio threads are realtime and wait on it -- so the rig ran at the
+       priority of its least urgent part, and a busy desktop could hold the
+       whole block up: the occasional burst of static on a direct ALSA device.
+       Promoted here, on the thread itself, the first time it calls, and again
+       whenever the device comes back on a new thread. PipeWire's thread is
+       already realtime and is left alone. */
+    if (! callbackThreadKnown || ! pthread_equal (callbackThread, pthread_self()))
+    {
+        callbackThread = pthread_self();
+        callbackThreadKnown = true;
+        audioThreadRealtime.store (LowLatency::currentThreadIsRealtime() || LowLatency::makeCurrentThreadRealtime (85));
+    }
+
     for (int c = 0; c < numOut; ++c)
         if (out[c] != nullptr)
             FloatVectorOperations::clear (out[c], numSamples);
@@ -2095,8 +2407,32 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn
             chunk[c] = out[c] != nullptr ? out[c] + start : nullptr;
         for (int c = 0; c < numIn; ++c)
             inChunk[c] = in[c] != nullptr ? in[c] + start : nullptr;
+
+        /* Each input lands on its output's mix; each output then runs its
+           master chain, takes its volume, and goes to its two device channels.
+           With the one default output on channels 1-2 this is what the single
+           sum used to be, one chain and one multiply later. */
+        for (auto& o : outputs)
+            o->mix.clear (0, n);
         for (auto& rt : runtimes)
-            processInput (*rt, inChunk, numIn, chunk, numOut, n, panicNow);
+        {
+            if (outputs.empty()) break;
+            int idx = rt->output.load (std::memory_order_relaxed);
+            if (idx < 0 || idx >= (int) outputs.size()) idx = 0;
+            float* busOut[2] = { outputs[(size_t) idx]->mix.getWritePointer (0), outputs[(size_t) idx]->mix.getWritePointer (1) };
+            processInput (*rt, inChunk, numIn, busOut, 2, n, panicNow);
+        }
+        static const MidiBuffer noMidi;
+        for (auto& o : outputs)
+        {
+            AudioBuffer<float> view (o->mix.getArrayOfWritePointers(), 2, n);
+            runChain (o->chain.effects, noMidi, view, n);
+            const float g = o->gain.load (std::memory_order_relaxed);
+            const int l = o->left.load (std::memory_order_relaxed);
+            const int r = o->right.load (std::memory_order_relaxed);
+            if (l >= 0 && l < numOut && chunk[l] != nullptr) FloatVectorOperations::addWithMultiply (chunk[l], view.getReadPointer (0), g, n);
+            if (r >= 0 && r < numOut && chunk[r] != nullptr) FloatVectorOperations::addWithMultiply (chunk[r], view.getReadPointer (1), g, n);
+        }
         panicNow = false;
     }
 }

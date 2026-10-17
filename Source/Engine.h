@@ -6,6 +6,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
+#include <pthread.h>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -43,6 +44,9 @@ public:
         virtual ~Listener() = default;
         /** Inputs added/removed or a whole setup loaded. */
         virtual void setupChanged() {}
+        /** An output was added, removed or changed, or a master chain's plugin loaded or died. */
+        virtual void outputsChanged() {}
+        virtual void outputVolumeLearned (int output, int cc) { juce::ignoreUnused (output, cc); }
         /** The active program of an input changed (via MIDI or UI). */
         virtual void programChanged (int inputIndex, int program) { juce::ignoreUnused (inputIndex, program); }
         /** Slots, effects or mappings of a program were edited, or its load state changed. */
@@ -126,6 +130,38 @@ public:
     /** The device's open input channels, in the order an audio input counts
         them. Empty when no input device is open. */
     juce::StringArray getAudioInputChannelNames() const;
+    //==============================================================================
+    // Outputs: device channel pairs, each with a master chain and a volume.
+    /** A master chain is addressed like a program's chain -- addEffect,
+        getPlugin, openPluginEditor and the rest take (input, program) -- with
+        this in place of the input index and 0 as the program. Negative, so it
+        can never be mistaken for an input. */
+    static int  outputAddress (int output)       { return -1 - output; }
+    static bool isOutputAddress (int input)      { return input < 0; }
+    static int  outputFromAddress (int input)    { return -1 - input; }
+
+    int  addOutput (const juce::String& name, int left, int right);
+    /** The last output cannot be removed; inputs on a removed one land on the first. */
+    void removeOutput (int output);
+    void setOutputName (int output, const juce::String&);
+    void setOutputChannels (int output, int left, int right);
+    void setOutputGainDb (int output, float dB);
+    /** A controller, on any input and channel, that moves this output's volume; 0 = none. */
+    void setOutputVolumeCC (int output, int cc);
+    /** The next controller to arrive becomes that output's volume control. -1 cancels. */
+    void armOutputVolumeLearn (int output);
+    bool isOutputVolumeLearnArmed() const        { return outputLearn.load() >= 0; }
+    void setInputOutput (int inputIndex, int output);
+    /** The device's open output channels, in callback order. */
+    juce::StringArray getAudioOutputChannelNames() const;
+    /** Opens at least this many device output channels, best effort. */
+    bool ensureAudioOutputsOpen (int channelsNeeded);
+
+    /** What is wrong with the device setup, if anything, in plain words: a
+        buffer too small for a hardware interface, input and output on
+        different devices. Empty when all is well. */
+    juce::StringArray deviceWarnings() const;
+
     /** An audio input's level before its trim: the peak on each side, falling
         at 20 dB a second, and whether it clipped within the last two seconds.
         Zero for a keyboard input. Read from any thread. */
@@ -314,11 +350,12 @@ private:
     struct MappingRuntime;
     struct ProgramRuntime;
     struct InputRuntime;
+    struct OutputRuntime;
 
     struct Event
     {
         enum Type { programChange, learn, touched, pluginDied, pluginLoaded, tapTempo, tapLearn,
-                    songStep, songLearn, editorClosed };
+                    songStep, songLearn, editorClosed, outputVolume, outputLearn };
         Type type; int input = 0, a = 0, b = 0, c = 0, d = 0;
     };
 
@@ -390,6 +427,10 @@ private:
     void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const float* inL, const float* inR,
                          float* const* out, int numOut, int numSamples, bool panic);
     static void applyInputDef (InputRuntime&, const InputDef&);
+    /** The program definition an address names: a program's, or an output's master chain. */
+    ProgramDef* defFor (int inputIndex, int program);
+    const ProgramDef* defFor (int inputIndex, int program) const { return const_cast<Engine*> (this)->defFor (inputIndex, program); }
+    void buildOutputs();
     void runChain (std::vector<std::unique_ptr<EffectRuntime>>&, const juce::MidiBuffer& midi, juce::AudioBuffer<float>& stereo, int numSamples);
 
     bool validInput (int i) const     { return i >= 0 && i < (int) setup.inputs.size(); }
@@ -410,6 +451,12 @@ private:
     Setup setup;
     juce::File setupFile;             // see setSetupFile
     std::vector<std::unique_ptr<InputRuntime>> runtimes;
+    std::vector<std::unique_ptr<OutputRuntime>> outputs;      // same lock as runtimes
+    std::atomic<int> outputLearn { -1 };                        // which output is waiting for its volume controller
+    juce::StringArray lastDeviceWarnings;
+    pthread_t callbackThread {};
+    bool callbackThreadKnown = false;              // audio thread only
+    std::atomic<bool> audioThreadRealtime { true };
 
     /** Tap tempo. Only the recent taps count: a pause means the player has
         stopped tapping and started again, and averaging across that gap would

@@ -1,4 +1,6 @@
 #include "LowLatency.h"
+#include <pthread.h>
+#include <sched.h>
 #include <dlfcn.h>
 #include <sys/resource.h>
 #include <cstdlib>
@@ -47,6 +49,22 @@ bool realtimeSchedulingAvailable()
     rlimit rl {};
     if (::getrlimit (RLIMIT_RTPRIO, &rl) != 0) return false;
     return rl.rlim_cur > 0;
+}
+
+bool currentThreadIsRealtime()
+{
+    int policy = 0;
+    sched_param sp {};
+    if (::pthread_getschedparam (::pthread_self(), &policy, &sp) != 0) return false;
+    return policy == SCHED_FIFO || policy == SCHED_RR;
+}
+
+bool makeCurrentThreadRealtime (int priority)
+{
+    if (! realtimeSchedulingAvailable()) return false;
+    sched_param sp {};
+    sp.sched_priority = jlimit (sched_get_priority_min (SCHED_RR), sched_get_priority_max (SCHED_RR), priority);
+    return ::pthread_setschedparam (::pthread_self(), SCHED_RR, &sp) == 0;
 }
 
 String realtimeSchedulingHint()

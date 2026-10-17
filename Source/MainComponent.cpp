@@ -141,6 +141,14 @@ public:
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
+        addAndMakeVisible (outputBox);
+        outputBox.setTooltip ("Which output this input lands on. Outputs are device channel pairs with a master chain, set up under Options.");
+        outputBox.onChange = [this]
+        {
+            int sel = list.getSelectedRow();
+            if (sel >= 0 && outputBox.getSelectedId() > 0) { engine.setInputOutput (sel, outputBox.getSelectedId() - 1); owner.markDirty(); }
+        };
+
         addAndMakeVisible (audioBox);
         audioBox.setTooltip ("Which of the open device inputs this input listens to: one channel (mono, fed to both sides) "
                              "or a pair. The channels on offer are those chosen in Audio...");
@@ -155,7 +163,7 @@ public:
             list.repaintRow (sel);
         };
 
-        for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel, &audioLabel })
+        for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel, &audioLabel, &outputLabel })
         {
             addAndMakeVisible (l);
             l->setColour (Label::textColourId, textDim);
@@ -188,6 +196,14 @@ public:
 
         auto& def = inputs[(size_t) sel];
         nameEditor.setText (def.name, dontSendNotification);
+
+        outputBox.clear (dontSendNotification);
+        for (int o = 0; o < (int) engine.getSetup().outputs.size(); ++o)
+        {
+            const auto& od = engine.getSetup().outputs[(size_t) o];
+            outputBox.addItem (od.name + "  (" + String (od.left + 1) + (od.right >= 0 ? "+" + String (od.right + 1) : String()) + ")", o + 1);
+        }
+        outputBox.setSelectedId (def.output + 1, dontSendNotification);
 
         // The audio channel row only means something for an audio input.
         audioLabel.setVisible (def.isAudio());
@@ -241,7 +257,7 @@ public:
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
         const bool audio = audioBox.isVisible();
-        auto editor = r.removeFromBottom (audio ? 216 : 170);
+        auto editor = r.removeFromBottom (audio ? 262 : 216);
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -272,6 +288,10 @@ public:
         auto pcRow = editor.removeFromTop (24);
         pcChannelLabel.setBounds (pcRow.removeFromLeft (56));
         pcChannelBox.setBounds (pcRow.removeFromLeft (130));
+        editor.removeFromTop (6);
+        auto outRow = editor.removeFromTop (24);
+        outputLabel.setBounds (outRow.removeFromLeft (56));
+        outputBox.setBounds (outRow);
     }
 
     // ListBoxModel
@@ -350,6 +370,8 @@ private:
     ComboBox pcChannelBox;
     Label audioLabel { {}, "Audio channels" };
     ComboBox audioBox;
+    Label outputLabel { {}, "Output" };
+    ComboBox outputBox;
     Array<MidiDeviceInfo> devices;
     int lastNotified = -1;
 };
@@ -561,10 +583,16 @@ public:
 
     EffectChainComponent (Engine& e, MainComponent& o, int slotIndex) : engine (e), owner (o), slot (slotIndex)
     {
+        address = [this] { return std::make_pair (owner.getSelectedInput(), owner.getEditedProgram()); };
         addAndMakeVisible (addBtn);
         addBtn.onClick = [this] { showAddMenu(); };
         addBtn.setTooltip (slot < 0 ? "Add an effect after the mix of all slots" : "Add an insert effect after this instrument");
     }
+
+    /** Whose chain this is: (input, program), or an output's master chain
+        through Engine::outputAddress(). The program chains follow the
+        selection; the Outputs window sets its own. */
+    std::function<std::pair<int, int>()> address;
 
     void setSlot (int s) { slot = s; }
 
@@ -622,12 +650,12 @@ private:
 
             auto& e = chain.engine;
             auto& o = chain.owner;
-            on.onClick        = [this, &e, &o] { e.setEffectBypassed (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, ! on.getToggleState()); o.markDirty(); };
-            guiBtn.onClick    = [this, &e, &o] { if (alive) o.openPluginEditor (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index);
-                                                 else       e.reloadPlugin (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
-            upBtn.onClick     = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index - 1); };
-            downBtn.onClick   = [this, &e, &o] { e.moveEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index, index + 1); };
-            removeBtn.onClick = [this, &e, &o] { e.removeEffect (o.getSelectedInput(), o.getEditedProgram(), chain.slot, index); };
+            on.onClick        = [this, &e, &o] { const auto a = chain.address(); e.setEffectBypassed (a.first, a.second, chain.slot, index, ! on.getToggleState()); o.markDirty(); };
+            guiBtn.onClick    = [this, &e, &o] { const auto a = chain.address(); if (alive) o.openPluginEditor (a.first, a.second, chain.slot, index);
+                                                                                  else       e.reloadPlugin (a.first, a.second, chain.slot, index); };
+            upBtn.onClick     = [this, &e]     { const auto a = chain.address(); e.moveEffect (a.first, a.second, chain.slot, index, index - 1); };
+            downBtn.onClick   = [this, &e]     { const auto a = chain.address(); e.moveEffect (a.first, a.second, chain.slot, index, index + 1); };
+            removeBtn.onClick = [this, &e]     { const auto a = chain.address(); e.removeEffect (a.first, a.second, chain.slot, index); };
         }
 
         void update (const EffectDef& def, bool loaded, bool loading, const String& error, bool canUp, bool canDown)
@@ -685,7 +713,8 @@ private:
             const int idx = result - 1;
             if (idx < 0 || idx >= types.size()) return;
             String error;
-            if (! engine.addEffect (owner.getSelectedInput(), owner.getEditedProgram(), slot, types[idx], error))
+            const auto a = address();
+            if (! engine.addEffect (a.first, a.second, slot, types[idx], error))
                 owner.showStatus ("Could not load " + types[idx].name + ": " + error);
             else if (MainComponent::looksLikeAraPlugin (types[idx]))
                 owner.showStatus (araWarning (types[idx].name));
@@ -705,6 +734,194 @@ private:
 
 //==============================================================================
 //  SlotsPanel
+//==============================================================================
+/** Options > Outputs: the device channel pairs the rig lands on, each with a
+    master chain and a volume. A window of its own because it is set up once
+    per venue, not touched mid-set. */
+class OutputsComponent : public Component,
+                         private ListBoxModel,
+                         private Engine::Listener
+{
+public:
+    OutputsComponent (Engine& e, MainComponent& o) : engine (e), owner (o), chain (e, o, -1)
+    {
+        engine.addListener (this);
+        addAndMakeVisible (list);
+        list.setModel (this);
+        list.setRowHeight (40);
+        list.setColour (ListBox::backgroundColourId, bgPanel);
+
+        addAndMakeVisible (addBtn);
+        addAndMakeVisible (removeBtn);
+        addBtn.onClick = [this]
+        {
+            const auto names = engine.getAudioOutputChannelNames();
+            const int n = (int) engine.getSetup().outputs.size();
+            const int idx = engine.addOutput ("Output " + String (n + 1), jmin (2 * n, 62), jmin (2 * n + 1, 63));
+            owner.markDirty();
+            list.updateContent();
+            list.selectRow (idx);
+            if (engine.getAudioOutputChannelNames().size() < 2 * n + 2)
+                owner.showStatus ("The device has not opened those channels. Open Audio... and tick more output channels, then pick them here.");
+            ignoreUnused (names);
+        };
+        removeBtn.onClick = [this]
+        {
+            const int sel = list.getSelectedRow();
+            if (sel > 0 || (sel == 0 && engine.getSetup().outputs.size() > 1)) { engine.removeOutput (sel); owner.markDirty(); list.updateContent(); list.selectRow (0); }
+        };
+
+        addAndMakeVisible (nameEditor);
+        nameEditor.onTextChange = [this] { if (int s = list.getSelectedRow(); s >= 0) { engine.setOutputName (s, nameEditor.getText()); owner.markDirty(); list.repaintRow (s); } };
+
+        addAndMakeVisible (channelsBox);
+        channelsBox.setTooltip ("Which device output channels this output goes to. Only channels opened in Audio... are offered.");
+        channelsBox.onChange = [this]
+        {
+            const int s = list.getSelectedRow(); const int id = channelsBox.getSelectedId();
+            if (s < 0 || id <= 0) return;
+            if (id >= 2000) engine.setOutputChannels (s, id - 2000, id - 2000 + 1); else engine.setOutputChannels (s, id - 1000, -1);
+            owner.markDirty(); list.repaintRow (s);
+        };
+
+        addAndMakeVisible (volume);
+        volume.setRange (-60.0, 12.0, 0.5);
+        volume.setSliderStyle (Slider::LinearBar);
+        volume.setTextValueSuffix (" dB");
+        volume.setDoubleClickReturnValue (true, 0.0);
+        volume.setTooltip ("Master volume of this output, after its effects. Double-click for 0 dB.");
+        volume.onValueChange = [this] { if (int s = list.getSelectedRow(); s >= 0) { engine.setOutputGainDb (s, (float) volume.getValue()); owner.markDirty(); } };
+
+        addAndMakeVisible (learnBtn);
+        learnBtn.setTooltip ("Press, then move the pedal or knob that should control this output's volume -- on any keyboard, any channel.");
+        learnBtn.onClick = [this]
+        {
+            const int s = list.getSelectedRow(); if (s < 0) return;
+            if (engine.isOutputVolumeLearnArmed()) { engine.armOutputVolumeLearn (-1); learnBtn.setButtonText ("Learn volume CC"); }
+            else { engine.armOutputVolumeLearn (s); learnBtn.setButtonText ("Move it now..."); }
+        };
+        addAndMakeVisible (clearCcBtn);
+        clearCcBtn.onClick = [this] { if (int s = list.getSelectedRow(); s >= 0) { engine.setOutputVolumeCC (s, 0); owner.markDirty(); } };
+
+        for (auto* l : { &nameLabel, &channelsLabel, &volumeLabel, &ccLabel, &chainLabel })
+        {
+            addAndMakeVisible (l);
+            l->setColour (Label::textColourId, textDim);
+            l->setFont (FontOptions (12.0f));
+        }
+        chainLabel.setFont (FontOptions (13.0f, Font::bold));
+        chainLabel.setColour (Label::textColourId, accent);
+
+        addAndMakeVisible (chain);
+        chain.address = [this] { return std::make_pair (Engine::outputAddress (list.getSelectedRow()), 0); };
+
+        list.selectRow (0);
+        refresh();
+    }
+    ~OutputsComponent() override { engine.armOutputVolumeLearn (-1); engine.removeListener (this); }
+
+    void refresh()
+    {
+        list.updateContent();
+        list.repaint();
+        const auto& outs = engine.getSetup().outputs;
+        const int s = list.getSelectedRow();
+        const bool valid = s >= 0 && s < (int) outs.size();
+        for (auto* c : std::initializer_list<Component*> { &nameEditor, &channelsBox, &volume, &learnBtn, &clearCcBtn, &chain })
+            c->setEnabled (valid);
+        removeBtn.setEnabled (valid && outs.size() > 1);
+        if (! valid) return;
+        const auto& def = outs[(size_t) s];
+        if (nameEditor.getText() != def.name) nameEditor.setText (def.name, dontSendNotification);
+        volume.setValue (def.gainDb, dontSendNotification);
+        ccLabel.setText (def.volumeCC > 0 ? "Volume follows CC " + String (def.volumeCC) : "No volume controller", dontSendNotification);
+        learnBtn.setButtonText (engine.isOutputVolumeLearnArmed() ? "Move it now..." : "Learn volume CC");
+
+        const auto names = engine.getAudioOutputChannelNames();
+        channelsBox.clear (dontSendNotification);
+        for (int c = 0; c < names.size(); ++c)
+            channelsBox.addItem (String (c + 1) + ": " + names[c], 1000 + c);
+        for (int c = 0; c + 1 < names.size(); ++c)
+            channelsBox.addItem (String (c + 1) + "+" + String (c + 2) + ": " + names[c] + " / " + names[c + 1], 2000 + c);
+        const int want = def.right >= 0 ? 2000 + def.left : 1000 + def.left;
+        if (channelsBox.indexOfItemId (want) >= 0) channelsBox.setSelectedId (want, dontSendNotification);
+        else channelsBox.setText (String (def.left + 1) + (def.right >= 0 ? "+" + String (def.right + 1) : String()) + " (not open: see Audio...)", dontSendNotification);
+
+        chain.rebuild (def.chain.effects, Engine::outputAddress (s), 0);
+        resized();
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        auto left = r.removeFromLeft (200);
+        auto buttons = left.removeFromBottom (26);
+        addBtn.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (2, 0));
+        removeBtn.setBounds (buttons.reduced (2, 0));
+        left.removeFromBottom (6);
+        list.setBounds (left);
+        r.removeFromLeft (12);
+
+        nameLabel.setBounds (r.removeFromTop (16));
+        nameEditor.setBounds (r.removeFromTop (24)); r.removeFromTop (8);
+        channelsLabel.setBounds (r.removeFromTop (16));
+        channelsBox.setBounds (r.removeFromTop (24)); r.removeFromTop (8);
+        volumeLabel.setBounds (r.removeFromTop (16));
+        auto vr = r.removeFromTop (24);
+        volume.setBounds (vr.removeFromLeft (jmax (120, vr.getWidth() - 300))); vr.removeFromLeft (8);
+        learnBtn.setBounds (vr.removeFromLeft (130)); vr.removeFromLeft (4);
+        clearCcBtn.setBounds (vr.removeFromLeft (60)); vr.removeFromLeft (8);
+        ccLabel.setBounds (vr);
+        r.removeFromTop (12);
+        chainLabel.setBounds (r.removeFromTop (20));
+        chain.setBounds (r.removeFromTop (chain.preferredHeight()));
+    }
+
+    // ListBoxModel
+    int getNumRows() override { return (int) engine.getSetup().outputs.size(); }
+    void paintListBoxItem (int row, Graphics& g, int w, int, bool selected) override
+    {
+        const auto& outs = engine.getSetup().outputs;
+        if (row < 0 || row >= (int) outs.size()) return;
+        const auto& d = outs[(size_t) row];
+        g.fillAll (selected ? accentDim : bgRow);
+        g.setColour (Colours::white);
+        g.setFont (FontOptions (14.0f, Font::bold));
+        g.drawText (d.name, 8, 3, w - 16, 18, Justification::centredLeft, true);
+        g.setFont (FontOptions (12.0f));
+        g.setColour (textDim);
+        int users = 0;
+        for (auto& in : engine.getSetup().inputs) if (in.output == row) ++users;
+        g.drawText ("channels " + String (d.left + 1) + (d.right >= 0 ? "+" + String (d.right + 1) : String ("")) + "   \xc2\xb7   "
+                    + String (users) + (users == 1 ? " input" : " inputs") + "   \xc2\xb7   " + String (d.chain.effects.size()) + " fx",
+                    8, 21, w - 16, 16, Justification::centredLeft, true);
+    }
+    void selectedRowsChanged (int) override { refresh(); }
+
+private:
+    // Engine::Listener
+    void outputsChanged() override { refresh(); }
+    void setupChanged() override { refresh(); }
+    void outputVolumeLearned (int output, int cc) override
+    {
+        owner.showStatus ("CC " + String (cc) + " now controls the volume of output " + engine.getSetup().outputs[(size_t) jlimit (0, (int) engine.getSetup().outputs.size() - 1, output)].name + ".");
+        owner.markDirty();
+        refresh();
+    }
+
+    Engine& engine;
+    MainComponent& owner;
+    ListBox list;
+    TextButton addBtn { "+ Add" }, removeBtn { "- Remove" };
+    Label nameLabel { {}, "Name" }, channelsLabel { {}, "Device channels" }, volumeLabel { {}, "Master volume" },
+          ccLabel, chainLabel { {}, "MASTER EFFECTS  (on everything that lands on this output)" };
+    TextEditor nameEditor;
+    ComboBox channelsBox;
+    Slider volume;
+    TextButton learnBtn { "Learn volume CC" }, clearCcBtn { "Clear" };
+    EffectChainComponent chain;
+};
+
 //==============================================================================
 class SlotsPanel : public Component
 {
@@ -1632,6 +1849,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
         m.addItem (1, "Preload all programs", true, setup.preloadAllPrograms);
         m.addItem (2, "Hold notes across program changes", true, setup.holdAcrossChange);
         m.addSeparator();
+        m.addItem (5, "Outputs & master effects...");
         m.addItem (3, "Rescan MIDI devices");
         m.addItem (4, "Print program map...");
         m.showMenuAsync (PopupMenu::Options().withTargetComponent (optionsBtn), [this] (int r)
@@ -1643,6 +1861,7 @@ MainComponent::MainComponent (Engine& e, PropertiesFile& s, const File& initialS
                 case 2: engine.setHoldAcrossChange (! s.holdAcrossChange); break;
                 case 3: engine.refreshMidiDevices(); showStatus ("MIDI devices rescanned"); break;
                 case 4: printProgramMap(); break;
+                case 5: showOutputs(); break;
                 default: break;
             }
         });
@@ -2064,10 +2283,16 @@ void MainComponent::openPluginEditor (int inputIndex, int program, int slot, int
     if (looksLikeAraPlugin (plugin->getDescription()))
         showStatus (araWarning (plugin->getName()));
 
-    const auto& inputs = engine.getSetup().inputs;
+    const auto& setup = engine.getSetup();
     String title = plugin->getName();
-    if (inputIndex < (int) inputs.size())
-        title = inputs[(size_t) inputIndex].name + " / " + programTitle (program, inputs[(size_t) inputIndex].programs[(size_t) program]) + " / " + plugin->getName();
+    if (Engine::isOutputAddress (inputIndex))
+    {
+        const int o = Engine::outputFromAddress (inputIndex);
+        if (o < (int) setup.outputs.size())
+            title = "Output " + setup.outputs[(size_t) o].name + " / FX" + String (effect + 1) + " / " + plugin->getName();
+    }
+    else if (inputIndex >= 0 && inputIndex < (int) setup.inputs.size())
+        title = setup.inputs[(size_t) inputIndex].name + " / " + programTitle (program, setup.inputs[(size_t) inputIndex].programs[(size_t) program]) + " / " + plugin->getName();
 
     if (! plugin->showEditor (title))
         showStatus (plugin->getName() + ": could not open its editor (" + plugin->getLastError() + ")");
@@ -2177,6 +2402,27 @@ void MainComponent::saveOnQuit()
        which the autosave and the program changes have been keeping current. */
     if (currentFile != File()) writeSetupFile (currentFile, 8000);
     else                       writeSetupFile (getAutosaveFile(), 8000);
+}
+
+//==============================================================================
+void MainComponent::showOutputs()
+{
+    auto* content = new OutputsComponent (engine, *this);
+    content->setSize (760, 420);
+    DialogWindow::LaunchOptions o;
+    o.content.setOwned (content);
+    o.dialogTitle = "Outputs & master effects";
+    o.dialogBackgroundColour = bgPanel;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    o.launchAsync();
+}
+
+void MainComponent::outputsChanged()
+{
+    markDirty();
+    inputsPanel->refresh();
 }
 
 //==============================================================================

@@ -29,6 +29,10 @@ other plugin.
   an input of its own, and each of its programs is an effects chain -- switched
   by the same footswitch, songs and tablet as the keyboards, with a level meter
   on the laptop and on the tablet.
+- **Outputs with a master chain.** Each input lands on an output -- a pair of
+  the interface's channels -- so the lower manual can reach the desk on its own
+  channels; every output has a master effects chain and a volume you can put
+  on a pedal.
 - **MIDI learn** for any plugin parameter, with suggested mappings from
   parameter names and reusable per-plugin templates.
 - **Every plugin in its own process.** A plugin that crashes or hangs takes
@@ -66,7 +70,8 @@ Licensed under the [GPL-3.0](LICENSE).
 | **Slot** | One instrument inside a program, with enable, gain, pan, transpose, key range, velocity range, velocity curve and MIDI-channel settings, plus its own insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
 | **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |
 | **Mapping** | A CC / pitch-bend / aftertouch message → one parameter on any instrument or effect, scaled between min and max. Optionally also passed through to the plugin. |
-| **Setup** | The whole document (inputs, programs, plugin states). Saved as `*.performer.json`. |
+| **Output** | A pair of the interface's channels with a master effects chain and a volume. Every input lands on one; the default setup has one, "Main", on channels 1-2. |
+| **Setup** | The whole document (inputs, outputs, programs, plugin states). Saved as `*.performer.json`. |
 
 A program change leaves what you are holding to the previous program: keys
 down and the sustain pedal keep sounding there until you let go, and then a

@@ -20,6 +20,11 @@ void setRequestedQuantum (int quantum, int sampleRate);
     audio threads run at normal priority and small buffers will drop out. */
 bool realtimeSchedulingAvailable();
 juce::String realtimeSchedulingHint();
+/** Whether the calling thread runs under SCHED_FIFO or SCHED_RR. */
+bool currentThreadIsRealtime();
+/** Puts the calling thread under SCHED_RR at `priority` (1..99). False when the
+    process may not (RLIMIT_RTPRIO), in which case nothing changes. */
+bool makeCurrentThreadRealtime (int priority);
 
 /** PipeWire's session clock settings, as pw-metadata reports them. Empty = not set. */
 struct ClockState { juce::String forceQuantum, forceRate, quantum, rate; };

@@ -502,7 +502,7 @@ function render(s) {
     gui.onclick = () => {
       const list = slotCache[i] || [];
       if (!list.length) return;
-      if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].effect, list[0].name, gui, "GUI"); return; }
+      if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].effect, list[0].name, gui, "GUI", list[0].bus); return; }
       pickSlot(i, list, gui);
     };
     now.querySelector(".prog").appendChild(gui);
@@ -592,7 +592,7 @@ function pickSlot(i, list, btn) {
   list.forEach(sl => {
     const b = document.createElement("button");
     b.textContent = sl.name;
-    b.onclick = () => { back.remove(); openPluginWindow(i, sl.slot, sl.effect, sl.name, btn, "GUI"); };
+    b.onclick = () => { back.remove(); openPluginWindow(i, sl.slot, sl.effect, sl.name, btn, "GUI", sl.bus); };
     card.appendChild(b);
   });
 
@@ -612,13 +612,14 @@ function pickSlot(i, list, btn) {
 
    Shared by the button in each input's header and the one on each slot, so both
    land on the same tab for the same plugin. */
-async function openPluginWindow(i, slot, effect, fallbackName, btn, restore) {
+async function openPluginWindow(i, slot, effect, fallbackName, btn, restore, bus) {
   const was = btn.textContent;
   btn.textContent = "...";
   btn.disabled = true;
   if (effect === undefined || effect === null) effect = -1;
+  if (bus === undefined || bus === null) bus = -1;
   try {
-    const r = await api("/api/pluginview?input=" + i + "&slot=" + slot + "&effect=" + effect, { method: "POST" });
+    const r = await api("/api/pluginview?input=" + i + "&slot=" + slot + "&effect=" + effect + "&bus=" + bus, { method: "POST" });
     if (r.error) { show(r.error); return; }
     /* Through this same port: a stream on a port of its own would need its own
        hole in the firewall, which is precisely what left the tab loading
@@ -632,7 +633,8 @@ async function openPluginWindow(i, slot, effect, fallbackName, btn, restore) {
        window targets by name, so this costs nothing. */
     const state = lastState && lastState.inputs && lastState.inputs[i];
     const label = state ? (state.currentName || ("Program " + state.current)) : fallbackName;
-    const target = "performer-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
+    const target = bus >= 0 ? "performer-output-" + bus + "-fx" + effect
+                            : "performer-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
 
     const base = "/view/" + r.port;
     const url = base + "/plugin.html?path="
@@ -1554,6 +1556,22 @@ String RemoteServer::slotsJson (int inputIndex) const
                 if (def.effects[(size_t) e].plugin.name.isNotEmpty())
                     add (-1, e, "Program FX" + String (e + 1) + ": " + def.effects[(size_t) e].plugin.name, ! def.effects[(size_t) e].bypassed);
         }
+        // And the master chain of the output this input lands on.
+        if (in.output >= 0 && in.output < (int) setup.outputs.size())
+        {
+            const auto& od = setup.outputs[(size_t) in.output];
+            for (int e = 0; e < (int) od.chain.effects.size(); ++e)
+                if (od.chain.effects[(size_t) e].plugin.name.isNotEmpty())
+                {
+                    DynamicObject::Ptr so (new DynamicObject());
+                    so->setProperty ("slot", -1);
+                    so->setProperty ("effect", e);
+                    so->setProperty ("bus", in.output);
+                    so->setProperty ("name", od.name + " out FX" + String (e + 1) + ": " + od.chain.effects[(size_t) e].plugin.name);
+                    so->setProperty ("enabled", ! od.chain.effects[(size_t) e].bypassed);
+                    out.add (var (so.get()));
+                }
+        }
     }
 
     root->setProperty ("slots", out);
@@ -1858,6 +1876,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
         const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
         const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
+        const int bus    = path.contains ("bus=")    ? path.fromFirstOccurrenceOf ("bus=", false, false).getIntValue()    : -1;
 
         /* Mirrors the plugin's own window. Needed because some plugins cannot be
            followed any other way: Kontakt's host-visible parameters are MIDI
@@ -1866,10 +1885,27 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         auto title = std::make_shared<String>();
         auto error = std::make_shared<String>();
         auto ready = std::make_shared<WaitableEvent>();
-        MessageManager::callAsync ([this, input, slot, effect, title, error, ready]
+        MessageManager::callAsync ([this, input, slot, effect, bus, title, error, ready]
         {
             const auto& setup = engine.getSetup();
-            if (input >= 0 && input < (int) setup.inputs.size())
+            if (bus >= 0 && bus < (int) setup.outputs.size())
+            {
+                // An output's master chain, reached from any input that lands on it.
+                const auto& od = setup.outputs[(size_t) bus];
+                auto* plugin = effect >= 0 && effect < (int) od.chain.effects.size()
+                             ? engine.getPlugin (Engine::outputAddress (bus), 0, -1, effect) : nullptr;
+                const auto name = "Output " + od.name + " / FX" + String (effect + 1) + " / " + (plugin != nullptr ? plugin->getName() : String());
+                if (plugin == nullptr || ! plugin->isAlive())
+                    *error = "That plugin is not running.";
+                else if (! plugin->isEditorOpen() && ! plugin->showEditor (name))
+                    *error = "Could not open that plugin's window.";
+                else
+                {
+                    *title = name;
+                    plugin->keepEditorOnTop (true);
+                }
+            }
+            else if (input >= 0 && input < (int) setup.inputs.size())
             {
                 const auto& in = setup.inputs[(size_t) input];
                 const int prog = in.currentProgram;

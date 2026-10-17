@@ -48,6 +48,7 @@ public:
 private:
     // Engine::Listener
     void setupChanged() override;
+    void outputsChanged() override;
     void programChanged (int inputIndex, int program) override;
     void programContentChanged (int inputIndex, int program) override;
     void learnReceived (int inputIndex, MappingDef::Source, int number) override;
@@ -69,6 +70,7 @@ private:
     juce::File getAutosaveFile() const;
 
     void showAudioSettings();
+    void showOutputs();
     void printProgramMap();
     void showTempoMenu();
     void updateTempoLabel();

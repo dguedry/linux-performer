@@ -28,6 +28,10 @@ int main()
 
     upper.programChangeChannel = 16;          // a workstation's global channel
 
+    OutputDef mon; mon.name = "Monitors"; mon.left = 2; mon.right = 3; mon.gainDb = -3.0f; mon.volumeCC = 7;
+    s.outputs.push_back (mon);
+    upper.output = 1;
+
     InputDef guitar; guitar.name = "Guitar"; guitar.kind = InputDef::Kind::audio;
     guitar.audioLeft = 2; guitar.audioRight = -1;          // mono on the third open channel
     guitar.programs[3].inputGainDb = -6.0f;
@@ -83,6 +87,10 @@ int main()
     CHECK (loaded.preloadAllPrograms == true);
     CHECK (std::abs (loaded.releaseTailSeconds - 2.5) < 1e-9);
     CHECK (loaded.holdAcrossChange == false);
+    CHECK (loaded.outputs.size() == 2 && loaded.outputs[1].name == "Monitors" && loaded.outputs[1].left == 2 && loaded.outputs[1].right == 3);
+    CHECK (std::abs (loaded.outputs[1].gainDb + 3.0f) < 1e-6f && loaded.outputs[1].volumeCC == 7);
+    CHECK (loaded.inputs[0].output == 1 && loaded.inputs[1].output == 0);
+    CHECK (Setup::makeDefault().outputs.size() == 1 && Setup::makeDefault().outputs[0].isDefault());
     CHECK (loaded.inputs.size() == 3 && loaded.inputs[2].isAudio());
     CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
     CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);
