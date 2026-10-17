@@ -27,6 +27,11 @@ int main()
     upper.currentProgram = 5;
 
     upper.programChangeChannel = 16;          // a workstation's global channel
+
+    InputDef guitar; guitar.name = "Guitar"; guitar.kind = InputDef::Kind::audio;
+    guitar.audioLeft = 2; guitar.audioRight = -1;          // mono on the third open channel
+    guitar.programs[3].inputGainDb = -6.0f;
+    s.inputs.push_back (guitar);
     auto& prog = upper.programs[5];
     prog.name = "Rhodes + Pad";
 
@@ -78,7 +83,11 @@ int main()
     CHECK (loaded.preloadAllPrograms == true);
     CHECK (std::abs (loaded.releaseTailSeconds - 2.5) < 1e-9);
     CHECK (loaded.holdAcrossChange == false);
-    CHECK (loaded.inputs.size() == 2);
+    CHECK (loaded.inputs.size() == 3 && loaded.inputs[2].isAudio());
+    CHECK (loaded.inputs[2].audioLeft == 2 && loaded.inputs[2].audioRight == -1);
+    CHECK (std::abs (loaded.inputs[2].programs[3].inputGainDb + 6.0f) < 1e-6f);
+    CHECK (! loaded.inputs[0].isAudio() && loaded.inputs[0].programs[5].inputGainDb == 0.0f);
+    CHECK (loaded.inputs.size() == 3);
     CHECK (loaded.inputs[1].name == "Lower");
     CHECK (loaded.inputs[1].channel == 2);
     CHECK (loaded.inputs[0].programChangeChannel == 16);                       // a workstation's global channel

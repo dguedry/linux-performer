@@ -55,6 +55,15 @@ static const char* kIndexHtml = R"HTML(<!DOCTYPE html>
               letter-spacing:.04em; align-self:center; }
   .now .gui:active { background:var(--accent); color:#06121f; }
   .now .gui:disabled { opacity:.6; }
+  /* An audio input's meter: two bars on a dB scale, and a clip mark that stays
+     lit a moment, so a hot microphone is seen from the stand. */
+  .meter { display:flex; align-items:center; gap:6px; margin-top:10px; }
+  .meter .bars { flex:1; display:flex; flex-direction:column; gap:3px; }
+  .meter i { display:block; height:6px; background:#1a1d24; border-radius:3px; overflow:hidden; }
+  .meter i span { display:block; height:100%; width:0; border-radius:3px;
+                  background:linear-gradient(to right, #4fb86a 0 80%, #d8a657 80% 95%, #e04a4a 95%); background-size:100% 100%; }
+  .meter b { flex:none; width:10px; height:15px; border-radius:3px; background:#2a2e38; }
+  .meter.clip b { background:#ff3b3b; }
 
   /* Choosing between the instruments of a split. A sheet, not a dropdown: this
      is hit with a thumb on a stand. */
@@ -433,8 +442,40 @@ function renderSets(s) {
   host.appendChild(wrap);
 }
 
+/* The audio inputs' meters. Polled only while the page is showing one, ten
+   times a second: a meter that lags is no meter, and a page in the background
+   has nothing to show it to. The bar's gradient is fixed to the full width,
+   so the colour at the end is the colour of that level. */
+const meters = {};
+let levelTimer = null;
+function syncLevelPolling() {
+  const want = token && lastState && lastState.inputs && lastState.inputs.some(x => x.audio)
+            && document.visibilityState === "visible";
+  if (want && !levelTimer) levelTimer = setInterval(pollLevels, 100);
+  if (!want && levelTimer) { clearInterval(levelTimer); levelTimer = null; }
+}
+function meterPct(v) {
+  if (!(v > 0.001)) return 0;
+  const db = 20 * Math.log10(v);
+  return Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+}
+async function pollLevels() {
+  try {
+    const r = await api("/api/levels");
+    (r.levels || []).forEach(l => {
+      const m = meters[l.input]; if (!m) return;
+      const lp = meterPct(l.left), rp = meterPct(l.right);
+      m.l.style.width = lp + "%"; m.l.style.backgroundSize = (lp > 0 ? 10000 / lp : 100) + "% 100%";
+      m.r.style.width = rp + "%"; m.r.style.backgroundSize = (rp > 0 ? 10000 / rp : 100) + "% 100%";
+      m.root.classList.toggle("clip", !!l.clip);
+    });
+  } catch (e) { /* a missed poll is nothing; the next one is 100 ms away */ }
+}
+document.addEventListener("visibilitychange", syncLevelPolling);
+
 function render(s) {
   lastState = s;
+  for (const k in meters) delete meters[k];
   if (s.tempo) showTempo(s.tempo);
   const root = document.getElementById("inputs");
   root.innerHTML = "";
@@ -444,7 +485,8 @@ function render(s) {
     now.innerHTML = '<div class="name"></div><div class="prog"><span class="num"></span><span class="title"></span></div>';
     now.querySelector(".name").textContent = inp.name.toUpperCase();
     now.querySelector(".num").textContent = String(inp.current).padStart(3, "0");
-    now.querySelector(".title").textContent = inp.currentName || "(empty)";
+    /* An audio input with nothing in the program is not empty: the signal goes straight through. */
+    now.querySelector(".title").textContent = inp.currentName || (inp.audio ? "straight through" : "(empty)");
 
     /* Straight to the plugin's interface from the input's own header. This is
        the thing you reach for mid-set -- the slot rows below are further down
@@ -460,7 +502,7 @@ function render(s) {
     gui.onclick = () => {
       const list = slotCache[i] || [];
       if (!list.length) return;
-      if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].name, gui, "GUI"); return; }
+      if (list.length === 1) { openPluginWindow(i, list[0].slot, list[0].effect, list[0].name, gui, "GUI"); return; }
       pickSlot(i, list, gui);
     };
     now.querySelector(".prog").appendChild(gui);
@@ -468,6 +510,12 @@ function render(s) {
     syncGuiButton(i);
 
     if (inp.loading) { const l = document.createElement("div"); l.className = "loading"; l.textContent = "loading…"; now.appendChild(l); }
+    if (inp.audio) {
+      const m = document.createElement("div"); m.className = "meter";
+      m.innerHTML = '<div class="bars"><i><span></span></i><i><span></span></i></div><b></b>';
+      now.appendChild(m);
+      meters[i] = { root: m, l: m.querySelectorAll("span")[0], r: m.querySelectorAll("span")[1] };
+    }
     wrap.appendChild(now);
     /* Which group is being shown, per input. Kept across refreshes so a poll
        does not throw you back to "All" while you are looking for a sound. */
@@ -538,13 +586,13 @@ function pickSlot(i, list, btn) {
   const back = document.createElement("div"); back.className = "sheet";
   const card = document.createElement("div"); card.className = "card";
   const t = document.createElement("div"); t.className = "sheet-title";
-  t.textContent = "Which instrument?";
+  t.textContent = list.every(sl => sl.effect >= 0) ? "Which effect?" : "Which plugin?";
   card.appendChild(t);
 
   list.forEach(sl => {
     const b = document.createElement("button");
     b.textContent = sl.name;
-    b.onclick = () => { back.remove(); openPluginWindow(i, sl.slot, sl.name, btn, "GUI"); };
+    b.onclick = () => { back.remove(); openPluginWindow(i, sl.slot, sl.effect, sl.name, btn, "GUI"); };
     card.appendChild(b);
   });
 
@@ -564,12 +612,13 @@ function pickSlot(i, list, btn) {
 
    Shared by the button in each input's header and the one on each slot, so both
    land on the same tab for the same plugin. */
-async function openPluginWindow(i, slot, fallbackName, btn, restore) {
+async function openPluginWindow(i, slot, effect, fallbackName, btn, restore) {
   const was = btn.textContent;
   btn.textContent = "...";
   btn.disabled = true;
+  if (effect === undefined || effect === null) effect = -1;
   try {
-    const r = await api("/api/pluginview?input=" + i + "&slot=" + slot, { method: "POST" });
+    const r = await api("/api/pluginview?input=" + i + "&slot=" + slot + "&effect=" + effect, { method: "POST" });
     if (r.error) { show(r.error); return; }
     /* Through this same port: a stream on a port of its own would need its own
        hole in the firewall, which is precisely what left the tab loading
@@ -583,7 +632,7 @@ async function openPluginWindow(i, slot, fallbackName, btn, restore) {
        window targets by name, so this costs nothing. */
     const state = lastState && lastState.inputs && lastState.inputs[i];
     const label = state ? (state.currentName || ("Program " + state.current)) : fallbackName;
-    const target = "performer-plugin-" + i + "-" + slot;
+    const target = "performer-plugin-" + i + "-" + slot + (effect >= 0 ? "-fx" + effect : "");
 
     const base = "/view/" + r.port;
     const url = base + "/plugin.html?path="
@@ -620,6 +669,7 @@ async function refresh(force) {
   try {
     const s = await api("/api/state");
     if (force || s.revision !== rev) { rev = s.revision; render(s); }
+    syncLevelPolling();
     show("");
   } catch (e) {
     if (e.gate) askForCode("That code was not accepted — check Performer and try again.");
@@ -1331,7 +1381,10 @@ String RemoteServer::stateJson() const
         bool loading = false;
         for (int s = 0; s < (int) cur.slots.size() && ! loading; ++s)
             loading = engine.isPluginLoading (i, in.currentProgram, s);
+        for (int e = 0; e < (int) cur.effects.size() && ! loading; ++e)
+            loading = engine.isPluginLoading (i, in.currentProgram, -1, e);
         o->setProperty ("loading", loading);
+        if (in.isAudio()) o->setProperty ("audio", true);
         Array<var> progs;
         for (int p = 0; p < InputDef::numPrograms; ++p)
         {
@@ -1422,6 +1475,26 @@ String RemoteServer::stateJson() const
     return JSON::toString (var (root.get()), true);
 }
 
+String RemoteServer::levelsJson() const
+{
+    DynamicObject::Ptr root (new DynamicObject());
+    Array<var> out;
+    const auto& setup = engine.getSetup();
+    for (int i = 0; i < (int) setup.inputs.size(); ++i)
+    {
+        if (! setup.inputs[(size_t) i].isAudio()) continue;
+        const auto l = engine.getInputLevel (i);
+        DynamicObject::Ptr o (new DynamicObject());
+        o->setProperty ("input", i);
+        o->setProperty ("left", l.left);
+        o->setProperty ("right", l.right);
+        o->setProperty ("clip", l.clipped);
+        out.add (var (o.get()));
+    }
+    root->setProperty ("levels", out);
+    return JSON::toString (var (root.get()), true);
+}
+
 /** The current program's slots, so the tablet can offer a window onto each one.
 
     Grouped by slot because that is how the setup is built and how the desktop
@@ -1438,20 +1511,48 @@ String RemoteServer::slotsJson (int inputIndex) const
         const int prog = in.currentProgram;
         const auto& def = in.programs[(size_t) prog];
 
-        for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
+        if (in.isAudio())
         {
-            const auto& slot = def.slots[(size_t) sIdx];
-
-            // A slot with no plugin has nothing to show.
-            if (slot.plugin.name.isEmpty()) continue;
-
-            DynamicObject::Ptr so (new DynamicObject());
-            so->setProperty ("slot", sIdx);
-            so->setProperty ("effect", -1);
-            so->setProperty ("name", String (sIdx + 1) + ": " + slot.plugin.name);
-            so->setProperty ("enabled", slot.enabled);
-
-            out.add (var (so.get()));
+            // An audio input has no instruments; its windows are the chain's effects.
+            for (int e = 0; e < (int) def.effects.size(); ++e)
+            {
+                const auto& fx = def.effects[(size_t) e];
+                if (fx.plugin.name.isEmpty()) continue;
+                DynamicObject::Ptr so (new DynamicObject());
+                so->setProperty ("slot", -1);
+                so->setProperty ("effect", e);
+                so->setProperty ("name", "FX" + String (e + 1) + ": " + fx.plugin.name);
+                so->setProperty ("enabled", ! fx.bypassed);
+                out.add (var (so.get()));
+            }
+        }
+        else
+        {
+            /* Each instrument, then its insert effects, then the program's own
+               chain: the order the desktop shows them in, so "1 > FX2" means
+               the same thing on both. */
+            auto add = [&out] (int slot, int effect, const String& name, bool enabled)
+            {
+                DynamicObject::Ptr so (new DynamicObject());
+                so->setProperty ("slot", slot);
+                so->setProperty ("effect", effect);
+                so->setProperty ("name", name);
+                so->setProperty ("enabled", enabled);
+                out.add (var (so.get()));
+            };
+            for (int sIdx = 0; sIdx < (int) def.slots.size(); ++sIdx)
+            {
+                const auto& slot = def.slots[(size_t) sIdx];
+                if (slot.plugin.name.isEmpty()) continue;        // a slot with no plugin has nothing to show
+                add (sIdx, -1, String (sIdx + 1) + ": " + slot.plugin.name, slot.enabled);
+                for (int e = 0; e < (int) slot.effects.size(); ++e)
+                    if (slot.effects[(size_t) e].plugin.name.isNotEmpty())
+                        add (sIdx, e, String (sIdx + 1) + " > FX" + String (e + 1) + ": " + slot.effects[(size_t) e].plugin.name,
+                             ! slot.effects[(size_t) e].bypassed);
+            }
+            for (int e = 0; e < (int) def.effects.size(); ++e)
+                if (def.effects[(size_t) e].plugin.name.isNotEmpty())
+                    add (-1, e, "Program FX" + String (e + 1) + ": " + def.effects[(size_t) e].plugin.name, ! def.effects[(size_t) e].bypassed);
         }
     }
 
@@ -1633,6 +1734,17 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     }
 
     
+    if (path.startsWith ("/api/levels"))
+    {
+        if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
+        String body;
+        if (produceOnMessageThread ([this] { return levelsJson(); }, body, 500))
+            sendResponse (sock, "200 OK", "application/json", body);
+        else
+            sendBusy (sock, sendResponse);
+        return;
+    }
+
     if (path.startsWith ("/api/state"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
@@ -1743,8 +1855,9 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
     if (path.startsWith ("/api/pluginview"))
     {
         if (! authorised (path)) { sendResponse (sock, "403 Forbidden", "application/json", "{\"error\":\"bad token\"}"); return; }
-        const int input = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
-        const int slot  = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const int input  = path.fromFirstOccurrenceOf ("input=", false, false).getIntValue();
+        const int slot   = path.fromFirstOccurrenceOf ("slot=", false, false).getIntValue();
+        const int effect = path.contains ("effect=") ? path.fromFirstOccurrenceOf ("effect=", false, false).getIntValue() : -1;
 
         /* Mirrors the plugin's own window. Needed because some plugins cannot be
            followed any other way: Kontakt's host-visible parameters are MIDI
@@ -1753,7 +1866,7 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
         auto title = std::make_shared<String>();
         auto error = std::make_shared<String>();
         auto ready = std::make_shared<WaitableEvent>();
-        MessageManager::callAsync ([this, input, slot, title, error, ready]
+        MessageManager::callAsync ([this, input, slot, effect, title, error, ready]
         {
             const auto& setup = engine.getSetup();
             if (input >= 0 && input < (int) setup.inputs.size())
@@ -1761,9 +1874,13 @@ void RemoteServer::handle (StreamingSocket& sock, bool& takeOver)
                 const auto& in = setup.inputs[(size_t) input];
                 const int prog = in.currentProgram;
                 const auto& def = in.programs[(size_t) prog];
-                if (slot >= 0 && slot < (int) def.slots.size())
+                // An instrument (effect -1), one of its insert effects, or (slot -1) a program effect.
+                const auto* chain = def.chainFor (slot);
+                const bool valid = effect < 0 ? slot >= 0 && slot < (int) def.slots.size()
+                                              : chain != nullptr && effect < (int) chain->size();
+                if (valid)
                 {
-                    auto* plugin = engine.getPlugin (input, prog, slot, -1);
+                    auto* plugin = engine.getPlugin (input, prog, slot, effect);
                     if (plugin == nullptr || ! plugin->isAlive())
                         *error = "That plugin is not running.";
                     else if (! plugin->isEditorOpen() && ! plugin->showEditor (

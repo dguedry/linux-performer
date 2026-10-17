@@ -74,6 +74,7 @@ struct ProgramDef
     juce::String group;
     std::vector<SlotDef> slots;
     std::vector<EffectDef> effects;   // program-level chain, applied to the summed slots
+    float inputGainDb = 0.0f;         // audio inputs: trim on the signal before the chain
     std::vector<MappingDef> mappings;
 
     bool isEmpty() const { return slots.empty() && effects.empty(); }
@@ -96,6 +97,20 @@ struct InputDef
     static constexpr int numPrograms = 128;
 
     juce::String name { "Input" };
+
+    /** What arrives on this input. A keyboard sends notes to the instruments
+        in a program's slots. An audio input -- a microphone, a guitar, a
+        hardware synth -- is the sound itself, so its programs are effect
+        chains and nothing else. Both take program changes and controllers
+        from the MIDI device below. */
+    enum class Kind { midi, audio };
+    Kind kind = Kind::midi;
+    bool isAudio() const { return kind == Kind::audio; }
+    /** An audio input's device channels, counted from 0 among the channels
+        open in Audio settings. audioRight = -1 is mono: the one channel feeds
+        both sides. */
+    int audioLeft = 0, audioRight = 1;
+
     juce::String midiDeviceIdentifier;
     juce::String midiDeviceName;      // used to re-find a device if identifiers change
     int channel = 0;                  // 0 = omni

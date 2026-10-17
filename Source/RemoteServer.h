@@ -54,6 +54,8 @@ private:
     bool relayToPluginView (juce::StreamingSocket&, const juce::String& firstChunk, int webPort);
 
     juce::String stateJson() const;
+    /** The audio inputs' meters, for the tablet to poll while a page shows them. */
+    juce::String levelsJson() const;
     juce::String slotsJson (int inputIndex) const;
     bool authorised (const juce::String& request) const;
 

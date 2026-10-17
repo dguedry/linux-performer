@@ -1555,6 +1555,80 @@ int main()
         }
     }
 
+    // --- an audio input: the signal through a program's chain, trimmed, with a tail ----------
+    {
+        const int ai = engine.addInput ("Guitar", InputDef::Kind::audio);
+        CHECK (engine.getSetup().inputs[(size_t) ai].isAudio());
+        engine.setInputAudioChannels (ai, 0, -1);                  // mono, device channel 1
+        settle();
+
+        // A 1 kHz tone at 0.5 peak: 0.354 RMS if it comes through untouched.
+        AudioBuffer<float> tone (1, kBlock), outBuf (2, kBlock);
+        double phase = 0.0;
+        auto feed = [&] (int blocks)
+        {
+            float peak = 0.0f;
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < kBlock; ++i) { tone.setSample (0, i, 0.5f * (float) std::sin (phase)); phase += MathConstants<double>::twoPi * 1000.0 / 48000.0; }
+                outBuf.clear();
+                engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+                peak = jmax (peak, outBuf.getRMSLevel (0, 0, kBlock), outBuf.getRMSLevel (1, 0, kBlock));
+            }
+            return peak;
+        };
+        const float through = feed (4);
+        std::printf ("     audio input, no effects: %.3f rms (tone 0.354)\n", through);
+        CHECK (std::abs (through - 0.354f) < 0.03f);
+
+        // The meter reads the arriving peak, both sides for a mono input, before the trim.
+        {
+            const auto lv = engine.getInputLevel (ai);
+            std::printf ("     meter: L %.3f R %.3f clip %d (tone peak 0.5)\n", lv.left, lv.right, (int) lv.clipped);
+            CHECK (std::abs (lv.left - 0.5f) < 0.02f && std::abs (lv.right - 0.5f) < 0.02f && ! lv.clipped);
+            const auto none = engine.getInputLevel (0);
+            CHECK (none.left == 0.0f && none.right == 0.0f);               // a keyboard input has no meter
+        }
+
+        engine.setProgramInputGainDb (ai, 0, -6.0f);
+        const float trimmed = feed (4);
+        std::printf ("     trimmed -6 dB: %.3f rms (want 0.177)\n", trimmed);
+        CHECK (std::abs (trimmed - 0.177f) < 0.02f);
+        CHECK (std::abs (engine.getInputLevel (ai).left - 0.5f) < 0.02f);    // the trim does not move the meter
+
+        // Full scale lights the clip mark; silence lets the meter fall.
+        for (int i = 0; i < kBlock; ++i) tone.setSample (0, i, i % 2 ? 1.0f : -1.0f);
+        outBuf.clear();
+        engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock);
+        CHECK (engine.getInputLevel (ai).clipped);
+        tone.clear();
+        for (int b = 0; b < 48; ++b) { outBuf.clear(); engine.renderBlockForTesting (tone.getArrayOfReadPointers(), 1, outBuf.getArrayOfWritePointers(), 2, kBlock); }
+        std::printf ("     after half a second of silence: %.3f\n", engine.getInputLevel (ai).left);
+        CHECK (engine.getInputLevel (ai).left < 0.4f && engine.getInputLevel (ai).left > 0.2f);   // 20 dB/s: about -10 dB in 0.5 s
+
+        // An effect in the chain still carries the signal.
+        PluginDescription anyFx; bool haveAnyFx = false;
+        for (auto& d : host.getKnownPlugins().getTypes())
+            if (! d.isInstrument && d.name.containsIgnoreCase ("Stereo Tools")) { anyFx = d; haveAnyFx = true; }
+        if (haveAnyFx)
+        {
+            CHECK (engine.addEffect (ai, 0, -1, anyFx, err)); settle();
+            const float withFx = feed (6);
+            std::printf ("     through %s: %.3f rms\n", anyFx.name.toRawUTF8(), withFx);
+            CHECK (withFx > 0.08f);
+        }
+
+        // A program change: the new program carries the input at its own trim; the old one rings out.
+        engine.selectProgram (ai, 1); settle();
+        const float switched = feed (6);
+        std::printf ("     after a change to an empty program: %.3f rms (want 0.354)\n", switched);
+        CHECK (std::abs (switched - 0.354f) < 0.03f);
+
+        // Nothing leaks to a keyboard input's programs.
+        engine.removeInput (ai);
+        CHECK (feed (2) < 1e-3f);
+    }
+
     // CLAP has to be loadable by the synchronous API, because that is the one
     // the out-of-process host calls. A format claiming it needs an unblocked
     // message thread is refused outright by JUCE with "cannot be instantiated

@@ -117,8 +117,24 @@ public:
 
     //==============================================================================
     // Inputs
-    int  addInput (const juce::String& name);
+    int  addInput (const juce::String& name, InputDef::Kind kind = InputDef::Kind::midi);
     void removeInput (int inputIndex);
+    /** Which of the open device input channels an audio input listens to; right = -1 for mono. */
+    void setInputAudioChannels (int inputIndex, int left, int right);
+    /** An audio input program's trim, applied to the signal before its chain. */
+    void setProgramInputGainDb (int inputIndex, int program, float dB);
+    /** The device's open input channels, in the order an audio input counts
+        them. Empty when no input device is open. */
+    juce::StringArray getAudioInputChannelNames() const;
+    /** An audio input's level before its trim: the peak on each side, falling
+        at 20 dB a second, and whether it clipped within the last two seconds.
+        Zero for a keyboard input. Read from any thread. */
+    struct InputLevel { float left = 0.0f, right = 0.0f; bool clipped = false; };
+    InputLevel getInputLevel (int inputIndex) const;
+    /** Opens the device's inputs if none are, best effort: the output device's
+        own inputs, with its default channels. False when that cannot be done,
+        in which case Audio settings is where to choose one. */
+    bool ensureAudioInputsOpen();
     void setInputName (int inputIndex, const juce::String&);
     void setInputMidiDevice (int inputIndex, const juce::MidiDeviceInfo&);
     void setInputProgramChangeChannel (int inputIndex, int channel);
@@ -274,6 +290,8 @@ public:
     /** Renders one block exactly as the audio callback would. Only for tests /
         offline use when constructed with startAudioDevice = false. */
     void renderBlockForTesting (float* const* out, int numOut, int numSamples);
+    /** The same, with device input: what an audio input would hear. */
+    void renderBlockForTesting (const float* const* in, int numIn, float* const* out, int numOut, int numSamples);
 
     double getSampleRate() const                    { return sampleRate; }
     double getCpuUsage() const                      { return deviceManager.getCpuUsage(); }
@@ -367,8 +385,11 @@ private:
     void renumberChain (std::vector<std::unique_ptr<EffectRuntime>>&);
 
     // audio thread
-    void processInput (InputRuntime&, float* const* out, int numOut, int numSamples, bool panic);
-    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, float* const* out, int numOut, int numSamples, bool panic);
+    void processInput (InputRuntime&, const float* const* in, int numIn, float* const* out, int numOut, int numSamples, bool panic);
+    /** `inL`/`inR` carry an audio input's signal into the program; null for a keyboard. */
+    void processProgram (ProgramRuntime&, const juce::MidiBuffer& in, const float* inL, const float* inR,
+                         float* const* out, int numOut, int numSamples, bool panic);
+    static void applyInputDef (InputRuntime&, const InputDef&);
     void runChain (std::vector<std::unique_ptr<EffectRuntime>>&, const juce::MidiBuffer& midi, juce::AudioBuffer<float>& stereo, int numSamples);
 
     bool validInput (int i) const     { return i >= 0 && i < (int) setup.inputs.size(); }

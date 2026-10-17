@@ -25,6 +25,10 @@ other plugin.
 - **Splits and layers** with per-slot key range, velocity range, velocity
   curve, transpose, gain and pan.
 - **Insert effects** per instrument and per program.
+- **Audio inputs too.** A microphone, a guitar or a hardware synth comes in as
+  an input of its own, and each of its programs is an effects chain -- switched
+  by the same footswitch, songs and tablet as the keyboards, with a level meter
+  on the laptop and on the tablet.
 - **MIDI learn** for any plugin parameter, with suggested mappings from
   parameter names and reusable per-plugin templates.
 - **Every plugin in its own process.** A plugin that crashes or hangs takes
@@ -57,7 +61,7 @@ Licensed under the [GPL-3.0](LICENSE).
 
 | Term | Meaning |
 |------|---------|
-| **Input** | A MIDI source: a MIDI device plus an optional channel filter. Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
+| **Input** | A keyboard (a MIDI device plus an optional channel filter) or an audio input (device channels, with a MIDI device for program changes and pedals). Each input has its own current program. Two inputs may share one device (e.g. channel 1 = Upper, channel 2 = Lower). |
 | **Program** | One of 128 per input, selected by MIDI Program Change or by clicking. Holds plugin slots and MIDI mappings. |
 | **Slot** | One instrument inside a program, with enable, gain, pan, transpose, key range, velocity range, velocity curve and MIDI-channel settings, plus its own insert-effect chain. Key and velocity ranges make splits and touch-switched layers; the curve matches a controller's feel to a library. |
 | **Effect chain** | Ordered effects with bypass. Each slot has one (instrument → effects → gain); the program has one more applied to the sum of all slots. Effects receive the same MIDI as their slot. |

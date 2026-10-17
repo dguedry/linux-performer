@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "LevelMeter.h"
 #include "QrCode.h"
 #include "MappingSuggestions.h"
 #include "PluginManagerComponent.h"
@@ -46,11 +47,13 @@ namespace
 //  InputsPanel
 //==============================================================================
 class InputsPanel : public Component,
-                    private ListBoxModel
+                    private ListBoxModel,
+                    private Timer
 {
 public:
     InputsPanel (Engine& e, MainComponent& o) : engine (e), owner (o)
     {
+        startTimerHz (30);      // audio inputs show their level in the list
         styleHeader (header);
         addAndMakeVisible (header);
         addAndMakeVisible (list);
@@ -62,8 +65,20 @@ public:
         addAndMakeVisible (removeBtn);
         addBtn.onClick = [this]
         {
-            auto idx = engine.addInput ("Input " + String (engine.getSetup().inputs.size() + 1));
-            lastNotified = -1; setSelected (idx);
+            PopupMenu m;
+            m.addItem (1, "Keyboard (MIDI)");
+            m.addItem (2, "Audio input (microphone, guitar, hardware synth)");
+            m.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [this] (int r)
+            {
+                if (r == 0) return;
+                const bool audio = r == 2;
+                const auto n = String (engine.getSetup().inputs.size() + 1);
+                auto idx = engine.addInput (audio ? "Audio " + n : "Input " + n,
+                                            audio ? InputDef::Kind::audio : InputDef::Kind::midi);
+                lastNotified = -1; setSelected (idx);
+                if (audio && engine.getAudioInputChannelNames().isEmpty())
+                    owner.showStatus ("No audio input is open. Open Audio... and choose an input device and channels.");
+            });
         };
         removeBtn.onClick = [this]
         {
@@ -126,7 +141,21 @@ public:
             pcChannelBox.setEnabled (pcToggle.getToggleState());
         };
 
-        for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel })
+        addAndMakeVisible (audioBox);
+        audioBox.setTooltip ("Which of the open device inputs this input listens to: one channel (mono, fed to both sides) "
+                             "or a pair. The channels on offer are those chosen in Audio...");
+        audioBox.onChange = [this]
+        {
+            int sel = list.getSelectedRow();
+            const int id = audioBox.getSelectedId();
+            if (sel < 0 || id <= 0) return;
+            if (id >= 2000) engine.setInputAudioChannels (sel, id - 2000, id - 2000 + 1);
+            else            engine.setInputAudioChannels (sel, id - 1000, -1);
+            owner.markDirty();
+            list.repaintRow (sel);
+        };
+
+        for (auto* l : { &deviceLabel, &channelLabel, &pcChannelLabel, &audioLabel })
         {
             addAndMakeVisible (l);
             l->setColour (Label::textColourId, textDim);
@@ -160,6 +189,26 @@ public:
         auto& def = inputs[(size_t) sel];
         nameEditor.setText (def.name, dontSendNotification);
 
+        // The audio channel row only means something for an audio input.
+        audioLabel.setVisible (def.isAudio());
+        audioBox.setVisible (def.isAudio());
+        deviceLabel.setText (def.isAudio() ? "Control MIDI device (program changes, pedals)" : "MIDI device", dontSendNotification);
+        if (def.isAudio())
+        {
+            const auto names = engine.getAudioInputChannelNames();
+            audioBox.clear (dontSendNotification);
+            if (names.isEmpty())
+                audioBox.addItem ("(no audio input open: see Audio...)", 1);
+            for (int c = 0; c < names.size(); ++c)
+                audioBox.addItem (String (c + 1) + ": " + names[c], 1000 + c);
+            for (int c = 0; c + 1 < names.size(); ++c)
+                audioBox.addItem (String (c + 1) + "+" + String (c + 2) + ": " + names[c] + " / " + names[c + 1], 2000 + c);
+            const int want = def.audioRight >= 0 ? 2000 + def.audioLeft : 1000 + def.audioLeft;
+            if (audioBox.indexOfItemId (want) >= 0) audioBox.setSelectedId (want, dontSendNotification);
+            else audioBox.setText (def.audioRight >= 0 ? String (def.audioLeft + 1) + "+" + String (def.audioRight + 1) + " (not open)"
+                                                      : String (def.audioLeft + 1) + " (not open)", dontSendNotification);
+        }
+
         deviceBox.clear (dontSendNotification);
         deviceBox.addItem ("(no MIDI device)", 1);
         int selectedId = 1;
@@ -180,6 +229,7 @@ public:
                                     : (def.programChangeChannel == InputDef::pcChannelAny ? 2 : def.programChangeChannel + 2),
                                     dontSendNotification);
         pcChannelBox.setEnabled (def.respondToProgramChange);
+        resized();      // the editor is taller for an audio input
     }
 
     void resized() override
@@ -190,7 +240,8 @@ public:
            Program Change toggle and its channel -- 164px of rows and padding.
            It was 150, so the last row was being clipped, which is why the PC
            channel selector looked squeezed. */
-        auto editor = r.removeFromBottom (170);
+        const bool audio = audioBox.isVisible();
+        auto editor = r.removeFromBottom (audio ? 216 : 170);
         auto buttons = r.removeFromBottom (26);
         r.removeFromBottom (4);
         list.setBounds (r);
@@ -201,6 +252,12 @@ public:
         editor.removeFromTop (6);
         nameEditor.setBounds (editor.removeFromTop (24));
         editor.removeFromTop (6);
+        if (audio)
+        {
+            audioLabel.setBounds (editor.removeFromTop (16));
+            audioBox.setBounds (editor.removeFromTop (24));
+            editor.removeFromTop (6);
+        }
         deviceLabel.setBounds (editor.removeFromTop (16));
         deviceBox.setBounds (editor.removeFromTop (24));
         editor.removeFromTop (6);
@@ -233,18 +290,45 @@ public:
 
         g.setFont (FontOptions (12.0f));
         g.setColour (textDim);
-        String info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no device";
+        String info;
+        if (def.isAudio())
+        {
+            info << "audio in " << (def.audioLeft + 1);
+            if (def.audioRight >= 0) info << "+" << (def.audioRight + 1);
+            if (def.midiDeviceName.isNotEmpty()) info << "  \xc2\xb7  " << def.midiDeviceName;
+        }
+        else
+            info = def.midiDeviceName.isNotEmpty() ? def.midiDeviceName : "no device";
         if (def.channel > 0) info << "  ch " << def.channel;
         g.drawText (info, 8, 22, w - 80, 16, Justification::centredLeft, true);
 
         g.setColour (accent);
         g.setFont (FontOptions (13.0f, Font::bold));
         g.drawText ("PC " + String (def.currentProgram).paddedLeft ('0', 3), w - 72, 22, 64, 16, Justification::centredRight, true);
+
+        if (def.isAudio())
+            LevelMeterPainter::paint (g, { w - 104, 6, 96, 12 }, engine.getInputLevel (row));
     }
 
     void selectedRowsChanged (int row) override { owner_select (row); }
 
 private:
+    void timerCallback() override
+    {
+        // Repaint only the audio rows, and only when their meter would look different.
+        const auto& inputs = engine.getSetup().inputs;
+        for (int i = 0; i < (int) inputs.size(); ++i)
+        {
+            if (! inputs[(size_t) i].isAudio()) continue;
+            const auto l = engine.getInputLevel (i);
+            const int key = (int) (LevelMeterPainter::position (l.left) * 100) * 1000
+                          + (int) (LevelMeterPainter::position (l.right) * 100) * 2 + (l.clipped ? 1 : 0);
+            if (meterKeys.size() <= (size_t) i) meterKeys.resize ((size_t) i + 1, -1);
+            if (meterKeys[(size_t) i] != key) { meterKeys[(size_t) i] = key; list.repaintRow (i); }
+        }
+    }
+    std::vector<int> meterKeys;
+
     void owner_select (int row)
     {
         if (row < 0 || row == lastNotified) return;
@@ -264,6 +348,8 @@ private:
     ToggleButton pcToggle { "Respond to Program Change" };
     Label pcChannelLabel { {}, "PC on" };
     ComboBox pcChannelBox;
+    Label audioLabel { {}, "Audio channels" };
+    ComboBox audioBox;
     Array<MidiDeviceInfo> devices;
     int lastNotified = -1;
 };
@@ -385,20 +471,31 @@ public:
         const int in = owner.getSelectedInput();
         if (in < 0 || in >= (int) inputs.size()) return;
         const auto& prog = inputs[(size_t) in].programs[(size_t) row];
+        /* An audio input's program is its effects; one with none but a name is
+           a real program all the same -- the signal passing straight through. */
+        const bool audio = inputs[(size_t) in].isAudio();
+        const bool blank = audio ? prog.effects.empty() && prog.name.isEmpty() : prog.isEmpty();
 
         g.fillAll (selected ? accentDim : (row % 2 ? bgRow : bgPanel));
-        g.setColour (prog.isEmpty() ? textDim : Colours::white);
-        g.setFont (FontOptions (13.0f, prog.isEmpty() ? Font::plain : Font::bold));
+        g.setColour (blank ? textDim : Colours::white);
+        g.setFont (FontOptions (13.0f, blank ? Font::plain : Font::bold));
         g.drawText (programTitle (row, prog), 8, 0, w - 60, h, Justification::centredLeft, true);
 
-        if (! prog.isEmpty())
+        if (! blank)
         {
             g.setColour (engine.isProgramLoaded (in, row) ? Colours::limegreen : textDim);
             if (engine.isProgramLoaded (in, row))
+            {
                 for (int sIdx = 0; sIdx < (int) prog.slots.size(); ++sIdx)
                     if (engine.isPluginLoading (in, row, sIdx)) { g.setColour (Colours::orange); break; }
+                for (int e = 0; e < (int) prog.effects.size(); ++e)
+                    if (engine.isPluginLoading (in, row, -1, e)) { g.setColour (Colours::orange); break; }
+            }
             g.setFont (FontOptions (11.0f));
-            g.drawText (String (prog.slots.size()) + (prog.slots.size() == 1 ? " plugin" : " plugins"), w - 70, 0, 64, h, Justification::centredRight, true);
+            const auto count = audio ? (prog.effects.empty() ? String ("straight through")
+                                                             : String (prog.effects.size()) + (prog.effects.size() == 1 ? " effect" : " effects"))
+                                     : String (prog.slots.size()) + (prog.slots.size() == 1 ? " plugin" : " plugins");
+            g.drawText (count, w - 100, 0, 94, h, Justification::centredRight, true);
         }
 
         // The group, dimmed and to the right of the name: visible when scanning
@@ -844,6 +941,29 @@ public:
         addAndMakeVisible (emptyLabel);
         emptyLabel.setColour (Label::textColourId, textDim);
         emptyLabel.setJustificationType (Justification::centred);
+        /* The hint lies across the chain row, and a Label takes the clicks that
+           land on it: with no instrument yet, "+ Add effect" did nothing. For
+           an audio input that is the normal state, not a passing one. */
+        emptyLabel.setInterceptsMouseClicks (false, false);
+
+        // Audio inputs only: the level arriving, and the trim on the signal before the chain.
+        addChildComponent (meter);
+        meter.setTooltip ("What is arriving at this input, before the trim: set the interface's gain so it stays out of the red.");
+        addChildComponent (trimCap);
+        trimCap.setFont (FontOptions (10.5f, Font::bold));
+        trimCap.setColour (Label::textColourId, textDim);
+        trimCap.setJustificationType (Justification::centredRight);
+        addChildComponent (trim);
+        trim.setRange (-60.0, 24.0, 0.5);
+        trim.setSliderStyle (Slider::LinearBar);
+        trim.setTextValueSuffix (" dB");
+        trim.setDoubleClickReturnValue (true, 0.0);
+        trim.setTooltip ("Level of the incoming signal before this program's effects. Double-click for 0 dB.");
+        trim.onValueChange = [this]
+        {
+            engine.setProgramInputGainDb (owner.getSelectedInput(), owner.getEditedProgram(), (float) trim.getValue());
+            owner.markDirty();
+        };
     }
 
     void refresh()
@@ -853,29 +973,53 @@ public:
         const int prog = owner.getEditedProgram();
         rows.clear();
         programChain.reset();
+        audioInput = in >= 0 && in < (int) inputs.size() && inputs[(size_t) in].isAudio();
         if (in >= 0 && in < (int) inputs.size())
         {
             const auto& def = inputs[(size_t) in].programs[(size_t) prog];
-            for (int s = 0; s < (int) def.slots.size(); ++s)
-            {
-                auto row = std::make_unique<SlotRow> (*this, s);
-                row->update (def.slots[(size_t) s], engine.isPluginAlive (in, prog, s), engine.isPluginLoading (in, prog, s), engine.getPluginLoadError (in, prog, s), in, prog);
-                container.addAndMakeVisible (row.get());
-                rows.push_back (std::move (row));
-            }
+            if (! audioInput)
+                for (int s = 0; s < (int) def.slots.size(); ++s)
+                {
+                    auto row = std::make_unique<SlotRow> (*this, s);
+                    row->update (def.slots[(size_t) s], engine.isPluginAlive (in, prog, s), engine.isPluginLoading (in, prog, s), engine.getPluginLoadError (in, prog, s), in, prog);
+                    container.addAndMakeVisible (row.get());
+                    rows.push_back (std::move (row));
+                }
             programChain = std::make_unique<ProgramChainRow> (*this);
+            if (audioInput)
+                programChain->header.setText ("EFFECTS  (on the incoming signal)", dontSendNotification);
             programChain->chain.rebuild (def.effects, in, prog);
             container.addAndMakeVisible (programChain.get());
+            trim.setValue (def.inputGainDb, dontSendNotification);
+            meter.setInput (in);
         }
+        /* An audio input has no instruments to add: the signal is the
+           instrument. Its chain's own "+ Add effect" is the way in. */
+        header.setText (audioInput ? "EFFECTS" : "PLUGINS", dontSendNotification);
+        addBtn.setVisible (! audioInput);
+        meter.setVisible (audioInput);
+        trimCap.setVisible (audioInput);
+        trim.setVisible (audioInput);
+        emptyLabel.setText (audioInput ? "No effects in this program. The signal passes straight through; add an effect below."
+                                       : "No plugins in this program. Click \"Add instrument...\"", dontSendNotification);
         emptyLabel.setVisible (rows.empty() && (programChain == nullptr || def_hasNoEffects (in, prog)));
-        layoutRows();
+        resized();
     }
 
     void resized() override
     {
         auto r = getLocalBounds().reduced (6);
         auto top = r.removeFromTop (24);
-        addBtn.setBounds (top.removeFromRight (140));
+        if (audioInput)
+        {
+            trim.setBounds (top.removeFromRight (100));
+            top.removeFromRight (4);
+            trimCap.setBounds (top.removeFromRight (80));
+            top.removeFromRight (12);
+            meter.setBounds (top.removeFromRight (160).reduced (0, 5));
+        }
+        else
+            addBtn.setBounds (top.removeFromRight (140));
         header.setBounds (top);
         r.removeFromTop (4);
         viewport.setBounds (r);
@@ -937,6 +1081,10 @@ private:
     std::vector<std::unique_ptr<SlotRow>> rows;
     std::unique_ptr<ProgramChainRow> programChain;
     Label emptyLabel { {}, "No plugins in this program. Click \"Add instrument...\"" };
+    bool audioInput = false;
+    LevelMeter meter { engine };
+    Label trimCap { {}, "INPUT TRIM" };
+    Slider trim;
 
     friend struct SlotRow;
     friend struct ProgramChainRow;

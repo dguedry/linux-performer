@@ -76,9 +76,17 @@ whichever section answers what you typed.
 
 **PANIC** sends all-notes-off to every loaded plugin. Use it if a note hangs.
 
-## Inputs: your keyboards
+## Inputs: your keyboards -- and microphones, guitars, hardware synths
 
-Each input has:
+An input is a keyboard, usually. **+ Add** also offers an **audio input**: a
+microphone, a guitar, a hardware synth or anything else plugged into the audio
+interface. Its programs are effect chains -- there is no instrument to load,
+the signal is the instrument -- and in every other way it is an input like the
+others: it has 128 programs, it changes them from a footswitch, a song or the
+tablet, its effects take MIDI mappings, and a program change leaves the
+outgoing chain to ring out for the tail. See *Audio inputs* below.
+
+Each keyboard input has:
 
 - **MIDI device** — any ALSA MIDI source. **Options ▸ Rescan MIDI devices** picks
   up a keyboard you plugged in after starting. If a saved device is missing,
@@ -101,6 +109,31 @@ Each input has:
 
 **+ Add** and **- Remove** manage the list. There is no fixed limit of two; add
 an input for a pedalboard, a second tier, or a drum pad.
+
+### Audio inputs
+
+An audio input has, in place of the instruments:
+
+- **Audio channels** — which of the interface's inputs it listens to: one
+  channel (mono, sent to both sides) or a pair. The list offers the channels
+  that are open in **Audio...**; if it says no input is open, choose an input
+  device and tick its channels there first.
+- **Control MIDI device**, **Channel** and the Program Change settings work as
+  for a keyboard, but carry only program changes and controllers -- a
+  footswitch or an expression pedal. Notes arriving here are ignored.
+- Each program has an **Input trim** (in the header of the effects panel) and
+  an effects chain, added with **+ Add effect** on the chain. A program with no
+  effects passes the signal straight through at its trim.
+- A **level meter** shows what is arriving, before the trim: in the input's row
+  of the list, beside the trim, under the program name on the stage display,
+  and in the input's header on the tablet. Two bars, green to -12 dB, amber to
+  -3, red above, and a mark that stays lit for two seconds after the signal
+  touches full scale. Set the interface's gain so the loudest you play stays
+  out of the red; the trim is for balancing programs, not for rescuing a hot
+  input.
+
+The tablet's **GUI** button opens the chain's effects for an audio input, the
+way it opens instruments for a keyboard.
 
 ## Programs: your sounds
 
@@ -660,6 +693,10 @@ to shift octave.
   that block size at start and restores the previous value on quit.
 - A status line shows the device, the block size actually delivered, the
   resulting latency, whether realtime scheduling is available, and warnings.
+
+The lower part is the device chooser: output device and channels, and -- for
+audio inputs -- the input device and which of its channels to open. Only open
+channels are offered to an audio input.
 
 Below that is the standard device selector: device type, output, sample rate
 and buffer size.

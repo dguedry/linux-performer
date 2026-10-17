@@ -101,6 +101,7 @@ struct Engine::ProgramRuntime
     MidiBuffer programMidi;        // MIDI seen by the program chain
     int releaseSamplesLeft = 0;
     bool needsNotesOff = false;
+    std::atomic<float> inputGain { 1.0f };    // audio inputs: the trim before the chain
 
     /* What the player is holding on this program, kept on the audio thread
        as the notes go through: one bit per key per channel, and the sustain
@@ -153,6 +154,10 @@ struct Engine::InputRuntime
     std::atomic<int> channel { 0 };
     std::atomic<bool> respondToProgramChange { true };
     std::atomic<int> programChangeChannel { InputDef::pcChannelSameAsNotes };
+    std::atomic<bool> audio { false };                       // an audio input: the signal is the instrument
+    std::atomic<int> audioLeft { 0 }, audioRight { 1 };      // device input channels; right -1 = mono
+    std::atomic<float> levelL { 0.0f }, levelR { 0.0f };     // the meter: pre-trim peaks, falling 20 dB/s
+    std::atomic<uint32_t> clipMs { 0 };                      // when the input last touched full scale
     MidiMessageCollector collector;
     MidiBuffer block;
     MidiBuffer holdBlock;          // this block's MIDI less the note-ons, for programs left sounding
@@ -281,6 +286,9 @@ void Engine::loadSetup (Setup newSetup)
 {
     teardownRuntimes();
     setup = std::move (newSetup);
+    // A setup with an audio input needs the device's inputs; a keyboard rig does not pay for them.
+    for (auto& in : setup.inputs)
+        if (in.isAudio()) { ensureAudioInputsOpen(); break; }
     // The audio thread reads the tap controller from its own copy.
     tapCC.store (jlimit (0, 127, setup.tapTempoCC), std::memory_order_relaxed);
     nextCC.store (jlimit (0, 127, setup.nextSongCC), std::memory_order_relaxed);
@@ -389,9 +397,7 @@ void Engine::rebuildRuntimes()
     {
         auto rt = std::make_unique<InputRuntime>();
         rt->collector.reset (sampleRate);
-        rt->channel.store (setup.inputs[(size_t) i].channel);
-        rt->respondToProgramChange.store (setup.inputs[(size_t) i].respondToProgramChange);
-        rt->programChangeChannel.store (setup.inputs[(size_t) i].programChangeChannel);
+        applyInputDef (*rt, setup.inputs[(size_t) i]);
         runtimes.push_back (std::move (rt));
     }
 
@@ -454,14 +460,35 @@ void Engine::teardownRuntimes (bool captureFirst, int budgetMs)
 //==============================================================================
 // Inputs
 //==============================================================================
-int Engine::addInput (const String& name)
+void Engine::applyInputDef (InputRuntime& rt, const InputDef& def)
+{
+    rt.channel.store (def.channel);
+    rt.respondToProgramChange.store (def.respondToProgramChange);
+    rt.programChangeChannel.store (def.programChangeChannel);
+    rt.audio.store (def.isAudio());
+    rt.audioLeft.store (def.audioLeft);
+    rt.audioRight.store (def.audioRight);
+}
+
+int Engine::addInput (const String& name, InputDef::Kind kind)
 {
     InputDef def;
     def.name = name;
+    def.kind = kind;
+    if (kind == InputDef::Kind::audio)
+    {
+        /* Whatever the device has open. Stereo when it has two, mono when
+           one; the inputs panel is where to pick otherwise. */
+        const int open = getAudioInputChannelNames().size();
+        def.audioLeft = 0;
+        def.audioRight = open >= 2 ? 1 : -1;
+        ensureAudioInputsOpen();
+    }
     setup.inputs.push_back (def);
 
     auto rt = std::make_unique<InputRuntime>();
     rt->collector.reset (sampleRate);
+    applyInputDef (*rt, def);
     {
         const ScopedLock sl (lock);
         runtimes.push_back (std::move (rt));
@@ -526,6 +553,75 @@ void Engine::setInputChannel (int inputIndex, int channel)
     if (! validInput (inputIndex)) return;
     setup.inputs[(size_t) inputIndex].channel = jlimit (0, 16, channel);
     runtimes[(size_t) inputIndex]->channel.store (channel);
+}
+
+void Engine::setInputAudioChannels (int inputIndex, int left, int right)
+{
+    if (! validInput (inputIndex)) return;
+    auto& def = setup.inputs[(size_t) inputIndex];
+    def.audioLeft = jlimit (0, 63, left);
+    def.audioRight = jlimit (-1, 63, right);
+    runtimes[(size_t) inputIndex]->audioLeft.store (def.audioLeft);
+    runtimes[(size_t) inputIndex]->audioRight.store (def.audioRight);
+}
+
+void Engine::setProgramInputGainDb (int inputIndex, int program, float dB)
+{
+    if (! validInput (inputIndex) || ! validProgram (program)) return;
+    dB = jlimit (-60.0f, 24.0f, dB);
+    setup.inputs[(size_t) inputIndex].programs[(size_t) program].inputGainDb = dB;
+    if (auto* rt = getLoaded (inputIndex, program))
+        rt->inputGain.store (Decibels::decibelsToGain (dB, -60.0f));
+}
+
+Engine::InputLevel Engine::getInputLevel (int inputIndex) const
+{
+    InputLevel l;
+    if (! validInput (inputIndex) || inputIndex >= (int) runtimes.size()) return l;
+    const auto& rt = *runtimes[(size_t) inputIndex];
+    if (! rt.audio.load (std::memory_order_relaxed)) return l;
+    l.left = rt.levelL.load (std::memory_order_relaxed);
+    l.right = rt.levelR.load (std::memory_order_relaxed);
+    const auto clipAt = rt.clipMs.load (std::memory_order_relaxed);
+    l.clipped = clipAt != 0 && Time::getMillisecondCounter() - clipAt < 2000;
+    return l;
+}
+
+StringArray Engine::getAudioInputChannelNames() const
+{
+    StringArray out;
+    if (auto* d = deviceManager.getCurrentAudioDevice())
+    {
+        // In callback order: the open channels only, as the audio thread sees them.
+        const auto names = d->getInputChannelNames();
+        const auto active = d->getActiveInputChannels();
+        for (int i = 0; i < names.size(); ++i)
+            if (active[i]) out.add (names[i]);
+    }
+    return out;
+}
+
+bool Engine::ensureAudioInputsOpen()
+{
+    auto* d = deviceManager.getCurrentAudioDevice();
+    if (d == nullptr) return false;
+    if (d->getActiveInputChannels().countNumberOfSetBits() > 0) return true;
+
+    auto s = deviceManager.getAudioDeviceSetup();
+    if (s.inputDeviceName.isEmpty()) s.inputDeviceName = s.outputDeviceName;
+    /* The first two channels, named: "default input channels" means as many
+       as initialise() asked for, which is none -- the device opened fine
+       with no inputs at all the first time round. */
+    s.useDefaultInputChannels = false;
+    s.inputChannels.clear();
+    s.inputChannels.setRange (0, 2, true);
+    const auto err = deviceManager.setAudioDeviceSetup (s, true);
+    const auto open = getAudioInputChannelNames();
+    std::fprintf (stderr, "[audio] opening inputs on '%s' (type %s, outputs on '%s'): %s, %d input channel(s) open%s%s\n",
+                  s.inputDeviceName.toRawUTF8(), deviceManager.getCurrentAudioDeviceType().toRawUTF8(),
+                  s.outputDeviceName.toRawUTF8(), err.isEmpty() ? "ok" : err.toRawUTF8(), open.size(),
+                  open.isEmpty() ? "" : ": ", open.joinIntoString (", ").toRawUTF8());
+    return err.isEmpty() && open.size() > 0;
 }
 
 void Engine::setInputProgramChangeChannel (int inputIndex, int channel)
@@ -980,6 +1076,7 @@ std::unique_ptr<Engine::ProgramRuntime> Engine::buildProgram (int inputIndex, in
     rt->programMidi.ensureSize (2048);
 
     const auto& def = setup.inputs[(size_t) inputIndex].programs[(size_t) program];
+    rt->inputGain.store (Decibels::decibelsToGain (def.inputGainDb, -60.0f));
     for (int s = 0; s < (int) def.slots.size(); ++s)
         rt->slots.push_back (buildSlot (inputIndex, program, s, def.slots[(size_t) s]));
     for (int e = 0; e < (int) def.effects.size(); ++e)
@@ -1934,6 +2031,11 @@ void Engine::renderBlockForTesting (float* const* out, int numOut, int numSample
     audioDeviceIOCallbackWithContext (nullptr, 0, out, numOut, numSamples, {});
 }
 
+void Engine::renderBlockForTesting (const float* const* in, int numIn, float* const* out, int numOut, int numSamples)
+{
+    audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, {});
+}
+
 //==============================================================================
 // Audio thread
 //==============================================================================
@@ -1963,7 +2065,7 @@ void Engine::audioDeviceAboutToStart (AudioIODevice* device)
 
 void Engine::audioDeviceStopped() {}
 
-void Engine::audioDeviceIOCallbackWithContext (const float* const*, int,
+void Engine::audioDeviceIOCallbackWithContext (const float* const* in, int numIn,
                                                float* const* out, int numOut, int numSamples,
                                                const AudioIODeviceCallbackContext&)
 {
@@ -1983,25 +2085,57 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const*, int,
     // bigger than what the buffers and plugins were prepared for.
     const int maxChunk = jmax (1, blockSize);
     numOut = jmin (numOut, 32);
+    numIn = in != nullptr ? jmin (numIn, 32) : 0;
     for (int start = 0; start < numSamples; start += maxChunk)
     {
         const int n = jmin (maxChunk, numSamples - start);
         float* chunk[32];
+        const float* inChunk[32];
         for (int c = 0; c < numOut; ++c)
             chunk[c] = out[c] != nullptr ? out[c] + start : nullptr;
-        for (auto& in : runtimes)
-            processInput (*in, chunk, numOut, n, panicNow);
+        for (int c = 0; c < numIn; ++c)
+            inChunk[c] = in[c] != nullptr ? in[c] + start : nullptr;
+        for (auto& rt : runtimes)
+            processInput (*rt, inChunk, numIn, chunk, numOut, n, panicNow);
         panicNow = false;
     }
 }
 
-void Engine::processInput (InputRuntime& in, float* const* out, int numOut, int numSamples, bool panicNow)
+void Engine::processInput (InputRuntime& in, const float* const* audioIn, int numIn,
+                           float* const* out, int numOut, int numSamples, bool panicNow)
 {
     in.block.clear();
     in.collector.removeNextBlockOfMessages (in.block, numSamples);
 
+    /* An audio input's signal goes to the program that is current. One left
+       behind by a change gets silence instead and rings out: a delay or
+       reverb finishing is the tail, exactly as a released note is. */
+    const float* inL = nullptr;
+    const float* inR = nullptr;
+    if (in.audio.load (std::memory_order_relaxed))
+    {
+        const int l = in.audioLeft.load (std::memory_order_relaxed);
+        const int r = in.audioRight.load (std::memory_order_relaxed);
+        if (l >= 0 && l < numIn) inL = audioIn[l];
+        if (r >= 0 && r < numIn) inR = audioIn[r];
+        if (inL == nullptr) inL = inR;          // a stale left channel: at least pass something
+
+        // The meter: what arrives, before the program's trim.
+        if (inL != nullptr)
+        {
+            auto peakOf = [numSamples] (const float* p) { const auto mm = FloatVectorOperations::findMinAndMax (p, numSamples); return jmax (std::abs (mm.getStart()), std::abs (mm.getEnd())); };
+            const float pl = peakOf (inL);
+            const float pr = inR != nullptr ? peakOf (inR) : pl;
+            const float fall = std::exp (-2.3026f * (float) numSamples / (float) jmax (1.0, sampleRate));   // 20 dB per second
+            in.levelL.store (jmax (pl, in.levelL.load (std::memory_order_relaxed) * fall), std::memory_order_relaxed);
+            in.levelR.store (jmax (pr, in.levelR.load (std::memory_order_relaxed) * fall), std::memory_order_relaxed);
+            if (pl >= 0.999f || pr >= 0.999f)
+                in.clipMs.store (Time::getMillisecondCounter(), std::memory_order_relaxed);
+        }
+    }
+
     if (in.active != nullptr)
-        processProgram (*in.active, in.block, out, numOut, numSamples, panicNow);
+        processProgram (*in.active, in.block, inL, inR, out, numOut, numSamples, panicNow);
 
     static const MidiBuffer emptyMidi;
     bool holdBlockBuilt = false;
@@ -2022,7 +2156,7 @@ void Engine::processInput (InputRuntime& in, float* const* out, int numOut, int 
             }
             midi = &in.holdBlock;
         }
-        processProgram (*p, *midi, out, numOut, numSamples, panicNow);
+        processProgram (*p, *midi, nullptr, nullptr, out, numOut, numSamples, panicNow);
 
         if (p->holding && ! panicNow && p->anythingHeld()) { ++it; continue; }    // still held: the tail waits
         p->holding = false;
@@ -2081,7 +2215,8 @@ void Engine::runChain (std::vector<std::unique_ptr<EffectRuntime>>& chain, const
     }
 }
 
-void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* const* out, int numOut, int numSamples, bool panicNow)
+void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, const float* inL, const float* inR,
+                             float* const* out, int numOut, int numSamples, bool panicNow)
 {
     for (auto& slot : prog.slots)
         slot->midi.clear();
@@ -2150,6 +2285,14 @@ void Engine::processProgram (ProgramRuntime& prog, const MidiBuffer& in, float* 
     if (prog.mix.getNumSamples() < numSamples) prog.mix.setSize (2, numSamples, false, false, true);
     AudioBuffer<float> mix (prog.mix.getArrayOfWritePointers(), 2, numSamples);
     mix.clear();
+
+    // An audio input: the signal, trimmed, is what the program's chain works on.
+    if (inL != nullptr)
+    {
+        const float g = prog.inputGain.load (std::memory_order_relaxed);
+        mix.addFrom (0, 0, inL, numSamples, g);
+        mix.addFrom (1, 0, inR != nullptr ? inR : inL, numSamples, g);
+    }
 
     for (auto& slot : prog.slots)
     {

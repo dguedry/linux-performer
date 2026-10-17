@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.h"
+#include "LevelMeter.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace perf
@@ -19,7 +20,7 @@ class StagePanel : public juce::Component,
 public:
     static constexpr int preferredHeight = 132;
 
-    explicit StagePanel (Engine& e) : engine (e) { startTimerHz (10); }
+    explicit StagePanel (Engine& e) : engine (e) { startTimerHz (20); }
 
     void paint (juce::Graphics& g) override
     {
@@ -39,7 +40,10 @@ public:
             bool loading = false;
             for (int slot = 0; slot < (int) prog.slots.size() && ! loading; ++slot)
                 loading = engine.isPluginLoading ((int) i, program, slot);
-            const bool empty = prog.isEmpty();
+            for (int e = 0; e < (int) prog.effects.size() && ! loading; ++e)
+                loading = engine.isPluginLoading ((int) i, program, -1, e);
+            // An audio input's program with no effects is a pass-through, not nothing.
+            const bool empty = def.isAudio() ? prog.name.isEmpty() && prog.effects.empty() : prog.isEmpty();
 
             // input name, small and dim: you know which manual is which, it is
             // the program that needs reading
@@ -52,7 +56,11 @@ public:
             g.setColour (empty ? juce::Colour (0xff4a4d57) : juce::Colour (0xff5aa9ff));
             g.drawText (juce::String (program).paddedLeft ('0', 3), numberArea, juce::Justification::centredLeft, false);
 
-            juce::String name = empty ? "(empty)" : (prog.name.isNotEmpty() ? prog.name : "(unnamed)");
+            // An audio input shows what is arriving, under its program name.
+            if (def.isAudio())
+                perf::LevelMeterPainter::paint (g, cell.removeFromBottom (12).withTrimmedTop (2), engine.getInputLevel ((int) i));
+
+            juce::String name = empty ? (def.isAudio() ? "straight through" : "(empty)") : (prog.name.isNotEmpty() ? prog.name : "(unnamed)");
             if (loading) name += "  ...loading";
             g.setFont (juce::FontOptions ((float) juce::jmin (34, cell.getHeight() - 4), juce::Font::bold));
             g.setColour (empty ? juce::Colour (0xff6b7079) : (loading ? juce::Colour (0xffd8a657) : juce::Colours::white));
@@ -73,7 +81,13 @@ private:
             const auto& prog = inputs[i].programs[(size_t) p];
             for (int slot = 0; slot < (int) prog.slots.size() && ! loading; ++slot)
                 loading = engine.isPluginLoading ((int) i, p, slot);
-            now << inputs[i].name << "|" << p << "|" << prog.name << "|" << (loading ? "L" : "-") << ";";
+            now << inputs[i].name << "|" << p << "|" << prog.name << "|" << (loading ? "L" : "-");
+            if (inputs[i].isAudio())
+            {
+                const auto l = engine.getInputLevel ((int) i);
+                now << "|" << (int) (LevelMeterPainter::position (l.left) * 100) << "," << (int) (LevelMeterPainter::position (l.right) * 100) << (l.clipped ? "!" : "");
+            }
+            now << ";";
         }
         if (now != shown) { shown = now; repaint(); }
     }

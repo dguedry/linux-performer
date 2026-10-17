@@ -158,6 +158,7 @@ var ProgramDef::toVar() const
     for (auto& s : slots) slotArr.add (s.toVar());
     o->setProperty ("slots", slotArr);
     o->setProperty ("effects", effectsToVar (effects));
+    if (inputGainDb != 0.0f) o->setProperty ("inputGainDb", inputGainDb);
 
     Array<var> mapArr;
     for (auto& m : mappings) mapArr.add (m.toVar());
@@ -173,6 +174,7 @@ ProgramDef ProgramDef::fromVar (const var& v)
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("slots").getArray() : nullptr)
         for (auto& s : *arr) p.slots.push_back (SlotDef::fromVar (s));
     p.effects = effectsFromVar (v);
+    p.inputGainDb = (float) prop<double> (v, "inputGainDb", 0.0);
     if (auto* arr = obj (v) != nullptr ? obj (v)->getProperty ("mappings").getArray() : nullptr)
         for (auto& m : *arr) p.mappings.push_back (MappingDef::fromVar (m));
     return p;
@@ -183,6 +185,13 @@ var InputDef::toVar() const
 {
     auto* o = new DynamicObject();
     o->setProperty ("name", name);
+    // Only written for an audio input, so keyboard setups stay byte-identical.
+    if (kind == Kind::audio)
+    {
+        o->setProperty ("kind", "audio");
+        o->setProperty ("audioLeft", audioLeft);
+        o->setProperty ("audioRight", audioRight);
+    }
     o->setProperty ("midiDeviceIdentifier", midiDeviceIdentifier);
     o->setProperty ("midiDeviceName", midiDeviceName);
     o->setProperty ("channel", channel);
@@ -194,7 +203,7 @@ var InputDef::toVar() const
     Array<var> progs;
     for (int i = 0; i < (int) programs.size(); ++i)
     {
-        if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty())
+        if (programs[(size_t) i].isEmpty() && programs[(size_t) i].name.isEmpty() && programs[(size_t) i].inputGainDb == 0.0f)
             continue;
         auto pv = programs[(size_t) i].toVar();
         pv.getDynamicObject()->setProperty ("index", i);
@@ -208,6 +217,9 @@ InputDef InputDef::fromVar (const var& v)
 {
     InputDef in;
     in.name                   = propStr (v, "name", "Input");
+    in.kind                   = propStr (v, "kind", "midi") == "audio" ? Kind::audio : Kind::midi;
+    in.audioLeft              = jlimit (0, 63, prop<int> (v, "audioLeft", 0));
+    in.audioRight             = jlimit (-1, 63, prop<int> (v, "audioRight", 1));
     in.midiDeviceIdentifier   = propStr (v, "midiDeviceIdentifier");
     in.midiDeviceName         = propStr (v, "midiDeviceName");
     in.channel                = prop<int>  (v, "channel", 0);

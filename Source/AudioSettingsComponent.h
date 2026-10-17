@@ -16,7 +16,7 @@ class AudioSettingsComponent : public juce::Component,
 public:
     AudioSettingsComponent (Engine& e, juce::PropertiesFile& s, std::function<void (const juce::String&)> statusCb)
         : engine (e), settings (s), onStatus (std::move (statusCb)),
-          selector (e.getDeviceManager(), 0, 0, 1, 64, false, false, true, false)
+          selector (e.getDeviceManager(), 0, 64, 1, 64, false, false, true, false)
     {
         addAndMakeVisible (title);
         title.setFont (juce::FontOptions (14.0f, juce::Font::bold));
