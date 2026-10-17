@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 # Version: CI passes the tag (v1.2.3 -> 1.2.3); local builds use the default.
-set(STAGERIG_VERSION "0.1.52" CACHE STRING "StageRig version")
+set(STAGERIG_VERSION "0.1.53" CACHE STRING "StageRig version")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
